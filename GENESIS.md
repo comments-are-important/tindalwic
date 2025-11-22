@@ -11,8 +11,9 @@ the behavior I wanted out of it, but it looked like that would be difficult.
 
 More web searching led me to [TOML Kit](https://tomlkit.readthedocs.io/). To be honest,
 I dislike TOML, but not as much as reinventing the wheel. Again it was relatively easy
-to switch... but out of the box this still was not what I was looking for. The API for
-working with comments seemed better, but still something was off.
+to switch... but out of the box this still was not what I was looking for. Even though
+the API for working with comments seemed better, it was hard to write code that made
+complex updates.
 
 At this point I took a step back to consider why none of these popular libraries was
 making me happy. Eventually I concluded that the library APIs are hamstrung because the

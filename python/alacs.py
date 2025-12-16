@@ -473,9 +473,9 @@ class Memory:
             self._readln()
             if len(self._line) > 1 and self._line[0] == 35 and self._line[1] == 33:
                 file.hashbang = self._readComment()
+            if self._marker() == Memory._Marker.COMMENT:
+                file.comment_intro = self._readComment()
             self._readDictEntries(file)
-            if len(self._line) > 1 and self._line[0] == 35:
-                file.comment_after = self._readComment()
             if self._errors:
                 raise ValueError(self._error("parse errors"))
             return file
@@ -666,3 +666,5 @@ class Memory:
             array[key] = value
         if duplicates:
             self._errors_add(f"duplicate keys: {duplicates}")
+        if isinstance(array, File) and comment:
+            array.comment_after = comment

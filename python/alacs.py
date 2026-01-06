@@ -1,3 +1,4 @@
+import sys
 from abc import ABC, abstractmethod
 from collections import UserString
 from collections.abc import Mapping, Sequence
@@ -53,22 +54,14 @@ class Value(ABC):
     __slots__ = ()
 
 
-class Style(StrEnum):
-    LONG_EMPTY = auto()
-    SINGLE_LINE = auto()
-    MARKDOWN = auto()
-
-
 class Text(UTF8, Value):
-    style: Style | None  # = None
 
     def __init__(self, *lines: Encoded | String):
         super().__init__(*lines)
         self.starting_line = 0
         self.comment_after = None
-        self.style = None
 
-    __slots__ = ('starting_line', 'comment_after', 'style')
+    __slots__ = ('starting_line', 'comment_after')
 
 
 class Array(Value, ABC):
@@ -97,6 +90,8 @@ class Key(str):
     comment_before: Comment | None  # = None
 
     def __init__(self, handled_by_str_new_but_here_for_type_hint: Any):
+        if '\n' in self:
+            raise ValueError("newline in key")
         self.blank_line_before = False
         self.comment_before = None
 
@@ -185,9 +180,14 @@ class Memory:
         self._next: int = -1
         self._line = Memory.empty
         self._tabs: int = -1
+        self._assign: int = -1
 
-    __slots__ = ("_scratch", "_errors", "_indent", "_count",
-                 "_write", "_parse", "_next", "_line", "_tabs")
+    __slots__ = ("_scratch", "_errors", "_indent", "_count", "_write",
+                 "_parse", "_next", "_line", "_tabs", "_assign")
+
+    def __dir__(self):
+        """terrible hack for easier debugging, should always be commented out"""
+        return Memory.__slots__
 
     # ============================================================================ UTF8
 
@@ -219,6 +219,27 @@ class Memory:
                     utf8[index:index+1] = self._scratch
                     self._scratch.clear()
 
+    def _shortList(self, text: Text) -> bool:
+        """check if encoding should use short List item syntax."""
+        self.normalize(text)
+        match len(text):
+            case 0: return True
+            case 1: return text[0][0] not in b'\t#<>[]{}/='
+        return False
+
+    def _shortDict(self, key: Key, text: Text) -> bool:
+        """check if encoding should use short Dict entry syntax."""
+        self.normalize(text)
+        if len(text) > 1:
+            return False
+        if not key:
+            return True
+        if key[0] in '\t#<>[]{}/':
+            return False
+        if '=' in key:
+            return False
+        return True
+
     # ========================================================================== errors
 
     def _error(self, message: str) -> str:
@@ -229,16 +250,16 @@ class Memory:
                 return f"{message}:\n\t{'\n\t'.join(self._errors)}"
 
     def _errors_add(self, *parts: Any) -> None:
-        line = StringIO()
+        message = StringIO()
         if self._count:
-            line.write(f"#{self._count} ")
-        line.write(self._indent.keys())
+            message.write(f"#{self._count} ")
+        message.write(self._indent.keys())
         if parts:
-            line.write(":")
+            message.write(":")
             for part in parts:
-                line.write(" ")
-                line.write(str(part))
-        self._errors.append(line.getvalue())
+                message.write(" ")
+                message.write(str(part))
+        self._errors.append(message.getvalue())
 
     # ======================================================================= to python
 
@@ -354,12 +375,12 @@ class Memory:
         self._errors.clear()
         self._indent = self._indent.zero()
         try:
-            self._count = 1
+            self._count = 0
             self._write.seek(0)
             self._write.truncate()
-            self._writeComment(file.hashbang)
+            self._writeComment(b'#!', file.hashbang)
             self._writeDict(file)
-            self._writeComment(file.comment_after)
+            self._writeComment(b'#', file.comment_after)
             if self._errors:
                 raise ValueError(self._error(
                     "argument is or contains illegal non-`Value` data"))
@@ -369,96 +390,104 @@ class Memory:
             self._errors.clear()
             self._indent = self._indent.zero()
 
-    def _writeln(self, key: Key | None, marker: bytes, data: Encoded) -> None:
-        out = self._write
-        if 1 != self._count:
-            out.write(b'\n')
-        out.write(self._indent._bytes)
-        if key:
-            out.write(key.encode())  # trusted because ctor
-        if marker:
-            out.write(marker)  # trusted because literal
-        if data:
-            if 10 in data:
-                raise AssertionError("impossible: normalized has LF")
-            out.write(data)
-        self._count += 1
+    def _writeIndent(self) -> None:
+        if self._count:
+            self._write.write(b'\n')
+            self._count += 1
+        else:
+            self._count = 1
+        self._write.write(self._indent._bytes)
 
-    def _writeComment(self, comment: Comment | None) -> None:
+    def _writeComment(self, marker: bytes, comment: Comment | None) -> None:
         if comment is not None:
+            self._writeIndent()
+            self._write.write(marker)
             comment.starting_line = self._count
             self.normalize(comment)
-            match len(comment):
-                case 0:
-                    self._writeln(None, b'#', b'')
-                case 1:
-                    self._writeln(None, b'#', comment[0])
-                case _:
-                    lines = iter(comment)
-                    self._writeln(None, b'#', next(lines))
-                    for line in lines:
-                        self._writeln(None, b'\t', line)
-
-    def _writeText(self, text: Text) -> None:
-        if text:
-            if text.style == Style.LONG_EMPTY:
-                self._errors_add("Text is not LONG_EMPTY")
-            for line in text:
-                self._writeln(None, b'', line)
-        elif text.style == Style.LONG_EMPTY:
-            self._writeln(None, b'', b'')
+            if comment:
+                self._write.write(comment[0])
+                self._indent = self._indent.more()
+                for index in range(1, len(comment)):
+                    self._writeIndent()
+                    self._write.write(comment[index])
+                self._indent = self._indent.less()
 
     def _writeList(self, array: List) -> None:
-        self._writeComment(array.comment_intro)
+        self._writeComment(b'#', array.comment_intro)
         for index, value in enumerate(array):
             self._indent._key = index
-            self._writeValue(None, value)
+            self._writeIndent()
+            value.starting_line = self._count
+            match value:
+                case Text():
+                    if not self._shortList(value):
+                        self._write.write(b"<>")
+                        self._indent = self._indent.more()
+                        for line in value:
+                            self._writeIndent()
+                            self._write.write(line)
+                        self._indent = self._indent.less()
+                    elif value:
+                        self._write.write(value[0])
+                case List():
+                    self._write.write(b'[]')
+                    self._indent = self._indent.more()
+                    self._writeList(value)
+                    self._indent = self._indent.less()
+                case Dict():
+                    self._write.write(b'{}')
+                    self._indent = self._indent.more()
+                    self._writeDict(value)
+                    self._indent = self._indent.less()
+                case _:
+                    self._errors_add("value is", type(value))
+            self._writeComment(b'#', value.comment_after)
 
     def _writeDict(self, array: Dict) -> None:
-        self._writeComment(array.comment_intro)
+        self._writeComment(b'#', array.comment_intro)
         for key, value in array.items():
             self._indent._key = key
-            match key:
-                case Key():
-                    if key.blank_line_before:
-                        self._writeln(None, b'', b'')
-                    self._writeComment(key.comment_before)
-                    self._writeValue(key, value)
-                case other:
-                    self._errors_add("key is", type(other))
-
-    def _writeValue(self, key: Key | None, value: Value) -> None:
-        value.starting_line = self._count
-        match value:
-            case Text():
-                self.normalize(value)
-                style = value.style
-                if style == Style.SINGLE_LINE and len(value) > 1:
-                    self._errors_add("Text is not SINGLE_LINE")
-                    style = None
-                if style == Style.SINGLE_LINE:
-                    marker = b'' if key is None else b'='
-                    text = b'' if not value else value[0]
-                    self._writeln(key, marker, text)
-                else:
-                    marker = b'>' if value.style == Style.MARKDOWN else b'|'
-                    self._writeln(key, marker, b'')
+            if not isinstance(key, Key):
+                self._errors_add("key is", type(key))
+                continue
+            if key.blank_line_before:
+                self._writeIndent()
+            self._writeComment(b'//', key.comment_before)
+            self._writeIndent()
+            value.starting_line = self._count
+            match value:
+                case Text():
+                    if not self._shortDict(key, value):
+                        self._write.write(b"<")
+                        self._write.write(key.encode())
+                        self._write.write(b">")
+                        self._indent = self._indent.more()
+                        for line in value:
+                            self._writeIndent()
+                            self._write.write(line)
+                        self._indent = self._indent.less()
+                    else:
+                        self._write.write(key.encode())
+                        self._write.write(b'=')
+                        if value:
+                            self._write.write(value[0])
+                case List():
+                    self._write.write(b'[')
+                    self._write.write(key.encode())
+                    self._write.write(b']')
                     self._indent = self._indent.more()
-                    self._writeText(value)
+                    self._writeList(value)
                     self._indent = self._indent.less()
-            case List():
-                self._writeln(key, b'[]', b'')
-                self._indent = self._indent.more()
-                self._writeList(value)
-                self._indent = self._indent.less()
-            case Dict():
-                self._writeln(key, b':', b'')
-                self._indent = self._indent.more()
-                self._writeDict(value)
-                self._indent = self._indent.less()
-            case other:
-                self._errors_add("value is", type(other))
-        self._writeComment(value.comment_after)
+                case Dict():
+                    self._write.write(b'{')
+                    self._write.write(key.encode())
+                    self._write.write(b'}')
+                    self._indent = self._indent.more()
+                    self._writeDict(value)
+                    self._indent = self._indent.less()
+                case _:
+                    self._errors_add("value is", type(value))
+            self._writeComment(b'#', value.comment_after)
 
     # ========================================================================== decode
 
@@ -469,13 +498,11 @@ class Memory:
             self._count = 0
             self._parse = memoryview(alacs)
             self._next = 0
-            file = File()
             self._readln()
+            file = File()
             if len(self._line) > 1 and self._line[0] == 35 and self._line[1] == 33:
-                file.hashbang = self._readComment()
-            if self._marker() == Memory._Marker.COMMENT:
-                file.comment_intro = self._readComment()
-            self._readDictEntries(file)
+                file.hashbang = self._readComment(2)
+            self._readDict(file)
             if self._errors:
                 raise ValueError(self._error("parse errors"))
             return file
@@ -486,185 +513,213 @@ class Memory:
             self._parse = self._line = Memory.empty
 
     def _readln(self) -> bool:
-        if self._next < 0:
-            self._line = Memory.empty
-            self._tabs = -1
+        index = self._next
+        limit = len(self._parse)
+        if index >= limit:
+            if self._line is not Memory.empty:
+                self._count += 1
+                self._line = Memory.empty
+                self._tabs = self._assign = -1
             return False
-        # no memoryview.index (yet), so assume that _parse wraps a bytes...
-        index = self._parse.obj.find(10, self._next)  # type: ignore
-        if index < 0:
-            self._line = self._parse[self._next:]
-            self._next = -1
-        else:
-            self._line = self._parse[self._next:index]
+        byte = self._parse[index]
+        while byte == 9:
             index += 1
-            self._next = index if index < len(self._parse) else -1
-        index = 0
-        while index < len(self._line) and self._line[index] == 9:
+            if index >= limit:
+                byte = 10
+                break
+            byte = self._parse[index]
+        self._tabs = index - self._next
+        self._assign = -1
+        while byte != 10:
+            if byte == 61 and self._assign < 0:
+                self._assign = index - self._next
             index += 1
-        self._tabs = index
+            if index >= limit:
+                break
+            byte = self._parse[index]
+        self._line = self._parse[self._next:index]
         self._count += 1
+        self._next = index + 1
         return True
 
-    class _Marker(StrEnum):
-        PLAINTEXT = "|"
-        MARKDOWN = ">"
-        LIST = "[]"
-        DICT = ":"
-        COMMENT = "#"
+    def _readExcess(self) -> None:
+        if self._tabs > len(self._indent):
+            message = StringIO(f"#{self._count}: excess indentation")
+            count = 1
+            while self._readln() and self._tabs > len(self._indent):
+                count += 1
+            if count > 1:
+                message.write(f" ({count} lines)")
+            self._errors_add(message.getvalue())
 
-    def _marker(self) -> _Marker | None:
-        over = len(self._line) - len(self._indent)
-        if over <= 0:
-            return None
-        match self._line[-1]:
-            case 124: return Memory._Marker.PLAINTEXT
-            case 62: return Memory._Marker.MARKDOWN
-            case 93 if over > 1 and self._line[-2] == 91:
-                return Memory._Marker.LIST
-            case 58: return Memory._Marker.DICT
-        if self._line[len(self._indent)] == 35:
-            return Memory._Marker.COMMENT
-        return None
-
-    def _readKey(self, drop: int) -> Key | None:
-        if len(self._line) < len(self._indent) + drop:
-            return None
-        else:
-            return Key(self._line[len(self._indent):-drop].tobytes().decode())
-
-    def _readComment(self) -> Comment:
-        assert self._marker() == Memory._Marker.COMMENT, f"comment != {self._marker()}"
-        comment = Comment()
+    def _readComment(self, start: int) -> Comment:
+        comment = Comment(self._line[start:])
         comment.starting_line = self._count
-        comment.append(self._line[len(self._indent)+1:])
-        while self._readln() and self._tabs > len(self._indent):
-            comment.append(self._line[len(self._indent)+1:])
+        indent = len(self._indent) + 1
+        while self._readln() and self._tabs >= indent:
+            comment.append(self._line[indent:])
         return comment
 
-    def _readText(self, markdown: bool) -> Text:
-        marker = Memory._Marker.MARKDOWN if markdown else Memory._Marker.PLAINTEXT
-        assert self._marker() == marker, f"text != {self._marker()}"
+    def _readText(self) -> Text:
         text = Text()
         text.starting_line = self._count
-        if markdown:
-            text.style = Style.MARKDOWN
-        while self._readln() and self._tabs > len(self._indent):
-            text.append(self._line[len(self._indent)+1:])
+        indent = len(self._indent) + 1
+        while self._readln() and self._tabs >= indent:
+            text.append(self._line[indent:])
         if len(text) == 1 and len(text[0]) == 0:
             text.clear()
-            text.style = Style.LONG_EMPTY
-        if self._marker() == Memory._Marker.COMMENT:
-            text.comment_after = self._readComment()
         return text
 
-    def _readList(self) -> List:
-        assert self._marker() == Memory._Marker.LIST, f"list != {self._marker()}"
-        array = List()
-        array.starting_line = self._count
-        if not self._readln():
-            return array
-        self._indent = self._indent.more()
-        if self._marker() == Memory._Marker.COMMENT:
-            array.comment_intro = self._readComment()
-        self._readListItems(array)
-        self._indent = self._indent.less()
-        if self._marker() == Memory._Marker.COMMENT:
-            array.comment_after = self._readComment()
-        return array
-
-    def _readListItems(self, array: List) -> None:
-        while self._tabs >= len(self._indent):
-            match self._marker():
-                case Memory._Marker.PLAINTEXT:
-                    array.append(self._readText(False))
-                case Memory._Marker.MARKDOWN:
-                    array.append(self._readText(True))
-                case Memory._Marker.LIST:
-                    array.append(self._readList())
-                case Memory._Marker.DICT:
-                    array.append(self._readDict())
-                case Memory._Marker.COMMENT:
-                    self._errors_add("misplaced comment")
-                case None:
-                    text = Text(self._line[len(self._indent):])
-                    text.style = Style.SINGLE_LINE
-                    array.append(text)
-
-    def _readDict(self) -> Dict:
-        assert self._marker() == Memory._Marker.DICT, f"dict != {self._marker()}"
-        array = Dict()
-        array.starting_line = self._count
-        if not self._readln():
-            return array
-        self._indent = self._indent.more()
-        if self._marker() == Memory._Marker.COMMENT:
-            array.comment_intro = self._readComment()
-        self._readDictEntries(array)
-        self._indent = self._indent.less()
-        if self._marker() == Memory._Marker.COMMENT:
-            array.comment_after = self._readComment()
-        return array
-
-    def _readDictEntries(self, array: Dict) -> None:
-        duplicates = set[Key]()
-        blank = False
-        comment:Comment|None = None
-        first = len(self._indent)
-        while self._tabs >= first:
-            match self._marker():
-                case Memory._Marker.PLAINTEXT:
-                    key = Key(self._line[first:-1].tobytes().decode())
-                    value = self._readText(False)
-                case Memory._Marker.MARKDOWN:
-                    key = Key(self._line[first:-1].tobytes().decode())
-                    value = self._readText(True)
-                case Memory._Marker.LIST:
-                    key = Key(self._line[first:-2].tobytes().decode())
-                    value = self._readList()
-                case Memory._Marker.DICT:
-                    key = Key(self._line[first:-1].tobytes().decode())
-                    value = self._readDict()
-                case Memory._Marker.COMMENT:
-                    if comment:
-                        self._errors_add("misplaced comment")
-                    comment = self._readComment()
-                    continue
-                case None if len(self._line) == first:
-                    if blank:
-                        self._errors_add("multiple blank lines")
-                    if comment:
-                        self._errors_add("blank line must precede comment")
-                    blank = True
+    def _readList(self, array: List) -> None:
+        self._readExcess()
+        indent = len(self._indent)
+        if self._tabs < indent: return
+        if len(self._line) > indent and self._line[indent] == 35:
+            array.comment_intro = self._readComment(indent + 1)
+        self._readExcess()
+        while self._tabs == indent:
+            size = len(self._line) - indent
+            if size < 0:
+                raise AssertionError(f"""impossible math:
+                    len(line) = {len(self._line)}
+                    indent    = {indent}
+                    tabs      = {self._tabs}""")
+            value: Value|None = None
+            match 10 if size == 0 else self._line[indent]:
+                case 10:
+                    value = Text()
                     self._readln()
-                    continue
-                case None: # and guard for previous case failed
-                    index = first
-                    assert len(self._line) > index, "blank in wrong case"
-                    # no memoryview.index (yet)...
-                    while self._line[index] != 61:
-                        index += 1
-                        if index >= len(self._line):
-                            self._errors_add("expected `=`")
-                            index = -1
-                            break
-                    self._readln()
-                    if index < 0:
-                        continue
-                    key = Key(self._line[first:index].tobytes().decode())
-                    value = Text(self._line[index+1:])
+                case 35:
+                    self._errors_add("unattached comment")
+                    self._readComment(indent)
+                case 47:
+                    self._errors_add("key comment in list context")
+                    self._readComment(indent)
+                case 60:
+                    if size != 2 or self._line[-1] != 62:
+                        self._errors_add("malformed text opening")
+                    else:
+                        value = self._readText()
+                case 91:
+                    if size != 2 or self._line[-1] != 93:
+                        self._errors_add("malformed linear array opening")
+                    else:
+                        value = List()
+                        self._readln()
+                        self._indent = self._indent.more()
+                        self._readList(value)
+                        self._indent = self._indent.less()
+                case 123:
+                    if size != 2 or self._line[-1] != 125:
+                        self._errors_add("malformed associative array opening")
+                    else:
+                        value = Dict()
+                        self._readln()
+                        self._indent = self._indent.more()
+                        self._readDict(value)
+                        self._indent = self._indent.less()
                 case _:
-                    raise RuntimeError("match cases are not exhaustive?")
-            if key in array:
-                duplicates.add(key)
-            if blank:
-                key.blank_line_before = True
-                blank = False
-            if comment:
-                key.comment_before = comment
-                comment = None
-            array[key] = value
-        if duplicates:
-            self._errors_add(f"duplicate keys: {duplicates}")
-        if isinstance(array, File) and comment:
-            array.comment_after = comment
+                        value = Text(self._line[indent:])
+                        self._readln()
+            if value is not None:
+                if self._tabs == indent and len(self._line) > indent and self._line[indent] == 35:
+                    value.comment_after = self._readComment(indent + 1)
+                array.append( value)
+            self._readExcess()
+
+    def _readDict(self, array: Dict) -> None:
+        self._readExcess()
+        indent = len(self._indent)
+        if self._tabs < indent: return
+        if len(self._line) > indent and self._line[indent] == 35:
+            array.comment_intro = self._readComment(indent + 1)
+        entries = 0
+        blank = 0
+        comment:Comment|None = None
+        self._readExcess()
+        while self._tabs == indent:
+            size = len(self._line) - indent
+            if size < 0:
+                raise AssertionError(f"""impossible math:
+                    len(line) = {len(self._line)}
+                    indent    = {indent}
+                    tabs      = {self._tabs}""")
+            if size == 0:
+                if comment:
+                    self._errors_add("blank line must precede key comment")
+                elif blank:
+                    self._errors_add("more than one blank line")
+                else:
+                    blank = self._count
+                self._readln()
+                continue
+            key:Key|None = None
+            value:Value|None = None
+            match self._line[indent]:
+                case 35:
+                    if isinstance(array, File)and not array.comment_after:
+                        array.comment_after = self._readComment(1)
+                    else:
+                        self._errors_add("illegal position for comment")
+                        self._readComment(indent+1)
+                case 47:
+                    if size < 2 or self._line[indent+1] != 47:
+                        self._errors_add("malformed key comment")
+                        self._readComment(indent)
+                    elif comment:
+                        self._errors_add("more than one key comment")
+                    else:
+                        comment = self._readComment(indent+2)
+                case 60:
+                    if size < 2 or self._line[-1] != 62:
+                        self._errors_add("malformed text opening")
+                    else:
+                        key = Key(self._line[indent+1:-1].tobytes().decode())
+                        value = self._readText()
+                case 91:
+                    if size < 2 or self._line[-1] != 93:
+                        self._errors_add("malformed linear array opening")
+                    else:
+                        key = Key(self._line[indent+1:-1].tobytes().decode())
+                        self._readln()
+                        value = List()
+                        self._indent = self._indent.more()
+                        self._readList(value)
+                        self._indent = self._indent.less()
+                case 123:
+                    if size < 2 or self._line[-1] != 125:
+                        self._errors_add("malformed associative array opening")
+                    else:
+                        key = Key(self._line[indent+1:-1].tobytes().decode())
+                        self._readln()
+                        value = Dict()
+                        self._indent = self._indent.more()
+                        self._readDict(value)
+                        self._indent = self._indent.less()
+                case _:
+                    if self._assign < 0:
+                        self._errors_add("malformed `key=value` association")
+                    else:
+                        key = Key(self._line[indent:self._assign].tobytes().decode())
+                        value = Text(self._line[self._assign+1:])
+                        self._readln()
+            if value is not None:
+                if self._tabs == indent and len(self._line) > indent and self._line[indent] == 35:
+                    value.comment_after = self._readComment(indent + 1)
+                if key is None:
+                    raise AssertionError("association needs both key and value")
+                array[key] = value
+                if blank:
+                    key.blank_line_before = True
+                    blank = False
+                if comment:
+                    key.comment_before = comment
+                    comment = None
+                entries += 1
+                if len(array) != entries:
+                    self._errors_add(f"duplicate key: {key}")
+            elif key is not None:
+                raise AssertionError("association needs both key and value")
+            self._readExcess()
+        if comment or blank:
+            self._errors_add("unclaimed key comment or blank line")

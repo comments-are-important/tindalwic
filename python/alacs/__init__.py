@@ -37,14 +37,38 @@ class UTF8(list[Encoded]):
                 case str() | UserString():
                     self[index] = line.encode()
 
-    def __bytes__(self) -> bytes:
-        return b"\n".join(self)
+    def join(self, prefix: bytes) -> str:
+        return b"\n".join(prefix + it for it in self).decode()
 
-    def __str__(self) -> str:
-        return bytes(self).decode()
-
-    def __repr__(self) -> str:
-        return f"<{self.__class__.__name__}={str(self)}>"
+    def normalize(self, scratch: list[Encoded] | None) -> None:
+        if 1 == len(self) and 0 == len(self[0]):
+            self.clear()  # `[]` is more "True"ly empty than `[b'']`
+        else:
+            if scratch is None:
+                scratch = list[Encoded]()
+            scratch.clear()
+            for index in range(len(self) - 1, -1, -1):
+                chunk = self[index]
+                if not isinstance(chunk, memoryview):
+                    if b"\n" not in chunk:
+                        continue
+                    chunk = memoryview(chunk)
+                start = len(chunk) - 1
+                while 0 <= start and 10 != chunk[start]:
+                    start -= 1
+                if 0 <= start:
+                    scratch.append(chunk[start + 1 :])
+                    limit = start
+                    start -= 1
+                    while start >= 0:
+                        if 10 == chunk[start]:
+                            scratch.append(chunk[start + 1 : limit])
+                            limit = start
+                        start -= 1
+                    scratch.append(chunk[:limit])
+                    scratch.reverse()
+                    self[index : index + 1] = scratch
+                    scratch.clear()
 
 
 # =====================================================================================
@@ -207,60 +231,7 @@ class Memory:
         self._tabs: int = -1
         self._assign: int = -1
 
-    # ============================================================================ UTF8
-
-    def normalize(self, utf8: UTF8) -> None:
-        if 1 == len(utf8) and 0 == len(utf8[0]):
-            utf8.clear()  # `[]` is more "True"ly empty than `[b'']`
-        else:
-            self._scratch.clear()
-            for index in range(len(utf8) - 1, -1, -1):
-                chunk = utf8[index]
-                if not isinstance(chunk, memoryview):
-                    if b"\n" not in chunk:
-                        continue
-                    chunk = memoryview(chunk)
-                start = len(chunk) - 1
-                while 0 <= start and 10 != chunk[start]:
-                    start -= 1
-                if 0 <= start:
-                    self._scratch.append(chunk[start + 1 :])
-                    limit = start
-                    start -= 1
-                    while start >= 0:
-                        if 10 == chunk[start]:
-                            self._scratch.append(chunk[start + 1 : limit])
-                            limit = start
-                        start -= 1
-                    self._scratch.append(chunk[:limit])
-                    self._scratch.reverse()
-                    utf8[index : index + 1] = self._scratch
-                    self._scratch.clear()
-
-    def _shortList(self, text: Text) -> bool:
-        """check if encoding should use short List item syntax."""
-        self.normalize(text)
-        match len(text):
-            case 0:
-                return True
-            case 1:
-                return text[0][0] not in b"\t#<>[]{}/="
-        return False
-
-    def _shortDict(self, key: Key, text: Text) -> bool:
-        """check if encoding should use short Dict entry syntax."""
-        self.normalize(text)
-        if len(text) > 1:
-            return False
-        if not key:
-            return True
-        if key[0] in "\t#<>[]{}/":
-            return False
-        if "=" in key:
-            return False
-        return True
-
-    # ========================================================================== errors
+    # -------------------------------------------------------------------------- errors
 
     def _error(self, message: str) -> str:
         match self._errors:
@@ -281,7 +252,7 @@ class Memory:
                 message.write(str(part))
         self._errors.append(message.getvalue())
 
-    # ======================================================================= to python
+    # ----------------------------------------------------------------------- to python
 
     def python(self, any: Value) -> str | list | dict:
         """Convert a `Value` to simple Python data.
@@ -308,7 +279,7 @@ class Memory:
     def _python(self, any: Value) -> str | list | dict | None:
         match any:
             case Text():
-                return str(any)
+                return any.join(b'')
             case List():
                 result = list()
                 self._indent = self._indent.more()
@@ -331,7 +302,7 @@ class Memory:
                 return result
         self._errors_add("value is", type(any))
 
-    # ===================================================================== from python
+    # --------------------------------------------------------------------- from python
 
     def file(self, mapping: Mapping) -> File:
         """Convert a simple Python `dict` (any mapping) to a `File`.
@@ -365,7 +336,7 @@ class Memory:
                 return Text()
             case str() | UserString() | bytes() | bytearray() | memoryview():
                 result = Text(any)
-                self.normalize(result)
+                result.normalize(self._scratch)
                 return result
             case Sequence():
                 result = List()
@@ -392,7 +363,7 @@ class Memory:
                 return result
         self._errors_add("value is", type(any))
 
-    # ========================================================================== encode
+    # -------------------------------------------------------------------------- encode
 
     def encode(self, file: File) -> memoryview:
         """result must be `release`d - suggest use `with`."""
@@ -428,7 +399,7 @@ class Memory:
             self._writeIndent()
             self._write.write(marker)
             comment.starting_line = self._count
-            self.normalize(comment)
+            comment.normalize(self._scratch)
             if comment:
                 self._write.write(comment[0])
                 self._indent = self._indent.more()
@@ -436,6 +407,16 @@ class Memory:
                     self._writeIndent()
                     self._write.write(comment[index])
                 self._indent = self._indent.less()
+
+    def _shortList(self, text: Text) -> bool:
+        """check if encoding should use short List item syntax."""
+        text.normalize(self._scratch)
+        match len(text):
+            case 0:
+                return True
+            case 1:
+                return text[0][0] not in b"\t#<>[]{}/="
+        return False
 
     def _writeList(self, array: List) -> None:
         self._writeComment(b"#", array.comment_intro)
@@ -467,6 +448,19 @@ class Memory:
                 case _:
                     self._errors_add("value is", type(value))
             self._writeComment(b"#", value.comment_after)
+
+    def _shortDict(self, key: Key, text: Text) -> bool:
+        """check if encoding should use short Dict entry syntax."""
+        text.normalize(self._scratch)
+        if len(text) > 1:
+            return False
+        if not key:
+            return True
+        if key[0] in "\t#<>[]{}/":
+            return False
+        if "=" in key:
+            return False
+        return True
 
     def _writeDict(self, array: Dict) -> None:
         self._writeComment(b"#", array.comment_intro)
@@ -514,7 +508,7 @@ class Memory:
                     self._errors_add("value is", type(value))
             self._writeComment(b"#", value.comment_after)
 
-    # ========================================================================== decode
+    # -------------------------------------------------------------------------- decode
 
     def decode(self, alacs: bytes) -> File:
         self._errors.clear()

@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod
+from abc import ABC
 from collections import UserString
 from collections.abc import Mapping, Sequence
 from io import BytesIO, StringIO
@@ -14,7 +14,6 @@ __all__ = [
     "Comment",
     "Value",
     "Text",
-    "Array",
     "List",
     "Key",
     "Dict",
@@ -38,7 +37,7 @@ class UTF8(list[Encoded]):
                     self[index] = line.encode()
 
     def __bytes__(self) -> bytes:
-        return b'\n'.join(self)
+        return b"\n".join(self)
 
     def __str__(self) -> str:
         return bytes(self).decode()
@@ -105,23 +104,15 @@ class Text(UTF8, Value):
         self.comment_after = None
 
 
-class Array(Value, ABC):
+class List(list[Value], Value):
     comment_intro: Comment | None  # = None
-    __slots__ = ()
-
-    @abstractmethod
-    def __len__(self) -> int:
-        pass
-
-
-class List(list[Value], Array):
-    __slots__ = ("starting_line", "comment_after", "comment_intro")
+    __slots__ = ("starting_line", "comment_intro", "comment_after")
 
     def __init__(self, *values: Value):
         super().__init__(values)
         self.starting_line = 0
-        self.comment_after = None
         self.comment_intro = None
+        self.comment_after = None
 
 
 class Key(str):
@@ -136,23 +127,26 @@ class Key(str):
         self.comment_before = None
 
 
-class Dict(dict[Key, Value], Array):
-    __slots__ = ("starting_line", "comment_after", "comment_intro")
+class Dict(dict[Key, Value], Value):
+    comment_intro: Comment | None  # = None
+    __slots__ = ("starting_line", "comment_intro", "comment_after")
 
     def __init__(self, **values: Value):
         super().__init__((Key(k), v) for k, v in values.items())
         self.starting_line = 0
-        self.comment_after = None
         self.comment_intro = None
+        self.comment_after = None
 
 
-class File(Dict):
+class File(dict[Key, Value]):
     hashbang: Comment | None  # = None
-    __slots__ = ("hashbang",)
+    comment_intro: Comment | None  # = None
+    __slots__ = ("hashbang", "comment_intro")
 
     def __init__(self, **values: Value):
         super().__init__(**values)
         self.hashbang = None
+        self.comment_intro = None
 
 
 # ========================================================================= ThreadLocal
@@ -261,7 +255,7 @@ class Memory:
 
     # ----------------------------------------------------------------------- to python
 
-    def python(self, any: Value) -> str | list | dict:
+    def python(self, file: File) -> dict:
         """Convert a `Value` to simple Python data.
 
         Returns a deep copy with any `Text` replaced by `str` instances,
@@ -270,20 +264,22 @@ class Memory:
         self._errors.clear()
         self._indent = self._indent.zero()
         try:
-            match self._python(any):
+            match self._python(file):
                 case _ if self._errors:
                     raise ValueError(
                         self._error("argument is or contains illegal non-`Value` data")
                     )
                 case None:
                     raise AssertionError("impossible: got None, but no error")
-                case result:
+                case result if isinstance(result, dict):
                     return result
+                case other:
+                    raise AssertionError(f"impossible: got {type(other)}")
         finally:
             self._errors.clear()
             self._indent = self._indent.zero()
 
-    def _python(self, any: Value) -> str | list | dict | None:
+    def _python(self, any: Value | File) -> str | list | dict | None:
         match any:
             case Text():
                 return str(any)
@@ -295,7 +291,7 @@ class Memory:
                     result.append(self._python(value))
                 self._indent = self._indent.less()
                 return result
-            case Dict():
+            case Dict() | File():
                 result = dict()
                 self._indent = self._indent.more()
                 for key, value in any.items():
@@ -329,8 +325,11 @@ class Memory:
                     )
                 case None:
                     raise AssertionError("impossible: got None, but no error")
-                case File() as result:
-                    return result
+                case Dict() as result:
+                    file = File()
+                    file.update(result)
+                    file.comment_intro = result.comment_intro
+                    return file
                 case other:
                     raise AssertionError(f"impossible: got {type(other)}")
         finally:
@@ -357,7 +356,7 @@ class Memory:
                 self._indent = self._indent.less()
                 return result
             case Mapping():
-                result = Dict() if self._indent else File()
+                result = Dict()
                 self._indent = self._indent.more()
                 for k, v in any.items():
                     self._indent._key = k
@@ -384,7 +383,6 @@ class Memory:
             self._write.truncate()
             self._writeComment(b"#!", file.hashbang)
             self._writeDict(file)
-            self._writeComment(b"#", file.comment_after)
             if self._errors:
                 raise ValueError(
                     self._error("argument is or contains illegal non-`Value` data")
@@ -471,7 +469,7 @@ class Memory:
             return False
         return True
 
-    def _writeDict(self, array: Dict) -> None:
+    def _writeDict(self, array: Dict | File) -> None:
         self._writeComment(b"#", array.comment_intro)
         for key, value in array.items():
             self._indent._key = key
@@ -519,7 +517,7 @@ class Memory:
 
     # -------------------------------------------------------------------------- decode
 
-    def decode(self, alacs: bytes) -> File:
+    def decode(self, alacs: Encoded) -> File:
         self._errors.clear()
         self._indent = self._indent.zero()
         try:
@@ -657,7 +655,7 @@ class Memory:
                 array.append(value)
             self._readExcess()
 
-    def _readDict(self, array: Dict) -> None:
+    def _readDict(self, array: Dict | File) -> None:
         self._readExcess()
         indent = len(self._indent)
         if self._tabs < indent:
@@ -688,11 +686,8 @@ class Memory:
             value: Value | None = None
             match self._line[indent]:
                 case 35:
-                    if isinstance(array, File) and not array.comment_after:
-                        array.comment_after = self._readComment(1)
-                    else:
-                        self._errors_add("illegal position for comment")
-                        self._readComment(indent + 1)
+                    self._errors_add("illegal position for comment")
+                    self._readComment(indent + 1)
                 case 47:
                     if size < 2 or self._line[indent + 1] != 47:
                         self._errors_add("malformed key comment")

@@ -13,27 +13,28 @@ class YAML(BytesIO):
 
     def __init__(self):
         self._scratch = list[Encoded]()
+        self._blank = Comment()
 
-    def encode(self, alacs: File) -> bytes:
+    def encode(self, alacs: File) -> BytesIO:
         self.seek(0)
         self.truncate()
-        self._comment(b"#!", alacs.hashbang)
-        self.write(b"--- ")
+        self._comment(b"", b"!", alacs.hashbang)
         self._dict(b"", alacs)
-        self._comment(b"#0a:", alacs.comment_after)
-        self.write(b"...")
-        return self.getvalue()
+        self.seek(0)
+        return self
 
-    def _utf8(self, indent: bytes, alacs: list[Encoded]) -> None:
+    def _utf8(self, indent: bytes, prefix: bytes, alacs: list[Encoded]) -> None:
         for line in alacs:
             self.write(indent)
+            self.write(prefix)
             self.write(line)
             self.write(b"\n")
 
-    def _comment(self, indent: bytes, alacs: Comment | None) -> None:
+    def _comment(self, indent: bytes, prefix: bytes, alacs: Comment | None) -> None:
         if alacs is not None:
             alacs.normalize(self._scratch)
-            self._utf8(indent, alacs)
+            mark = b"#" if prefix == b'!' else b"#%d" % len(indent)
+            self._utf8(mark, prefix, alacs)
 
     def _value(self, indent: bytes, alacs: Value) -> None:
         match alacs:
@@ -45,45 +46,46 @@ class YAML(BytesIO):
                 self._dict(indent, alacs)
             case _:
                 raise ValueError(f"unexpected type: {type(alacs)}")
-        self._comment(b"#%da:" % len(indent), alacs.comment_after)
+        self._comment(indent, b"a:", alacs.comment_after)
 
     def _text(self, indent: bytes, value: Text) -> None:
         value.normalize(self._scratch)
         if value and not value[-1]:
-            self.write(b"|1+\n")
-            self._utf8(indent, value[:-1])
+            self.write(b" |2+\n")
+            self._utf8(indent, b" ", value[:-1])
         else:
-            self.write(b"|1-\n")
-            self._utf8(indent, value)
+            self.write(b" |2-\n")
+            self._utf8(indent, b" ", value)
 
     def _list(self, indent: bytes, alacs: List) -> None:
-        self.write(b"!!seq\n")
-        self._comment(b"#%di:" % len(indent), alacs.comment_intro)
         if not alacs:
             self.write(indent)
-            self.write(b"[]\n")
-            return
-        more = indent + b" "
-        for value in alacs:
-            self.write(indent)
-            self.write(b"- ")
-            self._value(more, value)
+            self.write(b" []")
+        self.write(b"\n")
+        self._comment(indent, b"i:", alacs.comment_intro)
+        if alacs:
+            more = indent + b" "
+            for value in alacs:
+                self.write(indent)
+                self.write(b"-")
+                self._value(more, value)
 
-    def _dict(self, indent: bytes, alacs: Dict) -> None:
-        self.write(b"!!map\n")
-        self._comment(b"#%di:" % len(indent), alacs.comment_intro)
+    def _dict(self, indent: bytes, alacs: Dict | File) -> None:
         if not alacs:
             self.write(indent)
-            self.write(b"{}\n")
-            return
-        more = indent + b" "
-        for key, value in alacs.items():
-            if key.blank_line_before:
-                self.write(b"#b\n")
-            self._comment(b"#%dk:" % len(indent), key.comment_before)
-            self.write(indent)
-            self.write(b'"')
-            key = key.replace("\\", r"\\").replace('"', r"\"").replace("\t", r"\t")
-            self.write(key.encode())
-            self.write(b'": ')
-            self._value(more, value)
+            self.write(b" {}\n")
+        elif not isinstance(alacs, File):
+            self.write(b"\n")
+        self._comment(indent, b"i:", alacs.comment_intro)
+        if alacs:
+            more = indent + b" "
+            for key, value in alacs.items():
+                if key.blank_line_before:
+                    self._comment(indent, b"b", self._blank)
+                self._comment(indent, b"k:", key.comment_before)
+                self.write(indent)
+                self.write(b'"')
+                key = key.replace("\\", r"\\").replace('"', r"\"").replace("\t", r"\t")
+                self.write(key.encode())
+                self.write(b'":')
+                self._value(more, value)

@@ -12,7 +12,8 @@
                 "ms-vscode.makefile-tools",
                 "redhat.vscode-yaml",
                 "streetsidesoftware.code-spell-checker",
-                "tamasfe.even-better-toml"
+                "tamasfe.even-better-toml",
+                "anthropic.claude-code"
             ],
             "settings": {
                 "[python]": {

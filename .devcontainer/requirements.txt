@@ -1,9 +1,12 @@
 --only-binary :all:
 beautifulsoup4
+coverage
+deepdiff
 html5lib
 pydantic
 requests
 rdflib
+snakeviz
 tomlkit
 PyYAML
 ruamel_yaml

@@ -1,46 +1,45 @@
-; ABNF is not a good fit because it builds parsers, and ALACS is shy of that
+;# This is a rough sketch of the ALACS format. Some people will find this format easier
+;# to use than the English description in the manifesto. They are the audience for this
+;# file. It is incomplete because INDENT/DEDENT are impossible to express with rules,
+;# so it is not intended to be used by any of the ABNF tools.
 
-; input is UTF-8 encoded, rules work on the bytes without decoding them.
-; INDENT and DEDENT can't be defined here, those TAB chars are not covered here.
+;# The Python parser is a canonical example of a custom lexer that emits INDENT/DEDENT
+;# tokens. That kind of language greedily consumes all the whitespace at the start of
+;# each line. But ALACS is different: only TAB chars count, and the number is strictly
+;# monotonic. INDENT adds exactly one TAB, and DEDENT removes exactly one TAB.
+
+;# Because this file is not meant for tools, a non-standard EXCLUDE is imagined...
 
 LF = %x0A
-dot = %x00-09 / %x0B-FF
+TAB = %x09
+dot = EXCLUDE( %x00-FF, LF ) ;# these rules do not validate/decode the 8-bit UTF-8
+restricted = EXCLUDE( dot, TAB / "#<>[]{}/=" )
+
 line = *dot LF
-
-; byte not in marker set: excludes TAB(09) #(23) /(2F) <(3C) =(3D) >(3E) [(5B) ](5D) {(7B) }(7D)
-plain = %x00-08 / %x0B-22 / %x24-2E / %x30-3B / %x3F-5A / %x5C / %x5E-7A / %x7C / %x7E-FF
-
-; short key cannot start with marker, cannot contain LF or "="
-shortkey = plain *(%x00-08 / %x0B-3C / %x3E-FF)
-
-; long key can contain anything except LF (delimiters handle the rest)
-longkey = *dot
-
-utf8 = INDENT *line DEDENT
-
+utf8 = INDENT *line DEDENT ;# first char of line can be TAB
 comment = "#" line [utf8]
 
-; linear array element alternatives
-list-text = "<>" [utf8] [comment]
-list-array = "[]" [INDENT [comment] *list-item DEDENT] [comment]
-list-dict = "{}" [INDENT [comment] *dict-entry DEDENT] [comment]
-list-empty = [comment]
-list-short = plain *dot LF [comment]
+;# linear arrays
 
-list-item = list-text / list-array / list-dict / list-empty / list-short
+list = INDENT [comment] *list-item DEDENT
+list-item = ( list-text / list-list / list-dict / list-short ) [comment]
+list-text = "<>" LF [utf8]
+list-list = "[]" LF [list]
+list-dict = "{}" LF [dict]
+list-short = [restricted *dot] LF
 
-; common prefix for associative array entries
-; at most one blank line, must precede key comment if present
-key-prolog = [LF] ["//" line [utf8]]
+;# associative arrays
 
-; associative array entry alternatives
-dict-text = key-prolog "<" longkey ">" [utf8] [comment]
-dict-array = key-prolog "[" longkey "]" [INDENT [comment] *list-item DEDENT] [comment]
-dict-dict = key-prolog "{" longkey "}" [INDENT [comment] *dict-entry DEDENT] [comment]
-dict-short = key-prolog shortkey "=" line [comment]
+key-comment = [LF] "//" line [utf8]
 
-dict-entry = dict-text / dict-array / dict-dict / dict-short
+dict = INDENT [comment] *dict-item DEDENT
+dict-item = ( dict-text / dict-list / dict-dict / dict-short ) [comment]
+dict-text = [key-comment] "<" *dot ">" LF [utf8]
+dict-list = [key-comment] "[" *dot "]" LF [list]
+dict-dict = [key-comment] "{" *dot "}" LF [dict]
+dict-short = [key-comment] restricted *( EXCLUDE( dot, "=" ) ) "=" line
 
-; top level is an implicit associative array with optional hashbang
+;# outermost context
+
 hashbang = "#!" line [utf8]
-file = [hashbang] [comment] *dict-entry
+root = [hashbang] [comment] *dict-item

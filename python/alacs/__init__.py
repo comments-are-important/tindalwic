@@ -144,7 +144,7 @@ class File(dict[Key, Value]):
     __slots__ = ("hashbang", "comment_intro")
 
     def __init__(self, **values: Value):
-        super().__init__(**values)
+        super().__init__((Key(k), v) for k, v in values.items())
         self.hashbang = None
         self.comment_intro = None
 
@@ -243,14 +243,12 @@ class Memory:
 
     def _errors_add(self, *parts: Any) -> None:
         message = StringIO()
-        if self._count:
-            message.write(f"#{self._count} ")
-        message.write(self._indent.keys())
-        if parts:
-            message.write(":")
-            for part in parts:
-                message.write(" ")
-                message.write(str(part))
+        message.write(f"#{self._count}:")
+        keys = self._indent.keys()
+        if keys:
+            message.write(f" @{keys}:")
+        for part in parts:
+            message.write(f" {part}")
         self._errors.append(message.getvalue())
 
     # ----------------------------------------------------------------------- to python
@@ -266,9 +264,7 @@ class Memory:
         try:
             match self._python(file):
                 case _ if self._errors:
-                    raise ValueError(
-                        self._error("argument is or contains illegal non-`Value` data")
-                    )
+                    raise ValueError(self._error("illegal non-`Value` data"))
                 case None:
                     raise AssertionError("impossible: got None, but no error")
                 case result if isinstance(result, dict):
@@ -318,11 +314,7 @@ class Memory:
         try:
             match self._value(mapping):
                 case _ if self._errors:
-                    raise ValueError(
-                        self._error(
-                            "argument contains data that can't be converted to `Value`"
-                        )
-                    )
+                    raise ValueError(self._error("can't be converted to `Value`"))
                 case None:
                     raise AssertionError("impossible: got None, but no error")
                 case Dict() as result:
@@ -384,9 +376,7 @@ class Memory:
             self._writeComment(b"#!", file.hashbang)
             self._writeDict(file)
             if self._errors:
-                raise ValueError(
-                    self._error("argument is or contains illegal non-`Value` data")
-                )
+                raise ValueError(self._error("illegal non-`Value` data"))
             return self._write.getbuffer()
         finally:
             self._scratch.clear()
@@ -625,11 +615,13 @@ class Memory:
                 case 60:
                     if size != 2 or self._line[-1] != 62:
                         self._errors_add("malformed text opening")
+                        self._readln()
                     else:
                         value = self._readText()
                 case 91:
                     if size != 2 or self._line[-1] != 93:
                         self._errors_add("malformed linear array opening")
+                        self._readln()
                     else:
                         value = List()
                         self._readln()
@@ -639,6 +631,7 @@ class Memory:
                 case 123:
                     if size != 2 or self._line[-1] != 125:
                         self._errors_add("malformed associative array opening")
+                        self._readln()
                     else:
                         value = Dict()
                         self._readln()
@@ -694,17 +687,20 @@ class Memory:
                         self._readComment(indent)
                     elif comment:
                         self._errors_add("more than one key comment")
+                        self._readComment(indent)
                     else:
                         comment = self._readComment(indent + 2)
                 case 60:
                     if size < 2 or self._line[-1] != 62:
                         self._errors_add("malformed text opening")
+                        self._readln()
                     else:
                         key = Key(self._line[indent + 1 : -1].tobytes().decode())
                         value = self._readText()
                 case 91:
                     if size < 2 or self._line[-1] != 93:
                         self._errors_add("malformed linear array opening")
+                        self._readln()
                     else:
                         key = Key(self._line[indent + 1 : -1].tobytes().decode())
                         self._readln()
@@ -715,6 +711,7 @@ class Memory:
                 case 123:
                     if size < 2 or self._line[-1] != 125:
                         self._errors_add("malformed associative array opening")
+                        self._readln()
                     else:
                         key = Key(self._line[indent + 1 : -1].tobytes().decode())
                         self._readln()
@@ -725,6 +722,7 @@ class Memory:
                 case _:
                     if self._assign < 0:
                         self._errors_add("malformed `key=value` association")
+                        self._readln()
                     else:
                         key = Key(self._line[indent : self._assign].tobytes().decode())
                         value = Text(self._line[self._assign + 1 :])

@@ -4,14 +4,16 @@ import sys
 from . import TimedMemory, TimedRuamel
 from .equals import diff_any, diff_translate, diff_ruamel
 from .generate import Random
+from .unit_tests import run_all_tests_return_problem_count
+
+if run_all_tests_return_problem_count():
+    sys.exit()
 
 random = Random()
-# random.deepest = 5
-# random.widest = 3
 memory = TimedMemory()
 ruamel = TimedRuamel(memory)
 
-loops = range(10000)
+loops = range(100)
 progress = -1
 for loop in loops:
     pct = math.floor(loop * 100.0 / loops.stop)

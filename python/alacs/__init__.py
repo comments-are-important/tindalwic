@@ -403,6 +403,7 @@ class ALACS:
         for key, value in array.items():
             self._indent.key = key
             if not isinstance(key, Key):
+                self._count += 1 # because _writeIdent never called
                 self._errors_add("key is", type(key))
                 continue
             if key.blank_line_before:

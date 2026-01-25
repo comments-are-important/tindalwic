@@ -52,17 +52,20 @@ class TestCase(unittest.TestCase):
     def assertAssertionError(self, literal: str) -> ContextManager:
         return self.assertRaisesExactly(AssertionError, literal)
 
-    def illegalEllipsisKey(self, message: str, line: str = "") -> BadFile:
+    def illegalEllipsisKey(self, message: str, include_line = False) -> BadFile:
+        line = "#1: " if include_line else ""
         result = BadFile(f"{message}:\n\t{line}key is <class 'ellipsis'> @/~...")
         result[...] = ...  # type: ignore
         return result
 
-    def illegalEllipsisValue(self, message: str, line: str = "") -> BadFile:
+    def illegalEllipsisValue(self, message: str, include_line = False) -> BadFile:
+        line = "#1: " if include_line else ""
         result = BadFile(f"{message}:\n\t{line}value is <class 'ellipsis'> @/k")
         result[Key("k")] = ...  # type: ignore
         return result
 
-    def illegalEllipsisItem(self, message: str, line: str = "") -> BadFile:
+    def illegalEllipsisItem(self, message: str, include_line = False) -> BadFile:
+        line = "#2: " if include_line else ""
         result = BadFile(f"{message}:\n\t{line}value is <class 'ellipsis'> @/k/0")
         result[Key("k")] = List(...)  # type: ignore
         return result
@@ -216,17 +219,17 @@ class TestEncode(TestCase):
     illegal: ClassVar[str] = "illegal non-`Value` data"
 
     def test_illegal_key(self):
-        bad_file = self.illegalEllipsisKey(self.illegal)  # ??? why no line number
+        bad_file = self.illegalEllipsisKey(self.illegal, True)
         with self.assertValueError(bad_file.message):
             ALACS().encode(bad_file)
 
     def test_illegal_value(self):
-        bad_file = self.illegalEllipsisValue(self.illegal, "#1: ")
+        bad_file = self.illegalEllipsisValue(self.illegal, True)
         with self.assertValueError(bad_file.message):
             ALACS().encode(bad_file)
 
     def test_illegal_list_item(self):
-        bad_file = self.illegalEllipsisItem(self.illegal, "#2: ")
+        bad_file = self.illegalEllipsisItem(self.illegal, True)
         with self.assertValueError(bad_file.message):
             ALACS().encode(bad_file)
 

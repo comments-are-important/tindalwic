@@ -118,13 +118,24 @@ class TestIndent(TestCase):
 
 
 class TestYAML(TestCase):
-    def wrap(self, yaml: bytes) -> bytes:
-        return b"--- !map\n\n" + yaml + b"...\n"
+    def assertEncoded(self, file: File, *lines: bytes) -> None:
+        yaml = b"--- !map\n" + b"\n".join(lines) + b"\n...\n"
+        self.assertEqual(YAML().encode(file).getvalue(), yaml)
 
-    def test_yaml(self):
-        yaml = YAML().encode(File(d=Dict(), l=List())).getvalue()
-        # ??? why is this indented by one space?
-        self.assertEqual(yaml, self.wrap(b' "d": {}\n "l": []\n'))
+    def test_empty_file(self):
+        self.assertEncoded(File(), b"{}")
+
+    def test_empty_arrays(self):
+        self.assertEncoded(File(d=Dict(), l=List()), b'"d": {}', b'"l": []')
+
+    def test_empty_text(self):
+        self.assertEncoded(File(t=Text()), b'"t": |2-')
+
+    def test_text_normal(self):
+        self.assertEncoded(File(t=Text("one\ntwo")), b'"t": |2-\n  one\n  two')
+
+    def test_text_tricky(self):
+        self.assertEncoded(File(t=Text("\no\nt\n")), b'"t": |2+\n  \n  o\n  t')
 
     def test_bad_value(self):
         with self.assertValueError("unexpected type: <class 'ellipsis'>"):

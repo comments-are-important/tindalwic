@@ -1,5 +1,6 @@
 from random import randrange, choice, choices
-from alacs import Comment, Text, List, Dict, Value, File, Key, Indent
+from alacs import Comment, Text, List, Dict, Value, File, Key
+from alacs.pointer import Indent
 
 bools = (False, True)
 ascii = b"\t" + bytes(it for it in range(32, 127))
@@ -17,7 +18,7 @@ class Random:
         self.indent = Indent(b"")
 
     def _comment(self, kind: str) -> Comment:
-        result = Comment(f"{self.indent.keys()} {kind}")
+        result = Comment(f"{self.indent.path().getvalue()} {kind}")
         for loop in range(randrange(3)):
             result.append(bytes(choices(self.comment, k=randrange(80))))
         if len(result) == 1 and not result[0]:
@@ -28,7 +29,7 @@ class Random:
         if depth < randrange(self.deepest):
             self.indent = self.indent.more()
             for key in range(randrange(self.widest)):
-                self.indent._key = key
+                self.indent.key = key
                 array.append(self._value(depth))
             self.indent = self.indent.less()
         if not array:
@@ -44,7 +45,7 @@ class Random:
             self.indent = self.indent.more()
             for loop in range(randrange(self.widest)):
                 key = Key(bytes(choices(self.key, k=randrange(20))).decode())
-                self.indent._key = key
+                self.indent.key = key
                 if choice(bools):
                     key.blank_line_before = True
                 if choice(bools):

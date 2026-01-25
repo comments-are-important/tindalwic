@@ -1,7 +1,7 @@
 import math
 import sys
 
-from . import TimedMemory, TimedRuamel
+from . import TimedALACS, TimedRuamel
 from .equals import diff_any, diff_translate, diff_ruamel
 from .generate import Random
 from .unit_tests import run_all_tests_return_problem_count
@@ -10,10 +10,10 @@ if run_all_tests_return_problem_count():
     sys.exit()
 
 random = Random()
-memory = TimedMemory()
+memory = TimedALACS()
 ruamel = TimedRuamel(memory)
 
-loops = range(100)
+loops = range(1000)
 progress = -1
 for loop in loops:
     pct = math.floor(loop * 100.0 / loops.stop)

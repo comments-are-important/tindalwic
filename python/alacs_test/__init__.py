@@ -3,7 +3,7 @@ from io import BytesIO
 from time import perf_counter_ns
 from typing import NamedTuple, Any, Self
 
-from alacs import Memory, File, Encoded, Comment
+from alacs import ALACS, File, Encoded, Comment
 import alacs.yaml
 import ruamel.yaml
 from ruamel.yaml.comments import CommentedMap
@@ -69,13 +69,13 @@ class Timer:
         return round(self.avg / denom, 2)
 
 
-class TimedMemory:
+class TimedALACS:
     def __init__(self):
         self.python_timer = Timer()
         self.file_timer = Timer()
         self.encode_timer = Timer()
         self.decode_timer = Timer()
-        self.memory = Memory()
+        self.memory = ALACS()
         self.steal = StealComments()
 
     def python(self, file: File) -> dict:
@@ -108,7 +108,7 @@ class TimedMemory:
 
 
 class TimedRuamel:
-    def __init__(self, memory: TimedMemory):
+    def __init__(self, memory: TimedALACS):
         self.alacs_timer = Timer()
         self.dump_timer = Timer(memory.encode_timer)
         self.load_timer = Timer(memory.decode_timer)

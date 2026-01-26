@@ -52,19 +52,19 @@ class TestCase(unittest.TestCase):
     def assertAssertionError(self, literal: str) -> ContextManager:
         return self.assertRaisesExactly(AssertionError, literal)
 
-    def illegalEllipsisKey(self, message: str, include_line = False) -> BadFile:
+    def illegalEllipsisKey(self, message: str, include_line=False) -> BadFile:
         line = "#1: " if include_line else ""
         result = BadFile(f"{message}:\n\t{line}key is <class 'ellipsis'> @/~...")
         result[...] = ...  # type: ignore
         return result
 
-    def illegalEllipsisValue(self, message: str, include_line = False) -> BadFile:
+    def illegalEllipsisValue(self, message: str, include_line=False) -> BadFile:
         line = "#1: " if include_line else ""
         result = BadFile(f"{message}:\n\t{line}value is <class 'ellipsis'> @/k")
         result[Key("k")] = ...  # type: ignore
         return result
 
-    def illegalEllipsisItem(self, message: str, include_line = False) -> BadFile:
+    def illegalEllipsisItem(self, message: str, include_line=False) -> BadFile:
         line = "#2: " if include_line else ""
         result = BadFile(f"{message}:\n\t{line}value is <class 'ellipsis'> @/k/0")
         result[Key("k")] = List(...)  # type: ignore
@@ -73,9 +73,9 @@ class TestCase(unittest.TestCase):
 
 class TestUTF8(TestCase):
     def test_repr(self):
-        self.assertEqual(repr(UTF8()), "<UTF8=>")
-        self.assertEqual(repr(Comment(UserString("c"))), "<Comment=c>")
-        self.assertEqual(repr(Text("1", "2")), "<Text=1\n2>")
+        self.assertEqual(repr(UTF8()), "UTF8()")
+        self.assertEqual(repr(Comment(UserString("c"))), "Comment(b'c')")
+        self.assertEqual(repr(Text("1", "2")), r"Text(b'1\n2')")
 
     def test_normalize(self):
         text = Text(b"1\n2\n3", bytearray(b"4\n5\n6"), memoryview(b"7\n8\n9"))
@@ -149,10 +149,69 @@ class TestYAML(TestCase):
             YAML()._key(b"", ..., b"")  # type: ignore
 
 
-class TestErrors(TestCase):
+class TestMiscAndErrors(TestCase):
+    def assertReprEval(self, code: str) -> None:
+        self.assertEqual(repr(eval(code)), code)
+
+    def test_text_repr(self):
+        self.assertReprEval("Text()")
+        self.assertReprEval("Text(after=Comment(b'a'))")
+        self.assertReprEval("Text(b'')")
+        self.assertReprEval("Text(b'',after=Comment(b'a'))")
+        self.assertReprEval("Text(b'1')")
+        self.assertReprEval("Text(b'1',after=Comment(b'a'))")
+        self.assertReprEval(r"Text(b'1\n2')")
+        self.assertReprEval(r"Text(b'1\n2',after=Comment(b'a'))")
+
+    def test_list_repr(self):
+        self.assertReprEval("List()")
+        self.assertReprEval("List(Text(b'v'))")
+        self.assertReprEval("List(intro=Comment(b'i'))")
+        self.assertReprEval("List(Text(b'v'),intro=Comment(b'i'))")
+        self.assertReprEval("List(intro=Comment(b'i'),after=Comment(b'a'))")
+        self.assertReprEval("List(Text(b'v'),intro=Comment(b'i'),after=Comment(b'a'))")
+        self.assertReprEval("List(Text(b'v'),after=Comment(b'a'))")
+        self.assertReprEval("List(after=Comment(b'a'))")
+
+    def test_dict_repr(self):
+        self.assertReprEval("Dict()")
+        self.assertReprEval("Dict(k=Text(b'v'))")
+        self.assertReprEval("Dict(Comment(b'i'))")
+        self.assertReprEval("Dict(Comment(b'i'),k=Text(b'v'))")
+        self.assertReprEval("Dict(Comment(b'i'),Comment(b'a'))")
+        self.assertReprEval("Dict(Comment(b'i'),Comment(b'a'),k=Text(b'v'))")
+        self.assertReprEval("Dict(None,Comment(b'a'),k=Text(b'v'))")
+        self.assertReprEval("Dict(None,Comment(b'a'))")
+
+    def test_file_repr(self):
+        self.assertReprEval("File()")
+        self.assertReprEval("File(k=Text(b'v'))")
+        self.assertReprEval("File(Comment(b'h'))")
+        self.assertReprEval("File(Comment(b'h'),k=Text(b'v'))")
+        self.assertReprEval("File(Comment(b'h'),Comment(b'i'))")
+        self.assertReprEval("File(Comment(b'h'),Comment(b'i'),k=Text(b'v'))")
+        self.assertReprEval("File(None,Comment(b'i'),k=Text(b'v'))")
+        self.assertReprEval("File(None,Comment(b'i'))")
+
+    def test_to_file(self):
+        actual = File(Comment("h"), Dict(Comment("c"), k=Text("v")))
+        expect = File(Comment("h"), Comment("c"), k=Text("v"))
+        self.assertEqual(actual, expect)
+
+    def test_to_dict(self):
+        actual = File(Comment("h"), Comment("c"), k=Text("v"))
+        expect = Dict(Comment("c"), k=Text("v"))
+        self.assertEqual(Dict(actual), expect)
+
     def test_empty(self):
         message = "one two five"
         self.assertIs(ALACS()._error(message), message)
+
+    def test_eq_ignores_comments(self):
+        one = File(k=Text("t", after=Comment("one")))
+        two = File(k=Text("t", after=Comment("two")))
+        self.assertEqual(one, two)
+        self.assertNotEqual(repr(one), repr(two))
 
 
 class TestPython(TestCase):

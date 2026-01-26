@@ -40,8 +40,14 @@ class UTF8(list[Encoded]):
     def __str__(self) -> str:
         return bytes(self).decode()
 
+    def _repr_args(self, args: list[str]) -> None:
+        if self:
+            args.append(repr(bytes(self)))
+
     def __repr__(self) -> str:
-        return f"<{self.__class__.__name__}={str(self)}>"
+        args = list[str]()
+        self._repr_args(args)
+        return f"{self.__class__.__name__}({','.join(args)})"
 
     def normalize(self, scratch: list[Encoded] | None) -> None:
         if 1 == len(self) and 0 == len(self[0]):
@@ -91,21 +97,48 @@ class Value(ABC):
 
 
 class Text(UTF8, Value):
-    __slots__ = ("comment_after")
+    __slots__ = ("comment_after", )
 
-    def __init__(self, *lines: Encoded | str | UserString):
+    def __init__(
+        self,
+        *lines: Encoded | str | UserString,
+        after: Comment | None = None,
+    ):
         super().__init__(*lines)
-        self.comment_after = None
+        self.comment_after = after
+
+    def _repr_args(self, args: list[str]) -> None:
+        super()._repr_args(args)  # lines
+        if self.comment_after is not None:
+            args.append(f"after={self.comment_after!r}")
 
 
 class List(list[Value], Value):
     comment_intro: Comment | None  # = None
     __slots__ = ("comment_intro", "comment_after")
 
-    def __init__(self, *values: Value):
+    def __init__(
+        self,
+        *values: Value,
+        intro: Comment | None = None,
+        after: Comment | None = None,
+    ):
         super().__init__(values)
-        self.comment_intro = None
-        self.comment_after = None
+        self.comment_intro = intro
+        self.comment_after = after
+
+    def _repr_args(self, args: list[str]) -> None:
+        for value in self:
+            args.append(repr(value))
+        if self.comment_intro is not None:
+            args.append(f"intro={self.comment_intro!r}")
+        if self.comment_after is not None:
+            args.append(f"after={self.comment_after!r}")
+
+    def __repr__(self) -> str:
+        args = list[str]()
+        self._repr_args(args)
+        return f"{self.__class__.__name__}({','.join(args)})"
 
 
 class Key(str):
@@ -124,10 +157,35 @@ class Dict(dict[Key, Value], Value):
     comment_intro: Comment | None  # = None
     __slots__ = ("comment_intro", "comment_after")
 
-    def __init__(self, **values: Value):
-        super().__init__((Key(k), v) for k, v in values.items())
-        self.comment_intro = None
-        self.comment_after = None
+    def __init__(
+        self,
+        intro: "Comment | File | None" = None,
+        after: Comment | None = None,
+        /,
+        **values: Value,
+    ):
+        if isinstance(intro, File):
+            super().__init__(intro)
+            self.comment_intro = intro.comment_intro
+            self.update((Key(k), v) for k, v in values.items())
+        else:
+            super().__init__((Key(k), v) for k, v in values.items())
+            self.comment_intro = intro
+        self.comment_after = after
+
+    def _repr_args(self, args: list[str]) -> None:
+        if self.comment_after is not None:
+            args.append(repr(self.comment_intro))
+            args.append(repr(self.comment_after))
+        elif self.comment_intro is not None:
+            args.append(repr(self.comment_intro))
+        for key, value in self.items():
+            args.append(f"{key}={value!r}")
+
+    def __repr__(self) -> str:
+        args = list[str]()
+        self._repr_args(args)
+        return f"{self.__class__.__name__}({','.join(args)})"
 
 
 class File(dict[Key, Value]):
@@ -135,10 +193,35 @@ class File(dict[Key, Value]):
     comment_intro: Comment | None  # = None
     __slots__ = ("hashbang", "comment_intro")
 
-    def __init__(self, **values: Value):
-        super().__init__((Key(k), v) for k, v in values.items())
-        self.hashbang = None
-        self.comment_intro = None
+    def __init__(
+        self,
+        hashbang: Comment | None = None,
+        intro: Comment | Dict | None = None,
+        /,
+        **values: Value,
+    ):
+        if isinstance(intro, Dict):
+            super().__init__(intro)
+            self.comment_intro = intro.comment_intro
+            self.update((Key(k), v) for k, v in values.items())
+        else:
+            super().__init__((Key(k), v) for k, v in values.items())
+            self.comment_intro = intro
+        self.hashbang = hashbang
+
+    def _repr_args(self, args: list[str]) -> None:
+        if self.comment_intro is not None:
+            args.append(repr(self.hashbang))
+            args.append(repr(self.comment_intro))
+        elif self.hashbang is not None:
+            args.append(repr(self.hashbang))
+        for key, value in self.items():
+            args.append(f"{key}={value!r}")
+
+    def __repr__(self) -> str:
+        args = list[str]()
+        self._repr_args(args)
+        return f"{self.__class__.__name__}({','.join(args)})"
 
 
 # ========================================================================= ThreadLocal
@@ -258,10 +341,7 @@ class ALACS:
                 case None:
                     raise AssertionError("impossible: got None, but no error")
                 case Dict() as result:
-                    file = File()
-                    file.update(result)
-                    file.comment_intro = result.comment_intro
-                    return file
+                    return File(None, result)
                 case other:
                     raise AssertionError(f"impossible: got {type(other)}")
         finally:
@@ -403,7 +483,7 @@ class ALACS:
         for key, value in array.items():
             self._indent.key = key
             if not isinstance(key, Key):
-                self._count += 1 # because _writeIdent never called
+                self._count += 1  # because _writeIdent never called
                 self._errors_add("key is", type(key))
                 continue
             if key.blank_line_before:
@@ -505,7 +585,7 @@ class ALACS:
             count = 1
             while self._readln() and self._tabs > len(self._indent):
                 count += 1
-            self._count = starting_line # so error message points to this
+            self._count = starting_line  # so error message has the right line
             if count > 1:
                 self._errors_add(f"{count} lines excess indentation")
             else:

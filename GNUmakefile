@@ -47,6 +47,11 @@ python/test: must-run-inside
 	python -m alacs_test
 .PHONY: python/test
 
+python/repl: must-run-inside
+	export PYTHONPATH=$(realpath python)
+	python -i -c "import alacs_test;from alacs import *"
+.PHONY: python/repl
+
 python/profile: must-run-inside
 	export PYTHONPATH=$(realpath python)
 	mkdir -p /tmp/alacs_test

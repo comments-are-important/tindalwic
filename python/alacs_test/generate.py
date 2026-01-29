@@ -9,9 +9,9 @@ ascii = b"\t" + bytes(it for it in range(32, 127))
 class Random:
     "single thread only"
 
-    def __init__(self) -> None:
-        self.deepest = 6
-        self.widest = 8
+    def __init__(self, *, deepest=6, widest=8) -> None:
+        self.deepest = deepest
+        self.widest = widest
         self.key = ascii
         self.comment = ascii
         self.text = ascii

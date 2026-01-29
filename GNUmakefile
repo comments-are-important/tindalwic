@@ -52,14 +52,16 @@ python/repl: must-run-inside
 .PHONY: python/repl
 
 python/profile: must-run-inside
-	rm -f /tmp/ALACS.pstats &&
-	uv run -- python -m alacs_test /tmp/ALACS.pstats &&
+	rm -f /tmp/ALACS.pstats
+	set -e
+	uv run -- python -m alacs_test --pstats=/tmp/ALACS.pstats --loops=10000
 	uv run -- snakeviz /tmp/ALACS.pstats
 .PHONY: python/profile
 
 python/coverage: must-run-inside
 	mkdir -p /tmp/ALACS.coverage
 	cd /tmp/ALACS.coverage
+	set -e
 	uv run -- coverage run --branch --source=alacs -m alacs_test
 	uv run -- coverage report --fail-under=100 && exit
 	uv run -- coverage html --directory=.

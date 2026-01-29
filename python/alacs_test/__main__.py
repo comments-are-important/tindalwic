@@ -25,6 +25,14 @@ loops_option = Option(
     help="number of repetitions",
     min=0,
 )
+deepest_option = Option(
+    help="limit the depth of generated random data structure",
+    min=0,
+)
+widest_option = Option(
+    help="limit the breadth of generated random data structure",
+    min=0,
+)
 
 
 @app.command(
@@ -37,6 +45,8 @@ loops_option = Option(
 def main(
     pstats: Annotated[Path | None, profile_option] = None,
     loops: Annotated[int, loops_option] = 250,
+    deepest: Annotated[int, deepest_option] = 6,
+    widest: Annotated[int, widest_option] = 8,
 ):
     if pstats and pstats.exists():
         FAILED(f"won't overwrite: {pstats}")
@@ -44,7 +54,7 @@ def main(
     if unit_tests.problem_count():
         FAILED("unit tests")
 
-    random = Random()
+    random = Random(deepest=deepest, widest=widest)
     memory = TimedALACS(pstats)
     ruamel = None if pstats else TimedRuamel(memory)
 

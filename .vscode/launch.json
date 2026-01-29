@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "alacs_test main",
+            "name": "alacs_test __main__",
             "type": "debugpy",
             "request": "launch",
             "cwd": "${workspaceFolder}/python",

@@ -1,0 +1,35 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "python: build",
+            "group": "build",
+            "type": "shell",
+            "command": "make python/build",
+            "problemMatcher": "$python"
+        },
+        {
+            "label": "python: test",
+            "group": "build",
+            "type": "shell",
+            "command": "make python/test",
+            "problemMatcher": "$python"
+        },
+        {
+            "label": "python: profile",
+            "group": "build",
+            "type": "shell",
+            "command": "make python/profile",
+            "problemMatcher": "$python"
+        },
+        {
+            "label": "python: coverage",
+            "group": "build",
+            "type": "shell",
+            "command": "make python/coverage",
+            "problemMatcher": "$python"
+        }
+    ]
+}

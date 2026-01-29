@@ -14,7 +14,7 @@ usage: ;@
 .PHONY: usage
 
 must-run-outside: ;@
-	if [[ -n "$$ALACS_DCID" && "$$(< /tmp/.devcontainerId)" == "ALACS=$$ALACS_DCID" ]]
+	if [[ -n "$$ALACS_CID" && "$$(< /tmp/.devcontainerId)" == "ALACS=$$ALACS_CID" ]]
 	then
 	  echo 'must run outside devcontainer'
 	  exit 1
@@ -22,11 +22,12 @@ must-run-outside: ;@
 .PHONY: must-run-outside
 
 must-run-inside: ;@
-	if [[ -z "$$ALACS_DCID" || "$$(< /tmp/.devcontainerId)" != "ALACS=$$ALACS_DCID" ]]
+	if [[ -z "$$ALACS_CID" || "$$(< /tmp/.devcontainerId)" != "ALACS=$$ALACS_CID" ]]
 	then
 	  echo 'must run inside devcontainer'
 	  exit 1
 	fi
+	set -ex
 .PHONY: must-run-inside
 
 # =====================================================================================
@@ -36,33 +37,37 @@ setup: must-run-outside ;@
 	  | sed -e 's= is already installed[.].*= is already installed.='
 .PHONY: setup
 
-down: must-run-outside ;@
+down: must-run-outside
 	docker rm -f ALACS-devcontainer-vscode
 .PHONY: down
 
 # =====================================================================================
 
 python/test: must-run-inside
-	uv run --dev -- python -m alacs_test
+	uv run -- python -m alacs_test
 .PHONY: python/test
 
 python/repl: must-run-inside
-	uv run --dev -- python -i -c "import alacs_test;from alacs import *"
+	uv run -- python -i -c "import alacs_test;from alacs import *"
 .PHONY: python/repl
 
 python/profile: must-run-inside
-	mkdir -p /tmp/alacs_test
-	cd /tmp/alacs_test
-	uv run --dev -- python -m cProfile -o .pstats -m alacs_test
-	uv run --dev -- snakeviz .pstats
+	rm -f /tmp/ALACS.pstats &&
+	uv run -- python -m alacs_test /tmp/ALACS.pstats &&
+	uv run -- snakeviz /tmp/ALACS.pstats
 .PHONY: python/profile
 
 python/coverage: must-run-inside
-	mkdir -p /tmp/alacs_test
-	cd /tmp/alacs_test
-	uv run --dev -- coverage run --branch --source=alacs -m alacs_test
-	uv run --dev -- coverage html --directory=.
-	uv run --dev -- python -m http.server
+	mkdir -p /tmp/ALACS.coverage
+	cd /tmp/ALACS.coverage
+	uv run -- coverage run --branch --source=alacs -m alacs_test
+	uv run -- coverage report --fail-under=100 && exit
+	uv run -- coverage html --directory=.
+	uv run -- python -m http.server
 .PHONY: python/coverage
+
+python/build: python/test
+	uv build --sdist
+.PHONY: python/build
 
 # =====================================================================================

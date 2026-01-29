@@ -1,44 +1,75 @@
-import math
 import sys
+from pathlib import Path
+from typing import Annotated
+
+from rich.progress import track
+from typer import Typer, Exit, Option
 
 from . import TimedALACS, TimedRuamel, unit_tests
 from .equals import diff_any, diff_translate, diff_ruamel
 from .generate import Random
 
-if unit_tests.problem_count():
-    sys.exit()
 
-random = Random()
-memory = TimedALACS()
-ruamel = TimedRuamel(memory)
+def FAILED(message: str):
+    print(f"FAILED {message}", file=sys.stderr)
+    raise Exit(code=1)
 
-loops = range(1000)
-progress = -1
-for loop in loops:
-    pct = math.floor(loop * 100.0 / loops.stop)
-    if pct != progress:
-        progress = pct
-        print(f"\r{progress}%", end="")
 
-    file = memory.separated(random.file())
+app = Typer()
+profile_option = Option(
+    help="write profile stats here (fail if already exists)",
+    file_okay=False,
+    dir_okay=False,
+)
+loops_option = Option(
+    help="number of repetitions",
+    min=0,
+)
 
-    if diff_any(file.alacs, memory.file(file.python)):
-        sys.exit("FAILED to python and back")
 
-    with memory.encode(file.alacs) as buffer:
-        if diff_any(file, memory.separated(memory.decode(buffer))):
-            sys.exit("FAILED encode then decode")
+@app.command(
+    help="""Run unit tests, then exercise the API with random data.
 
-    yaml = ruamel.translate(file.alacs)
-    if diff_translate(file, yaml):
-        sys.exit("FAILED YAML translate")
-    if diff_ruamel(yaml, ruamel.roundtrip(yaml)):
-        print("--- # was")
-        print(file.yaml.decode())
-        print("--- # now")
-        print(bytes(ruamel).decode())
-        sys.exit("FAILED YAML roundtrip")
+    Without the `pstats` option broad timing information is gathered and the ruamel.yaml
+    conversions are included. The `pstats` option switches to detailed cProfile stats,
+    focused only on the ALACS library (ruamel.yaml conversions are skipped).""",
+)
+def main(
+    pstats: Annotated[Path | None, profile_option] = None,
+    loops: Annotated[int, loops_option] = 250,
+):
+    if pstats and pstats.exists():
+        FAILED(f"won't overwrite: {pstats}")
 
-print("\r100%")
-memory.timers()
-ruamel.timers()
+    if unit_tests.problem_count():
+        FAILED("unit tests")
+
+    random = Random()
+    memory = TimedALACS(pstats)
+    ruamel = None if pstats else TimedRuamel(memory)
+
+    if loops:
+        for loop in track(range(loops)):
+            file = memory.separated(random.file())
+
+            if diff_any(file.alacs, memory.file(file.python)):
+                FAILED("to python and back")
+
+            with memory.encode(file.alacs) as buffer:
+                if diff_any(file, memory.separated(memory.decode(buffer))):
+                    FAILED("encode then decode")
+
+            if ruamel:
+                yaml = ruamel.translate(file.alacs)
+                if diff_translate(file, yaml):
+                    FAILED("YAML translate")
+                if diff_ruamel(yaml, ruamel.roundtrip(yaml)):
+                    FAILED("YAML roundtrip")
+
+        memory.timers()
+        if ruamel:
+            ruamel.timers()
+
+
+if __name__ == "__main__":
+    app()

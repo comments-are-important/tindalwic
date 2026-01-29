@@ -1,5 +1,7 @@
 from collections.abc import Mapping
+from cProfile import Profile
 from io import BytesIO
+from pathlib import Path
 from time import perf_counter_ns
 from typing import NamedTuple, Any, Self
 
@@ -70,36 +72,42 @@ class Timer:
 
 
 class TimedALACS:
-    def __init__(self):
+    def __init__(self, pstats:Path|None):
         self.python_timer = Timer()
         self.file_timer = Timer()
         self.encode_timer = Timer()
         self.decode_timer = Timer()
         self.memory = ALACS()
         self.steal = StealComments()
+        self.pstats = pstats
+        self.profile = Profile(builtins=False) if pstats else None
 
     def python(self, file: File) -> dict:
-        with self.python_timer:
+        with self.profile if self.profile else self.python_timer:
             return self.memory.python(file)
 
     def file(self, mapping: Mapping) -> File:
-        with self.file_timer:
+        with self.profile if self.profile else self.file_timer:
             return self.memory.file(mapping)
 
     def encode(self, file: File) -> memoryview:
-        with self.encode_timer:
+        with self.profile if self.profile else self.encode_timer:
             return self.memory.encode(file)
 
     def decode(self, alacs: Encoded) -> File:
-        with self.decode_timer:
+        with self.profile if self.profile else self.decode_timer:
             return self.memory.decode(alacs)
 
     def timers(self) -> None:
         print("   ALACS")
-        print(f"\tencode = {self.encode_timer.avg}")
-        print(f"\tdecode = {self.decode_timer.avg}")
-        print(f"\tpython = {self.python_timer.avg}")
-        print(f"\t  file = {self.file_timer.avg}")
+        if self.pstats and self.profile:
+            self.profile.dump_stats(self.pstats)
+            print(f"\t(written to {self.pstats})")
+        else:
+            print(f"\tencode = {self.encode_timer.avg}")
+            print(f"\tdecode = {self.decode_timer.avg}")
+            print(f"\tpython = {self.python_timer.avg}")
+            print(f"\t  file = {self.file_timer.avg}")
 
     def separated(self, file: File) -> FileSeparated:
         python = self.python(file)

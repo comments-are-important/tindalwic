@@ -2,7 +2,17 @@
     "cSpell.words": [
         "abnf",
         "alacs",
+        "charliermarsh",
+        "deepdiff",
         "demarks",
-        "ruamel"
+        "elif",
+        "pstats",
+        "pycache",
+        "PYTHONPYCACHEPREFIX",
+        "ruamel",
+        "rustup",
+        "sdist",
+        "snakeviz",
+        "venv"
     ]
 }

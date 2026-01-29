@@ -1,0 +1,43 @@
+{
+    "name": "ALACS",
+    "runArgs": [
+        "--name=ALACS-devcontainer-vscode"
+    ],
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "containerEnv": {
+        "ALACS_CID": "${devcontainerId}",
+        "ALACS_ROOT": "${containerWorkspaceFolder}",
+        "PYTHONPYCACHEPREFIX": "/home/node/ALACS.pycache",
+        "UV_DEV": "true",
+        "UV_PROJECT": "${containerWorkspaceFolder}/python",
+        "UV_PROJECT_ENVIRONMENT": "/home/node/ALACS.venv"
+    },
+    "onCreateCommand": {
+        "id": "echo 'ALACS=${devcontainerId}' >/tmp/.devcontainerId",
+        "uv": "test -e /home/node/ALACS.venv || uv sync"
+    },
+    "postCreateCommand": {
+        "rs": "test -e /home/node/.cargo || rustup-init -y"
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "charliermarsh.ruff",
+                "editorconfig.editorconfig",
+                "ms-python.python",
+                "redhat.vscode-yaml",
+                "rust-lang.rust-analyzer",
+                "streetsidesoftware.code-spell-checker"
+            ],
+            "settings": {
+                "python": {
+                    "defaultInterpreterPath": "/home/node/ALACS.venv/bin/python",
+                    "editor.defaultFormatter": "charliermarsh.ruff"
+                },
+                "yaml.schemas": {}
+            }
+        }
+    }
+}

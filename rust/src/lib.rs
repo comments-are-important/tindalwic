@@ -5,20 +5,21 @@
 //! Users can manipulate these like standard collections while comments are preserved.
 //!
 //! All structures borrow from a source buffer via lifetime `'a`.
+//! The source must be valid UTF-8 (validated once at parse time).
 
 use std::collections::HashMap;
 use std::fmt;
 
 // =============================================================================
-// UTF8 - a list of byte slices representing lines
+// UTF8 - a list of string slices representing lines
 // =============================================================================
 
-/// A list of byte slices, each representing a line of UTF-8 text.
-/// Lines are joined with newlines when converted to bytes or string.
+/// A list of string slices, each representing a line of text.
+/// Lines are joined with newlines when converted to a single string.
 /// Borrows from an external buffer.
 #[derive(Clone, Default, PartialEq, Eq, Hash)]
 pub struct Utf8<'a> {
-    lines: Vec<&'a [u8]>,
+    lines: Vec<&'a str>,
 }
 
 impl<'a> Utf8<'a> {
@@ -28,12 +29,12 @@ impl<'a> Utf8<'a> {
     }
 
     /// Create from a single line.
-    pub fn from_line(line: &'a [u8]) -> Self {
+    pub fn from_line(line: &'a str) -> Self {
         Self { lines: vec![line] }
     }
 
     /// Create from multiple lines.
-    pub fn from_lines(lines: impl IntoIterator<Item = &'a [u8]>) -> Self {
+    pub fn from_lines(lines: impl IntoIterator<Item = &'a str>) -> Self {
         Self {
             lines: lines.into_iter().collect(),
         }
@@ -55,35 +56,23 @@ impl<'a> Utf8<'a> {
     }
 
     /// Append a line.
-    pub fn push(&mut self, line: &'a [u8]) {
+    pub fn push(&mut self, line: &'a str) {
         self.lines.push(line);
     }
 
     /// Get a line by index.
-    pub fn get(&self, index: usize) -> Option<&'a [u8]> {
+    pub fn get(&self, index: usize) -> Option<&'a str> {
         self.lines.get(index).copied()
     }
 
     /// Iterate over lines.
-    pub fn iter(&self) -> impl Iterator<Item = &'a [u8]> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = &'a str> + '_ {
         self.lines.iter().copied()
     }
 
-    /// Join all lines with newlines into a single byte vector.
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut result = Vec::new();
-        for (i, line) in self.lines.iter().enumerate() {
-            if i > 0 {
-                result.push(b'\n');
-            }
-            result.extend_from_slice(line);
-        }
-        result
-    }
-
-    /// Decode all lines as UTF-8 string, joined with newlines.
-    pub fn to_string(&self) -> String {
-        String::from_utf8_lossy(&self.to_bytes()).into_owned()
+    /// Join all lines with newlines into a single string.
+    pub fn join(&self) -> String {
+        self.lines.join("\n")
     }
 
     /// Normalize: split any lines containing embedded newlines.
@@ -98,29 +87,30 @@ impl<'a> Utf8<'a> {
         // Split any lines containing newlines
         let mut i = 0;
         while i < self.lines.len() {
-            let bytes = self.lines[i];
-            if bytes.iter().any(|&b| b == b'\n') {
+            let line = self.lines[i];
+            if line.contains('\n') {
                 // This line contains a newline - split it
-                let line = self.lines.remove(i);
-                let mut start = 0;
-                for (j, &b) in line.iter().enumerate() {
-                    if b == b'\n' {
-                        self.lines.insert(i, &line[start..j]);
-                        i += 1;
-                        start = j + 1;
-                    }
+                let removed = self.lines.remove(i);
+                for part in removed.split('\n') {
+                    self.lines.insert(i, part);
+                    i += 1;
                 }
-                // Insert the remainder
-                self.lines.insert(i, &line[start..]);
+            } else {
+                i += 1;
             }
-            i += 1;
         }
     }
 }
 
 impl fmt::Debug for Utf8<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Utf8({:?})", self.to_bytes())
+        write!(f, "Utf8({:?})", self.join())
+    }
+}
+
+impl fmt::Display for Utf8<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.join())
     }
 }
 
@@ -175,10 +165,10 @@ impl fmt::Debug for Value<'_> {
 }
 
 // =============================================================================
-// Text - UTF8 lines with optional trailing comment
+// Text - string lines with optional trailing comment
 // =============================================================================
 
-/// Text value: UTF-8 lines with an optional trailing comment.
+/// Text value: lines of text with an optional trailing comment.
 #[derive(Clone, Default)]
 pub struct Text<'a> {
     pub content: Utf8<'a>,
@@ -195,16 +185,11 @@ impl<'a> Text<'a> {
     }
 
     /// Create from a single line.
-    pub fn from_line(line: &'a [u8]) -> Self {
+    pub fn from_line(line: &'a str) -> Self {
         Self {
             content: Utf8::from_line(line),
             comment_after: None,
         }
-    }
-
-    /// Get the text as a string.
-    pub fn to_string(&self) -> String {
-        self.content.to_string()
     }
 
     /// Normalize the content.
@@ -220,6 +205,12 @@ impl fmt::Debug for Text<'_> {
             write!(f, ",after={:?}", c)?;
         }
         write!(f, ")")
+    }
+}
+
+impl fmt::Display for Text<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.content)
     }
 }
 
@@ -531,44 +522,44 @@ mod tests {
 
     #[test]
     fn utf8_from_line() {
-        let data = b"hello world";
-        let utf8 = Utf8::from_line(data);
+        let utf8 = Utf8::from_line("hello world");
         assert_eq!(utf8.len(), 1);
-        assert_eq!(utf8.get(0), Some(&b"hello world"[..]));
+        assert_eq!(utf8.get(0), Some("hello world"));
     }
 
     #[test]
     fn utf8_normalize_splits_newlines() {
-        let data = b"line1\nline2\nline3";
-        let mut utf8 = Utf8::from_line(data);
+        let mut utf8 = Utf8::from_line("line1\nline2\nline3");
         utf8.normalize();
         assert_eq!(utf8.len(), 3);
-        assert_eq!(utf8.get(0), Some(&b"line1"[..]));
-        assert_eq!(utf8.get(1), Some(&b"line2"[..]));
-        assert_eq!(utf8.get(2), Some(&b"line3"[..]));
+        assert_eq!(utf8.get(0), Some("line1"));
+        assert_eq!(utf8.get(1), Some("line2"));
+        assert_eq!(utf8.get(2), Some("line3"));
     }
 
     #[test]
     fn utf8_normalize_clears_single_empty() {
-        let data = b"";
-        let mut utf8 = Utf8::from_line(data);
+        let mut utf8 = Utf8::from_line("");
         utf8.normalize();
         assert!(utf8.is_empty());
     }
 
     #[test]
-    fn text_to_string() {
-        let data = b"hello";
-        let text = Text::from_line(data);
-        assert_eq!(text.to_string(), "hello");
+    fn utf8_join() {
+        let utf8 = Utf8::from_lines(["a", "b", "c"]);
+        assert_eq!(utf8.join(), "a\nb\nc");
+    }
+
+    #[test]
+    fn text_display() {
+        let text = Text::from_line("hello");
+        assert_eq!(format!("{}", text), "hello");
     }
 
     #[test]
     fn dict_insert_and_get() {
-        let key_name = "name";
-        let value_data = b"value";
         let mut dict = Dict::new();
-        dict.insert(Key::new(key_name), Text::from_line(value_data).into());
+        dict.insert(Key::new("name"), Text::from_line("value").into());
         assert!(dict.get("name").is_some());
     }
 
@@ -581,8 +572,8 @@ mod tests {
     #[test]
     fn file_borrows_from_buffer() {
         // Demonstrates the borrowing pattern
-        let buffer = b"key=value";
-        let key_slice = std::str::from_utf8(&buffer[0..3]).unwrap();
+        let buffer = "key=value";
+        let key_slice = &buffer[0..3];
         let value_slice = &buffer[4..9];
 
         let mut file = File::new();
@@ -590,6 +581,6 @@ mod tests {
 
         assert_eq!(file.len(), 1);
         // buffer is still accessible here - file borrows from it
-        assert_eq!(&buffer[0..3], b"key");
+        assert_eq!(&buffer[0..3], "key");
     }
 }

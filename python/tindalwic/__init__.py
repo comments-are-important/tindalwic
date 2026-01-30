@@ -19,7 +19,7 @@ __all__ = [
     "Key",
     "Dict",
     "File",
-    "ALACS",
+    "RAM",
 ]
 
 Encoded: TypeAlias = bytes | bytearray | memoryview
@@ -227,7 +227,7 @@ class File(dict[Key, Value]):
 # ========================================================================= ThreadLocal
 
 
-class ALACS:
+class RAM:
     empty: ClassVar[memoryview] = memoryview(b"")
     __slots__ = (
         "_scratch",
@@ -249,9 +249,9 @@ class ALACS:
         self._indent: Indent = Indent(b"")
         self._count: int = 0
         self._write = BytesIO()
-        self._parse = ALACS.empty
+        self._parse = RAM.empty
         self._next: int = -1
-        self._line = ALACS.empty
+        self._line = RAM.empty
         self._tabs: int = -1
         self._assign: int = -1
 
@@ -527,12 +527,12 @@ class ALACS:
 
     # -------------------------------------------------------------------------- decode
 
-    def decode(self, alacs: Encoded) -> File:
+    def decode(self, buffer: Encoded) -> File:
         self._errors.clear()
         self._indent = self._indent.zero()
         try:
             self._count = 0
-            self._parse = memoryview(alacs)
+            self._parse = memoryview(buffer)
             self._next = 0
             self._indent.key = ""
             self._readln()
@@ -547,15 +547,15 @@ class ALACS:
             self._scratch.clear()
             self._errors.clear()
             self._indent = self._indent.zero()
-            self._parse = self._line = ALACS.empty
+            self._parse = self._line = RAM.empty
 
     def _readln(self) -> bool:
         index = self._next
         limit = len(self._parse)
         if index >= limit:
-            if self._line is not ALACS.empty:
+            if self._line is not RAM.empty:
                 self._count += 1
-                self._line = ALACS.empty
+                self._line = RAM.empty
                 self._tabs = self._assign = -1
             return False
         byte = self._parse[index]

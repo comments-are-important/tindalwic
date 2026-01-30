@@ -5,7 +5,7 @@ from typing import Annotated
 from rich.progress import track
 from typer import Typer, Exit, Option
 
-from . import TimedALACS, TimedRuamel, unit_tests
+from . import TimedTindalwic, TimedRuamel, unit_tests
 from .equals import diff_any, diff_translate, diff_ruamel
 from .generate import Random
 
@@ -40,7 +40,7 @@ widest_option = Option(
 
     Without the `pstats` option broad timing information is gathered and the ruamel.yaml
     conversions are included. The `pstats` option switches to detailed cProfile stats,
-    focused only on the ALACS library (ruamel.yaml conversions are skipped).""",
+    focused only on the Tindalwic library (ruamel.yaml conversions are skipped).""",
 )
 def main(
     pstats: Annotated[Path | None, profile_option] = None,
@@ -55,23 +55,23 @@ def main(
         FAILED("unit tests")
 
     random = Random(deepest=deepest, widest=widest)
-    memory = TimedALACS(pstats)
+    memory = TimedTindalwic(pstats)
     ruamel = None if pstats else TimedRuamel(memory)
 
     if loops:
         for loop in track(range(loops)):
-            file = memory.separated(random.file())
+            separated = memory.separated(random.file())
 
-            if diff_any(file.alacs, memory.file(file.python)):
+            if diff_any(separated.file, memory.file(separated.python)):
                 FAILED("to python and back")
 
-            with memory.encode(file.alacs) as buffer:
-                if diff_any(file, memory.separated(memory.decode(buffer))):
+            with memory.encode(separated.file) as buffer:
+                if diff_any(separated, memory.separated(memory.decode(buffer))):
                     FAILED("encode then decode")
 
             if ruamel:
-                yaml = ruamel.translate(file.alacs)
-                if diff_translate(file, yaml):
+                yaml = ruamel.translate(separated.file)
+                if diff_translate(separated, yaml):
                     FAILED("YAML translate")
                 if diff_ruamel(yaml, ruamel.roundtrip(yaml)):
                     FAILED("YAML roundtrip")

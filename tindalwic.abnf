@@ -1,12 +1,12 @@
-;# This is a rough sketch of the ALACS format. Some people will find this format easier
-;# to use than the English description in the manifesto. They are the audience for this
-;# file. It is incomplete because INDENT/DEDENT are impossible to express with rules,
-;# so it is not intended to be used by any of the ABNF tools.
+;# This is a rough sketch of the Tindalwic format. Some people will find this format
+;# easier to use than the English description in the manifesto. They are the audience
+;# for this file. It is incomplete because INDENT/DEDENT are impossible to express with
+;# rules, so it is not intended to be used by any of the ABNF tools.
 
 ;# The Python parser is a canonical example of a custom lexer that emits INDENT/DEDENT
 ;# tokens. That kind of language greedily consumes all the whitespace at the start of
-;# each line. But ALACS is different: only TAB chars count, and the number is strictly
-;# monotonic. INDENT adds exactly one TAB, and DEDENT removes exactly one TAB.
+;# each line. But Tindalwic is different: only TAB chars count, and the number is
+;# strictly monotonic. INDENT adds exactly one TAB, and DEDENT removes exactly one TAB.
 
 ;# Because this file is not meant for tools, a non-standard EXCLUDE is imagined...
 

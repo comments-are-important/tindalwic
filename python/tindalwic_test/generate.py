@@ -1,6 +1,6 @@
 from random import randrange, choice, choices
-from alacs import Comment, Text, List, Dict, Value, File, Key
-from alacs.pointer import Indent
+from tindalwic import Comment, Text, List, Dict, Value, File, Key
+from tindalwic.pointer import Indent
 
 bools = (False, True)
 ascii = b"\t" + bytes(it for it in range(32, 127))

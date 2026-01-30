@@ -1,4 +1,4 @@
-# ALACS - Associative and Linear Arrays of Commented Strings
+# Text in Nested Dicts and Lists - with Important Comments
 
  + How did this start? Why does it even exist?
  + See the [README](README.md) for links to other documentation.
@@ -23,7 +23,7 @@ complex updates.
 I also discovered that linear arrays in TOML can be extremely awkward: no better than
 JSON except for (arrays-of-tables)[https://toml.io/en/v1.1.0#array-of-tables]. TOML is
 not a good choice for representing the full range of data supported by JSON and YAML.
-There will be some ALACS code that is about YAML, but none about TOML.
+There will be some tindalwic code that is about YAML, but none about TOML.
 
 At this point I took a step back to consider why none of these popular libraries was
 making me happy. Eventually I concluded that the library APIs are hamstrung because the

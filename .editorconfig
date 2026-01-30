@@ -9,7 +9,7 @@ insert_final_newline = true
 max_line_length = off
 trim_trailing_whitespace = true
 
-[*.alacs]
+[*.tindalwic]
 charset = utf-8
 end_of_line = lf
 indent_style = tab

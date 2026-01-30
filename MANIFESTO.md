@@ -1,10 +1,10 @@
-# ALACS - Associative and Linear Arrays of Commented Strings
+# Text in Nested Dicts and Lists - with Important Comments
 
  + This is meant to be an informal description of the format.
  + See the [README](README.md) for links to other documentation.
 
 A formal spec is tricky to write and would likely not be very helpful. More information
-about that can be found in the non-normative [alacs.abnf](alacs.abnf) file.
+about that can be found in the non-normative [tindalwic.abnf](tindalwic.abnf) file.
 
 
 ## Line Oriented Pattern Matching
@@ -12,7 +12,7 @@ about that can be found in the non-normative [alacs.abnf](alacs.abnf) file.
  + Based on these marker characters:
    + TAB **`#`** **`//`** **`<>`** **`[]`** **`{}`** **`=`**
 
-ALACS reads data one line at a time, examining typically only a few bytes of it to
+Tindalwic reads data one line at a time, examining typically only a few bytes of it to
 decide what to do next. Those decisions are final - they cannot be altered by any
 subsequent line.
 
@@ -20,7 +20,7 @@ subsequent line.
 ### Strict Encoding
 
 ```ini
-[*.alacs]
+[*.tindalwic]
 charset = utf-8
 end_of_line = lf
 indent_style = tab
@@ -29,7 +29,7 @@ max_line_length = off
 trim_trailing_whitespace = false
 ```
 
-ALACS data is required to conform to these [EditorConfig](https://editorconfig.org/)
+Tindalwic data must conform to these [EditorConfig](https://editorconfig.org/)
 settings. Other formats accommodate various encodings and use of whitespace, but that
 flexibility comes at a cost - sometimes subtle, like the impact on content-addressable
 storage. The limitations of tools on different platforms in the past made it arguably
@@ -55,7 +55,7 @@ Every context is closed by EOF or by the next line with insufficient indentation
  + Used for both comments and string values.
    + Media type for comments: `text/markdown; charset=UTF-8; variant=GFM`
 
-ALACS might be considered a lexer because it refrains from making many of the semantic
+Tindalwic might be considered a lexer because it refrains from making the semantic
 interpretations that a parser will. It doesn't even decode most of the UTF-8. Tools
 like [Pydantic](https://pydantic.dev/) and [JSON Schema](https://json-schema.org/)
 better address those concerns, and there is no reason to duplicate that functionality.

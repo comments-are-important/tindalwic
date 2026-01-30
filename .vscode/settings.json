@@ -1,7 +1,6 @@
 {
     "cSpell.words": [
         "abnf",
-        "alacs",
         "charliermarsh",
         "deepdiff",
         "demarks",
@@ -13,6 +12,8 @@
         "rustup",
         "sdist",
         "snakeviz",
+        "tindalwic",
+        "typer",
         "venv"
     ]
 }

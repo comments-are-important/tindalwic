@@ -2,15 +2,15 @@ import re
 from collections import UserString
 from typing import Any, TypeAlias, ClassVar, ContextManager
 import unittest
-import alacs_test
-from alacs import ALACS, UTF8, Comment, Text, Key, File, List, Dict
-from alacs.pointer import Indent
-from alacs.yaml import YAML
+import tindalwic_test
+from tindalwic import RAM, UTF8, Comment, Text, Key, File, List, Dict
+from tindalwic.pointer import Indent
+from tindalwic.yaml import YAML
 
 ExType: TypeAlias = type[BaseException]
 
-# focus is on filling in gaps left  by the timing script in alacs_test.__main__
-# goal is to test all error branches to get 100% coverage of alacs.__init__
+# focus is on filling in gaps left  by the timing script in tindalwic_test.__main__
+# goal is to test all error branches to get 100% coverage of tindalwic.__init__
 
 
 class BadFile(File):
@@ -19,7 +19,7 @@ class BadFile(File):
         self.message = message
 
 
-class Impossible(ALACS):
+class Impossible(RAM):
     """a broken subclass that returns an impossible result from select methods."""
 
     def __init__(self, result: Any):
@@ -205,7 +205,7 @@ class TestMiscAndErrors(TestCase):
 
     def test_empty(self):
         message = "one two five"
-        self.assertIs(ALACS()._error(message), message)
+        self.assertIs(RAM()._error(message), message)
 
     def test_eq_ignores_comments(self):
         one = File(k=Text("t", after=Comment("one")))
@@ -228,12 +228,12 @@ class TestPython(TestCase):
     def test_illegal_key(self):
         bad_file = self.illegalEllipsisKey(self.illegal)
         with self.assertValueError(bad_file.message):
-            ALACS().python(bad_file)
+            RAM().python(bad_file)
 
     def test_illegal_value(self):
         bad_file = self.illegalEllipsisValue(self.illegal)
         with self.assertValueError(bad_file.message):
-            ALACS().python(bad_file)
+            RAM().python(bad_file)
 
 
 class TestFile(TestCase):
@@ -246,24 +246,24 @@ class TestFile(TestCase):
             Impossible(...).file({})
 
     def test_none_is_empty_text(self):
-        self.assertEqual(File(k=Text()), ALACS().file({"k": None}))
+        self.assertEqual(File(k=Text()), RAM().file({"k": None}))
 
     illegal: ClassVar[str] = "can't be converted to `Value`"
 
     def test_illegal_key(self):
         bad_file = self.illegalEllipsisKey(self.illegal)
         with self.assertValueError(bad_file.message):
-            ALACS().file(bad_file)
+            RAM().file(bad_file)
 
     def test_illegal_value(self):
         bad_file = self.illegalEllipsisValue(self.illegal)
         with self.assertValueError(bad_file.message):
-            ALACS().file(bad_file)
+            RAM().file(bad_file)
 
     def test_illegal_list_item(self):
         bad_file = self.illegalEllipsisItem(self.illegal)
         with self.assertValueError(bad_file.message):
-            ALACS().file(bad_file)
+            RAM().file(bad_file)
 
 
 class TestEncode(TestCase):
@@ -271,127 +271,126 @@ class TestEncode(TestCase):
         text = Text("")
         text.comment_after = Comment()
         text.comment_after.append(b"")  # now it is not normalized
-        with ALACS().encode(File(k=text)) as buffer:
-            alacs = buffer.tobytes().decode()
-            self.assertEqual(alacs, "k=\n#")
+        with RAM().encode(File(k=text)) as buffer:
+            self.assertEqual(buffer.tobytes().decode(), "k=\n#")
 
     illegal: ClassVar[str] = "illegal non-`Value` data"
 
     def test_illegal_key(self):
         bad_file = self.illegalEllipsisKey(self.illegal, True)
         with self.assertValueError(bad_file.message):
-            ALACS().encode(bad_file)
+            RAM().encode(bad_file)
 
     def test_illegal_value(self):
         bad_file = self.illegalEllipsisValue(self.illegal, True)
         with self.assertValueError(bad_file.message):
-            ALACS().encode(bad_file)
+            RAM().encode(bad_file)
 
     def test_illegal_list_item(self):
         bad_file = self.illegalEllipsisItem(self.illegal, True)
         with self.assertValueError(bad_file.message):
-            ALACS().encode(bad_file)
+            RAM().encode(bad_file)
 
 
 class TestDecode(TestCase):
     def test_readln(self):
-        alacs = ALACS()
-        alacs._next = 0
-        self.assertEqual(alacs._readln(), False)
-        self.assertEqual(alacs._readln(), False)
+        ram = RAM()
+        ram._next = 0
+        self.assertEqual(ram._readln(), False)
+        self.assertEqual(ram._readln(), False)
 
     def test_lenient_text(self):
-        self.assertEqual(ALACS().decode(b"<k>\n\t"), File(k=Text()))
+        self.assertEqual(RAM().decode(b"<k>\n\t"), File(k=Text()))
 
     def assertParseError(self, literal: str) -> ContextManager:
         return self.assertValueError(f"parse errors:\n\t{literal}")
 
     def test_excess_root_one(self):
         with self.assertParseError("#1: excess indentation @/"):
-            ALACS().decode(b"\tk=v\nk=v")
+            RAM().decode(b"\tk=v\nk=v")
 
     def test_excess_dict_one(self):
         with self.assertParseError("#2: excess indentation @/o/"):
-            ALACS().decode(b"{o}\n\t\tk=v\nk=v")
+            RAM().decode(b"{o}\n\t\tk=v\nk=v")
 
     def test_excess_root_more(self):
         with self.assertParseError("#1: 3 lines excess indentation @/"):
-            ALACS().decode(b"\tk=v\n\tk=v\n\tk=v\nk=v")
+            RAM().decode(b"\tk=v\n\tk=v\n\tk=v\nk=v")
 
     def test_excess_list_one(self):
         with self.assertParseError("#2: excess indentation @/k/"):
-            ALACS().decode(b"[k]\n\t\tx")
+            RAM().decode(b"[k]\n\t\tx")
 
     def test_malformed_text_in_dict(self):
         with self.assertParseError("#1: malformed text opening @"):
-            ALACS().decode(b"<foo")
+            RAM().decode(b"<foo")
 
     def test_malformed_text_in_list(self):
         with self.assertParseError("#2: malformed text opening @/key/0"):
-            ALACS().decode(b"[key]\n\t<foo")
+            RAM().decode(b"[key]\n\t<foo")
 
     def test_malformed_list_in_dict(self):
         with self.assertParseError("#1: malformed linear array opening @"):
-            ALACS().decode(b"[foo")
+            RAM().decode(b"[foo")
 
     def test_malformed_list_in_list(self):
         with self.assertParseError("#2: malformed linear array opening @/key/0"):
-            ALACS().decode(b"[key]\n\t[foo")
+            RAM().decode(b"[key]\n\t[foo")
 
     def test_malformed_dict_in_dict(self):
         with self.assertParseError("#1: malformed associative array opening @"):
-            ALACS().decode(b"{foo")
+            RAM().decode(b"{foo")
 
     def test_malformed_dict_in_list(self):
         with self.assertParseError("#2: malformed associative array opening @/key/0"):
-            ALACS().decode(b"[key]\n\t{foo")
+            RAM().decode(b"[key]\n\t{foo")
 
     def test_unattached_comment_in_list(self):
         with self.assertParseError("#4: unattached comment @/key/1"):
-            ALACS().decode(b"[key]\n\tvalue\n\t#attached\n\t#unattached")
+            RAM().decode(b"[key]\n\tvalue\n\t#attached\n\t#unattached")
 
     def test_key_comment_in_list_context(self):
         with self.assertParseError("#2: key comment in list context @/key/0"):
-            ALACS().decode(b"[key]\n\t//comment")
+            RAM().decode(b"[key]\n\t//comment")
 
     def test_illegal_comment_position_in_dict(self):
         with self.assertParseError("#3: illegal position for comment @"):
-            ALACS().decode(b"foo=bar\n#attached\n#illegal")
+            RAM().decode(b"foo=bar\n#attached\n#illegal")
 
     def test_malformed_key_comment(self):
         with self.assertParseError("#1: malformed key comment @"):
-            ALACS().decode(b"/comment")
+            RAM().decode(b"/comment")
 
     def test_multiple_key_comments(self):
         with self.assertParseError("#2: more than one key comment @"):
-            ALACS().decode(b"//comment1\n//comment2\nfoo=bar")
+            RAM().decode(b"//comment1\n//comment2\nfoo=bar")
 
     def test_blank_before_key_comment(self):
         with self.assertParseError("#2: blank line must precede key comment @"):
-            ALACS().decode(b"//comment\n\nfoo=bar")
+            RAM().decode(b"//comment\n\nfoo=bar")
 
     def test_multiple_blank_lines(self):
         with self.assertParseError("#2: more than one blank line @/"):
-            ALACS().decode(b"\n\nfoo=bar")
+            RAM().decode(b"\n\nfoo=bar")
 
     def test_unclaimed_blank_line(self):
         with self.assertParseError("#3: unclaimed key comment or blank line @/foo"):
-            ALACS().decode(b"foo=bar\n\n")
+            RAM().decode(b"foo=bar\n\n")
 
     def test_unclaimed_key_comment(self):
         with self.assertParseError("#2: unclaimed key comment or blank line @"):
-            ALACS().decode(b"//comment")
+            RAM().decode(b"//comment")
 
     def test_missing_equals(self):
         with self.assertParseError("#1: malformed `key=value` association @"):
-            ALACS().decode(b"foobar")
+            RAM().decode(b"foobar")
 
     def test_duplicate_key(self):
         with self.assertParseError("#3: duplicate key: foo @/foo"):
-            ALACS().decode(b"foo=bar\nfoo=baz")
+            RAM().decode(b"foo=bar\nfoo=baz")
 
 
 def problem_count() -> int:
-    argv = ["alacs_test", "unit_tests"]  # argv[0] is (fictional) name of program
-    result = unittest.main(module=alacs_test, argv=argv, exit=False).result
+    argv = ["tindalwic_test", "unit_tests"]  # argv[0] is (fictional) name of program
+    result = unittest.main(module=tindalwic_test, argv=argv, exit=False).result
     return len(result.failures) + len(result.errors)

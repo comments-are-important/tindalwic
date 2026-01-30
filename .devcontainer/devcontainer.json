@@ -1,22 +1,22 @@
 {
-    "name": "ALACS",
+    "name": "tindalwic",
     "runArgs": [
-        "--name=ALACS-devcontainer-vscode"
+        "--name=tindalwic-devcontainer-vscode"
     ],
     "build": {
         "dockerfile": "Dockerfile"
     },
     "containerEnv": {
-        "ALACS_CID": "${devcontainerId}",
-        "ALACS_ROOT": "${containerWorkspaceFolder}",
-        "PYTHONPYCACHEPREFIX": "/home/node/ALACS.pycache",
+        "TINDALWIC_CID": "${devcontainerId}",
+        "TINDALWIC_ROOT": "${containerWorkspaceFolder}",
+        "PYTHONPYCACHEPREFIX": "/home/node/tindalwic.pycache",
         "UV_DEV": "true",
         "UV_PROJECT": "${containerWorkspaceFolder}/python",
-        "UV_PROJECT_ENVIRONMENT": "/home/node/ALACS.venv"
+        "UV_PROJECT_ENVIRONMENT": "/home/node/tindalwic.venv"
     },
     "onCreateCommand": {
-        "id": "echo 'ALACS=${devcontainerId}' >/tmp/.devcontainerId",
-        "uv": "test -e /home/node/ALACS.venv || uv sync"
+        "id": "echo '${devcontainerId}' >/tmp/.devcontainerId",
+        "uv": "test -e /home/node/tindalwic.venv || uv sync"
     },
     "postCreateCommand": {
         "rs": "test -e /home/node/.cargo || rustup-init -y"
@@ -33,7 +33,7 @@
             ],
             "settings": {
                 "python": {
-                    "defaultInterpreterPath": "/home/node/ALACS.venv/bin/python",
+                    "defaultInterpreterPath": "/home/node/tindalwic.venv/bin/python",
                     "editor.defaultFormatter": "charliermarsh.ruff"
                 },
                 "yaml.schemas": {}

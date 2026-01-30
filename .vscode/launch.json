@@ -5,11 +5,11 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "alacs_test __main__",
+            "name": "tindalwic_test __main__",
             "type": "debugpy",
             "request": "launch",
             "cwd": "${workspaceFolder}/python",
-            "module": "alacs_test",
+            "module": "tindalwic_test",
             "console": "integratedTerminal",
             "justMyCode": true
         }

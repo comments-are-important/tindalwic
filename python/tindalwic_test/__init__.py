@@ -5,37 +5,37 @@ from pathlib import Path
 from time import perf_counter_ns
 from typing import NamedTuple, Any, Self
 
-from alacs import ALACS, File, Encoded, Comment
-import alacs.yaml
+from tindalwic import RAM, File, Encoded, Comment
+import tindalwic.yaml
 import ruamel.yaml
 from ruamel.yaml.comments import CommentedMap
 from ruamel.yaml.scanner import ScannerError
 
 
 class FileSeparated(NamedTuple):
-    alacs: File
+    file: File
     python: dict[str, str | list | dict]
     comments: list[str]
     yaml: bytes
 
 
-class StealComments(alacs.yaml.YAML):
+class StealComments(tindalwic.yaml.YAML):
     def __init__(self):
         super().__init__()
         self.comments = list[str]()
 
-    def encode(self, alacs: File) -> BytesIO:
+    def encode(self, file: File) -> BytesIO:
         self.comments.clear()
-        return super().encode(alacs)
+        return super().encode(file)
 
-    def _comment(self, indent: bytes, prefix: bytes, alacs: Comment | None) -> None:
-        super()._comment(indent, prefix, alacs)
-        if alacs is not None:
+    def _comment(self, indent: bytes, prefix: bytes, comment: Comment | None) -> None:
+        super()._comment(indent, prefix, comment)
+        if comment is not None:
             if not indent and prefix == b"!":
                 before= f"#{prefix.decode()}"
             else:
                 before =  f"#{len(indent)}{prefix.decode()}"
-            for line in alacs:
+            for line in comment:
                 if isinstance(line, memoryview):
                     line = line.tobytes()
                 self.comments.append(f"{before}{line.decode()}")
@@ -71,13 +71,13 @@ class Timer:
         return round(self.avg / denom, 2)
 
 
-class TimedALACS:
+class TimedTindalwic:
     def __init__(self, pstats:Path|None):
         self.python_timer = Timer()
         self.file_timer = Timer()
         self.encode_timer = Timer()
         self.decode_timer = Timer()
-        self.memory = ALACS()
+        self.memory = RAM()
         self.steal = StealComments()
         self.pstats = pstats
         self.profile = Profile(builtins=False) if pstats else None
@@ -94,12 +94,12 @@ class TimedALACS:
         with self.profile if self.profile else self.encode_timer:
             return self.memory.encode(file)
 
-    def decode(self, alacs: Encoded) -> File:
+    def decode(self, buffer: Encoded) -> File:
         with self.profile if self.profile else self.decode_timer:
-            return self.memory.decode(alacs)
+            return self.memory.decode(buffer)
 
     def timers(self) -> None:
-        print("   ALACS")
+        print("   tindalwic")
         if self.pstats and self.profile:
             self.profile.dump_stats(self.pstats)
             print(f"\t(written to {self.pstats})")
@@ -116,11 +116,11 @@ class TimedALACS:
 
 
 class TimedRuamel:
-    def __init__(self, memory: TimedALACS):
-        self.alacs_timer = Timer()
+    def __init__(self, memory: TimedTindalwic):
+        self.trans_timer = Timer()
         self.dump_timer = Timer(memory.encode_timer)
         self.load_timer = Timer(memory.decode_timer)
-        self.buffer = alacs.yaml.YAML()
+        self.buffer = tindalwic.yaml.YAML()
         self.ruamel = ruamel.yaml.YAML(typ="rt")
         self.ruamel.indent(mapping=2, sequence=4, offset=2)
         if self.preserves(b"comment", b"{}\n#comment"):
@@ -165,7 +165,7 @@ class TimedRuamel:
         return self._load_file()
 
     def translate(self, file: File) -> CommentedMap:
-        with self.alacs_timer:
+        with self.trans_timer:
             self.buffer.encode(file)
         return self._load_file()
 
@@ -173,4 +173,4 @@ class TimedRuamel:
         print("   ruamel.yaml RT")
         print(f"\t  dump = {self.dump_timer.avg}  ({self.dump_timer.mul})")
         print(f"\t  load = {self.load_timer.avg}  ({self.load_timer.mul})")
-        print(f"\t trans = {self.alacs_timer.avg}")
+        print(f"\t trans = {self.trans_timer.avg}")

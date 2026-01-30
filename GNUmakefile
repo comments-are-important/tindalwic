@@ -14,7 +14,7 @@ usage: ;@
 .PHONY: usage
 
 must-run-outside: ;@
-	if [[ -n "$$ALACS_CID" && "$$(< /tmp/.devcontainerId)" == "ALACS=$$ALACS_CID" ]]
+	if [[ -n "$$TINDALWIC_CID" && "$$(< /tmp/.devcontainerId)" == "$$TINDALWIC_CID" ]]
 	then
 	  echo 'must run outside devcontainer'
 	  exit 1
@@ -22,7 +22,7 @@ must-run-outside: ;@
 .PHONY: must-run-outside
 
 must-run-inside: ;@
-	if [[ -z "$$ALACS_CID" || "$$(< /tmp/.devcontainerId)" != "ALACS=$$ALACS_CID" ]]
+	if [[ -z "$$TINDALWIC_CID" || "$$(< /tmp/.devcontainerId)" != "$$TINDALWIC_CID" ]]
 	then
 	  echo 'must run inside devcontainer'
 	  exit 1
@@ -38,31 +38,31 @@ setup: must-run-outside ;@
 .PHONY: setup
 
 down: must-run-outside
-	docker rm -f ALACS-devcontainer-vscode
+	docker rm -f tindalwic-devcontainer-vscode
 .PHONY: down
 
 # =====================================================================================
 
 python/test: must-run-inside
-	uv run -- python -m alacs_test
+	uv run -- python -m tindalwic_test
 .PHONY: python/test
 
 python/repl: must-run-inside
-	uv run -- python -i -c "import alacs_test;from alacs import *"
+	uv run -- python -i -c "import tindalwic_test;from tindalwic import *"
 .PHONY: python/repl
 
 python/profile: must-run-inside
-	rm -f /tmp/ALACS.pstats
+	rm -f /tmp/tindalwic.pstats
 	set -e
-	uv run -- python -m alacs_test --pstats=/tmp/ALACS.pstats --loops=10000
-	uv run -- snakeviz /tmp/ALACS.pstats
+	uv run -- python -m tindalwic_test --pstats=/tmp/tindalwic.pstats --loops=10000
+	uv run -- snakeviz /tmp/tindalwic.pstats
 .PHONY: python/profile
 
 python/coverage: must-run-inside
-	mkdir -p /tmp/ALACS.coverage
-	cd /tmp/ALACS.coverage
+	mkdir -p /tmp/tindalwic.coverage
+	cd /tmp/tindalwic.coverage
 	set -e
-	uv run -- coverage run --branch --source=alacs -m alacs_test
+	uv run -- coverage run --branch --source=tindalwic -m tindalwic_test
 	uv run -- coverage report --fail-under=100 && exit
 	uv run -- coverage html --directory=.
 	uv run -- python -m http.server

@@ -1,11 +1,7 @@
-[build-system]
-requires = ["uv_build >= 0.9.26, <0.10.0"]
-build-backend = "uv_build"
-
 [project]
-name = "alacs"
+name = "tindalwic"
 version = "0.1.0"
-description = "ALACS configuration file tools"
+description = "tindalwic data format and tools"
 readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "MIT"}
@@ -34,6 +30,10 @@ dev = [
     "typer",
 ]
 
+[build-system]
+requires = ["uv_build >= 0.9.26, <0.10.0"]
+build-backend = "uv_build"
+
 [tool.uv.build-backend]
-module-name = "alacs"
+module-name = "tindalwic"
 module-root = ""

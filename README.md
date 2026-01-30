@@ -1,6 +1,6 @@
-# ALACS - Associative and Linear Arrays of Commented Strings
+# Text in Nested Dicts and Lists - with Important Comments
 
-+ [**MANIFESTO.md**](MANIFESTO.md) = an informal English description of the ALACS format.
++ [**MANIFESTO.md**](MANIFESTO.md) = an informal English description of the format.
 + [**ORIGINS.md**](ORIGINS.md) = the story of the spark that led to this project.
 
 

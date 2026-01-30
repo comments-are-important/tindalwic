@@ -7,7 +7,7 @@
 //! All structures borrow from a source buffer via lifetime `'a`.
 //! The source must be valid UTF-8 (validated once at parse time).
 
-use std::collections::HashMap;
+use indexmap::IndexMap;
 use std::fmt;
 
 // =============================================================================
@@ -352,10 +352,10 @@ impl fmt::Display for Key<'_> {
 // =============================================================================
 
 /// A dictionary mapping keys to values, with optional intro and trailing comments.
-/// Note: uses std HashMap which does not preserve insertion order.
+/// Preserves insertion order.
 #[derive(Clone, Default)]
 pub struct Dict<'a> {
-    pub entries: HashMap<&'a str, (Key<'a>, Value<'a>)>,
+    pub entries: IndexMap<&'a str, (Key<'a>, Value<'a>)>,
     pub comment_intro: Option<Comment<'a>>,
     pub comment_after: Option<Comment<'a>>,
 }
@@ -364,7 +364,7 @@ impl<'a> Dict<'a> {
     /// Create empty dict.
     pub fn new() -> Self {
         Self {
-            entries: HashMap::new(),
+            entries: IndexMap::new(),
             comment_intro: None,
             comment_after: None,
         }
@@ -400,12 +400,12 @@ impl<'a> Dict<'a> {
         self.entries.get(key).map(|(k, v)| (k, v))
     }
 
-    /// Iterate over (key, value) pairs.
+    /// Iterate over (key, value) pairs in insertion order.
     pub fn iter(&self) -> impl Iterator<Item = (&Key<'a>, &Value<'a>)> {
         self.entries.values().map(|(k, v)| (k, v))
     }
 
-    /// Iterate mutably over values (keys are immutable for HashMap consistency).
+    /// Iterate mutably over values in insertion order.
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut Value<'a>> {
         self.entries.values_mut().map(|(_, v)| v)
     }
@@ -438,9 +438,10 @@ impl<'a> From<Dict<'a>> for Value<'a> {
 // =============================================================================
 
 /// A top-level ALACS file, which is a Dict with an optional hashbang.
+/// Preserves insertion order.
 #[derive(Clone, Default)]
 pub struct File<'a> {
-    pub entries: HashMap<&'a str, (Key<'a>, Value<'a>)>,
+    pub entries: IndexMap<&'a str, (Key<'a>, Value<'a>)>,
     pub hashbang: Option<Comment<'a>>,
     pub comment_intro: Option<Comment<'a>>,
 }
@@ -449,7 +450,7 @@ impl<'a> File<'a> {
     /// Create empty file.
     pub fn new() -> Self {
         Self {
-            entries: HashMap::new(),
+            entries: IndexMap::new(),
             hashbang: None,
             comment_intro: None,
         }
@@ -485,12 +486,12 @@ impl<'a> File<'a> {
         self.entries.get(key).map(|(k, v)| (k, v))
     }
 
-    /// Iterate over (key, value) pairs.
+    /// Iterate over (key, value) pairs in insertion order.
     pub fn iter(&self) -> impl Iterator<Item = (&Key<'a>, &Value<'a>)> {
         self.entries.values().map(|(k, v)| (k, v))
     }
 
-    /// Iterate mutably over values.
+    /// Iterate mutably over values in insertion order.
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut Value<'a>> {
         self.entries.values_mut().map(|(_, v)| v)
     }
@@ -582,5 +583,27 @@ mod tests {
         assert_eq!(file.len(), 1);
         // buffer is still accessible here - file borrows from it
         assert_eq!(&buffer[0..3], "key");
+    }
+
+    #[test]
+    fn dict_preserves_insertion_order() {
+        let mut dict = Dict::new();
+        dict.insert(Key::new("charlie"), Text::from_line("3").into());
+        dict.insert(Key::new("alpha"), Text::from_line("1").into());
+        dict.insert(Key::new("bravo"), Text::from_line("2").into());
+
+        let keys: Vec<_> = dict.iter().map(|(k, _)| k.name).collect();
+        assert_eq!(keys, vec!["charlie", "alpha", "bravo"]);
+    }
+
+    #[test]
+    fn dict_update_preserves_position() {
+        let mut dict = Dict::new();
+        dict.insert(Key::new("a"), Text::from_line("1").into());
+        dict.insert(Key::new("b"), Text::from_line("2").into());
+        dict.insert(Key::new("a"), Text::from_line("updated").into());
+
+        let keys: Vec<_> = dict.iter().map(|(k, _)| k.name).collect();
+        assert_eq!(keys, vec!["a", "b"]); // "a" stays in original position
     }
 }

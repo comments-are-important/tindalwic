@@ -5,7 +5,7 @@ build-backend = "uv_build"
 [project]
 name = "alacs"
 version = "0.1.0"
-description = "ALACS configuration file tools"
+description = "ALACS data format and tools"
 readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "MIT"}

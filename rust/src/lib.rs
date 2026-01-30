@@ -3,107 +3,11 @@
 //! Data structures for representing text with comments.
 //! Values can be Text, List, or Dict - augmented with comment metadata.
 //! Users can manipulate these like standard collections while comments are preserved.
+//!
+//! All structures borrow from a source buffer via lifetime `'a`.
 
 use std::collections::HashMap;
 use std::fmt;
-use std::ops::Range;
-use std::rc::Rc;
-
-// =============================================================================
-// Bytes - zero-copy slice into a shared buffer
-// =============================================================================
-
-/// A reference to a slice of bytes within a shared buffer.
-/// Enables zero-copy parsing by sharing a single allocation.
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub struct Bytes {
-    buffer: Rc<[u8]>,
-    range: Range<usize>,
-}
-
-impl Bytes {
-    /// Create from owned data, taking ownership of the entire buffer.
-    pub fn new(data: impl Into<Rc<[u8]>>) -> Self {
-        let buffer: Rc<[u8]> = data.into();
-        let range = 0..buffer.len();
-        Self { buffer, range }
-    }
-
-    /// Create an empty Bytes.
-    pub fn empty() -> Self {
-        Self {
-            buffer: Rc::from([]),
-            range: 0..0,
-        }
-    }
-
-    /// View the bytes as a slice.
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.buffer[self.range.clone()]
-    }
-
-    /// Create a sub-slice sharing the same underlying buffer.
-    pub fn slice(&self, range: Range<usize>) -> Self {
-        let start = self.range.start + range.start;
-        let end = self.range.start + range.end;
-        debug_assert!(end <= self.range.end);
-        Self {
-            buffer: Rc::clone(&self.buffer),
-            range: start..end,
-        }
-    }
-
-    /// Length in bytes.
-    pub fn len(&self) -> usize {
-        self.range.len()
-    }
-
-    /// True if empty.
-    pub fn is_empty(&self) -> bool {
-        self.range.is_empty()
-    }
-
-    /// Decode as UTF-8 string.
-    pub fn to_string_lossy(&self) -> String {
-        String::from_utf8_lossy(self.as_bytes()).into_owned()
-    }
-}
-
-impl Default for Bytes {
-    fn default() -> Self {
-        Self::empty()
-    }
-}
-
-impl fmt::Debug for Bytes {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Bytes({:?})", self.as_bytes())
-    }
-}
-
-impl From<&[u8]> for Bytes {
-    fn from(data: &[u8]) -> Self {
-        Self::new(data.to_vec())
-    }
-}
-
-impl From<Vec<u8>> for Bytes {
-    fn from(data: Vec<u8>) -> Self {
-        Self::new(data)
-    }
-}
-
-impl From<&str> for Bytes {
-    fn from(s: &str) -> Self {
-        Self::new(s.as_bytes().to_vec())
-    }
-}
-
-impl From<String> for Bytes {
-    fn from(s: String) -> Self {
-        Self::new(s.into_bytes())
-    }
-}
 
 // =============================================================================
 // UTF8 - a list of byte slices representing lines
@@ -111,24 +15,25 @@ impl From<String> for Bytes {
 
 /// A list of byte slices, each representing a line of UTF-8 text.
 /// Lines are joined with newlines when converted to bytes or string.
+/// Borrows from an external buffer.
 #[derive(Clone, Default, PartialEq, Eq, Hash)]
-pub struct Utf8 {
-    lines: Vec<Bytes>,
+pub struct Utf8<'a> {
+    lines: Vec<&'a [u8]>,
 }
 
-impl Utf8 {
+impl<'a> Utf8<'a> {
     /// Create empty.
     pub fn new() -> Self {
         Self { lines: Vec::new() }
     }
 
     /// Create from a single line.
-    pub fn from_line(line: Bytes) -> Self {
+    pub fn from_line(line: &'a [u8]) -> Self {
         Self { lines: vec![line] }
     }
 
     /// Create from multiple lines.
-    pub fn from_lines(lines: impl IntoIterator<Item = Bytes>) -> Self {
+    pub fn from_lines(lines: impl IntoIterator<Item = &'a [u8]>) -> Self {
         Self {
             lines: lines.into_iter().collect(),
         }
@@ -150,18 +55,18 @@ impl Utf8 {
     }
 
     /// Append a line.
-    pub fn push(&mut self, line: Bytes) {
+    pub fn push(&mut self, line: &'a [u8]) {
         self.lines.push(line);
     }
 
     /// Get a line by index.
-    pub fn get(&self, index: usize) -> Option<&Bytes> {
-        self.lines.get(index)
+    pub fn get(&self, index: usize) -> Option<&'a [u8]> {
+        self.lines.get(index).copied()
     }
 
     /// Iterate over lines.
-    pub fn iter(&self) -> impl Iterator<Item = &Bytes> {
-        self.lines.iter()
+    pub fn iter(&self) -> impl Iterator<Item = &'a [u8]> + '_ {
+        self.lines.iter().copied()
     }
 
     /// Join all lines with newlines into a single byte vector.
@@ -171,7 +76,7 @@ impl Utf8 {
             if i > 0 {
                 result.push(b'\n');
             }
-            result.extend_from_slice(line.as_bytes());
+            result.extend_from_slice(line);
         }
         result
     }
@@ -193,28 +98,27 @@ impl Utf8 {
         // Split any lines containing newlines
         let mut i = 0;
         while i < self.lines.len() {
-            let bytes = self.lines[i].as_bytes();
+            let bytes = self.lines[i];
             if bytes.iter().any(|&b| b == b'\n') {
                 // This line contains a newline - split it
                 let line = self.lines.remove(i);
                 let mut start = 0;
-                let bytes = line.as_bytes();
-                for (j, &b) in bytes.iter().enumerate() {
+                for (j, &b) in line.iter().enumerate() {
                     if b == b'\n' {
-                        self.lines.insert(i, line.slice(start..j));
+                        self.lines.insert(i, &line[start..j]);
                         i += 1;
                         start = j + 1;
                     }
                 }
                 // Insert the remainder
-                self.lines.insert(i, line.slice(start..bytes.len()));
+                self.lines.insert(i, &line[start..]);
             }
             i += 1;
         }
     }
 }
 
-impl fmt::Debug for Utf8 {
+impl fmt::Debug for Utf8<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Utf8({:?})", self.to_bytes())
     }
@@ -225,24 +129,24 @@ impl fmt::Debug for Utf8 {
 // =============================================================================
 
 /// A comment block: one or more lines of comment text.
-pub type Comment = Utf8;
+pub type Comment<'a> = Utf8<'a>;
 
 // =============================================================================
-// Value - the trait shared by Text, List, and Dict
+// Value - the enum of possible value types
 // =============================================================================
 
 /// A value that can appear in an ALACS structure.
 /// All values can have a trailing comment.
 #[derive(Clone)]
-pub enum Value {
-    Text(Text),
-    List(List),
-    Dict(Dict),
+pub enum Value<'a> {
+    Text(Text<'a>),
+    List(List<'a>),
+    Dict(Dict<'a>),
 }
 
-impl Value {
+impl<'a> Value<'a> {
     /// Get the comment after this value, if any.
-    pub fn comment_after(&self) -> Option<&Comment> {
+    pub fn comment_after(&self) -> Option<&Comment<'a>> {
         match self {
             Value::Text(t) => t.comment_after.as_ref(),
             Value::List(l) => l.comment_after.as_ref(),
@@ -251,7 +155,7 @@ impl Value {
     }
 
     /// Set the comment after this value.
-    pub fn set_comment_after(&mut self, comment: Option<Comment>) {
+    pub fn set_comment_after(&mut self, comment: Option<Comment<'a>>) {
         match self {
             Value::Text(t) => t.comment_after = comment,
             Value::List(l) => l.comment_after = comment,
@@ -260,7 +164,7 @@ impl Value {
     }
 }
 
-impl fmt::Debug for Value {
+impl fmt::Debug for Value<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Text(t) => t.fmt(f),
@@ -276,12 +180,12 @@ impl fmt::Debug for Value {
 
 /// Text value: UTF-8 lines with an optional trailing comment.
 #[derive(Clone, Default)]
-pub struct Text {
-    pub content: Utf8,
-    pub comment_after: Option<Comment>,
+pub struct Text<'a> {
+    pub content: Utf8<'a>,
+    pub comment_after: Option<Comment<'a>>,
 }
 
-impl Text {
+impl<'a> Text<'a> {
     /// Create empty text.
     pub fn new() -> Self {
         Self {
@@ -291,17 +195,9 @@ impl Text {
     }
 
     /// Create from a single line.
-    pub fn from_line(line: Bytes) -> Self {
+    pub fn from_line(line: &'a [u8]) -> Self {
         Self {
             content: Utf8::from_line(line),
-            comment_after: None,
-        }
-    }
-
-    /// Create from a string (will be encoded as UTF-8).
-    pub fn from_str(s: &str) -> Self {
-        Self {
-            content: Utf8::from_line(Bytes::from(s)),
             comment_after: None,
         }
     }
@@ -317,7 +213,7 @@ impl Text {
     }
 }
 
-impl fmt::Debug for Text {
+impl fmt::Debug for Text<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Text({:?}", self.content)?;
         if let Some(ref c) = self.comment_after {
@@ -327,8 +223,8 @@ impl fmt::Debug for Text {
     }
 }
 
-impl From<Text> for Value {
-    fn from(t: Text) -> Self {
+impl<'a> From<Text<'a>> for Value<'a> {
+    fn from(t: Text<'a>) -> Self {
         Value::Text(t)
     }
 }
@@ -339,13 +235,13 @@ impl From<Text> for Value {
 
 /// A list of values with optional intro and trailing comments.
 #[derive(Clone, Default)]
-pub struct List {
-    pub items: Vec<Value>,
-    pub comment_intro: Option<Comment>,
-    pub comment_after: Option<Comment>,
+pub struct List<'a> {
+    pub items: Vec<Value<'a>>,
+    pub comment_intro: Option<Comment<'a>>,
+    pub comment_after: Option<Comment<'a>>,
 }
 
-impl List {
+impl<'a> List<'a> {
     /// Create empty list.
     pub fn new() -> Self {
         Self {
@@ -366,32 +262,32 @@ impl List {
     }
 
     /// Append a value.
-    pub fn push(&mut self, value: Value) {
+    pub fn push(&mut self, value: Value<'a>) {
         self.items.push(value);
     }
 
     /// Get item by index.
-    pub fn get(&self, index: usize) -> Option<&Value> {
+    pub fn get(&self, index: usize) -> Option<&Value<'a>> {
         self.items.get(index)
     }
 
     /// Get mutable item by index.
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut Value> {
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut Value<'a>> {
         self.items.get_mut(index)
     }
 
     /// Iterate over items.
-    pub fn iter(&self) -> impl Iterator<Item = &Value> {
+    pub fn iter(&self) -> impl Iterator<Item = &Value<'a>> {
         self.items.iter()
     }
 
     /// Iterate mutably over items.
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Value> {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Value<'a>> {
         self.items.iter_mut()
     }
 }
 
-impl fmt::Debug for List {
+impl fmt::Debug for List<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "List(")?;
         for (i, item) in self.items.iter().enumerate() {
@@ -410,8 +306,8 @@ impl fmt::Debug for List {
     }
 }
 
-impl From<List> for Value {
-    fn from(l: List) -> Self {
+impl<'a> From<List<'a>> for Value<'a> {
+    fn from(l: List<'a>) -> Self {
         Value::List(l)
     }
 }
@@ -421,17 +317,17 @@ impl From<List> for Value {
 // =============================================================================
 
 /// A dictionary key with optional formatting metadata.
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub struct Key {
-    pub name: String,
+#[derive(Clone)]
+pub struct Key<'a> {
+    pub name: &'a str,
     pub blank_line_before: bool,
-    pub comment_before: Option<Comment>,
+    pub comment_before: Option<Comment<'a>>,
 }
 
-impl Key {
-    /// Create a key from a string.
-    pub fn new(name: impl Into<String>) -> Self {
-        let name = name.into();
+impl<'a> Key<'a> {
+    /// Create a key from a string slice.
+    /// Panics if the name contains a newline.
+    pub fn new(name: &'a str) -> Self {
         if name.contains('\n') {
             panic!("newline in key");
         }
@@ -443,18 +339,18 @@ impl Key {
     }
 
     /// Get the key name.
-    pub fn as_str(&self) -> &str {
-        &self.name
+    pub fn as_str(&self) -> &'a str {
+        self.name
     }
 }
 
-impl fmt::Debug for Key {
+impl fmt::Debug for Key<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Key({:?})", self.name)
     }
 }
 
-impl fmt::Display for Key {
+impl fmt::Display for Key<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.name)
     }
@@ -467,13 +363,13 @@ impl fmt::Display for Key {
 /// A dictionary mapping keys to values, with optional intro and trailing comments.
 /// Note: uses std HashMap which does not preserve insertion order.
 #[derive(Clone, Default)]
-pub struct Dict {
-    pub entries: HashMap<String, (Key, Value)>,
-    pub comment_intro: Option<Comment>,
-    pub comment_after: Option<Comment>,
+pub struct Dict<'a> {
+    pub entries: HashMap<&'a str, (Key<'a>, Value<'a>)>,
+    pub comment_intro: Option<Comment<'a>>,
+    pub comment_after: Option<Comment<'a>>,
 }
 
-impl Dict {
+impl<'a> Dict<'a> {
     /// Create empty dict.
     pub fn new() -> Self {
         Self {
@@ -494,37 +390,37 @@ impl Dict {
     }
 
     /// Insert a key-value pair.
-    pub fn insert(&mut self, key: Key, value: Value) {
-        self.entries.insert(key.name.clone(), (key, value));
+    pub fn insert(&mut self, key: Key<'a>, value: Value<'a>) {
+        self.entries.insert(key.name, (key, value));
     }
 
     /// Get value by key name.
-    pub fn get(&self, key: &str) -> Option<&Value> {
+    pub fn get(&self, key: &str) -> Option<&Value<'a>> {
         self.entries.get(key).map(|(_, v)| v)
     }
 
     /// Get mutable value by key name.
-    pub fn get_mut(&mut self, key: &str) -> Option<&mut Value> {
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut Value<'a>> {
         self.entries.get_mut(key).map(|(_, v)| v)
     }
 
     /// Get key and value by key name.
-    pub fn get_entry(&self, key: &str) -> Option<(&Key, &Value)> {
+    pub fn get_entry(&self, key: &str) -> Option<(&Key<'a>, &Value<'a>)> {
         self.entries.get(key).map(|(k, v)| (k, v))
     }
 
     /// Iterate over (key, value) pairs.
-    pub fn iter(&self) -> impl Iterator<Item = (&Key, &Value)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&Key<'a>, &Value<'a>)> {
         self.entries.values().map(|(k, v)| (k, v))
     }
 
     /// Iterate mutably over values (keys are immutable for HashMap consistency).
-    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut Value> {
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut Value<'a>> {
         self.entries.values_mut().map(|(_, v)| v)
     }
 }
 
-impl fmt::Debug for Dict {
+impl fmt::Debug for Dict<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Dict(")?;
         if let Some(ref c) = self.comment_intro {
@@ -540,8 +436,8 @@ impl fmt::Debug for Dict {
     }
 }
 
-impl From<Dict> for Value {
-    fn from(d: Dict) -> Self {
+impl<'a> From<Dict<'a>> for Value<'a> {
+    fn from(d: Dict<'a>) -> Self {
         Value::Dict(d)
     }
 }
@@ -552,13 +448,13 @@ impl From<Dict> for Value {
 
 /// A top-level ALACS file, which is a Dict with an optional hashbang.
 #[derive(Clone, Default)]
-pub struct File {
-    pub entries: HashMap<String, (Key, Value)>,
-    pub hashbang: Option<Comment>,
-    pub comment_intro: Option<Comment>,
+pub struct File<'a> {
+    pub entries: HashMap<&'a str, (Key<'a>, Value<'a>)>,
+    pub hashbang: Option<Comment<'a>>,
+    pub comment_intro: Option<Comment<'a>>,
 }
 
-impl File {
+impl<'a> File<'a> {
     /// Create empty file.
     pub fn new() -> Self {
         Self {
@@ -579,37 +475,37 @@ impl File {
     }
 
     /// Insert a key-value pair.
-    pub fn insert(&mut self, key: Key, value: Value) {
-        self.entries.insert(key.name.clone(), (key, value));
+    pub fn insert(&mut self, key: Key<'a>, value: Value<'a>) {
+        self.entries.insert(key.name, (key, value));
     }
 
     /// Get value by key name.
-    pub fn get(&self, key: &str) -> Option<&Value> {
+    pub fn get(&self, key: &str) -> Option<&Value<'a>> {
         self.entries.get(key).map(|(_, v)| v)
     }
 
     /// Get mutable value by key name.
-    pub fn get_mut(&mut self, key: &str) -> Option<&mut Value> {
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut Value<'a>> {
         self.entries.get_mut(key).map(|(_, v)| v)
     }
 
     /// Get key and value by key name.
-    pub fn get_entry(&self, key: &str) -> Option<(&Key, &Value)> {
+    pub fn get_entry(&self, key: &str) -> Option<(&Key<'a>, &Value<'a>)> {
         self.entries.get(key).map(|(k, v)| (k, v))
     }
 
     /// Iterate over (key, value) pairs.
-    pub fn iter(&self) -> impl Iterator<Item = (&Key, &Value)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&Key<'a>, &Value<'a>)> {
         self.entries.values().map(|(k, v)| (k, v))
     }
 
     /// Iterate mutably over values.
-    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut Value> {
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut Value<'a>> {
         self.entries.values_mut().map(|(_, v)| v)
     }
 }
 
-impl fmt::Debug for File {
+impl fmt::Debug for File<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "File(")?;
         if let Some(ref c) = self.hashbang {
@@ -634,41 +530,45 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bytes_slice_shares_buffer() {
-        let original = Bytes::from("hello world");
-        let slice = original.slice(0..5);
-        assert_eq!(slice.as_bytes(), b"hello");
-        // Both share the same underlying Rc
-        assert!(Rc::ptr_eq(&original.buffer, &slice.buffer));
+    fn utf8_from_line() {
+        let data = b"hello world";
+        let utf8 = Utf8::from_line(data);
+        assert_eq!(utf8.len(), 1);
+        assert_eq!(utf8.get(0), Some(&b"hello world"[..]));
     }
 
     #[test]
     fn utf8_normalize_splits_newlines() {
-        let mut utf8 = Utf8::from_line(Bytes::from("line1\nline2\nline3"));
+        let data = b"line1\nline2\nline3";
+        let mut utf8 = Utf8::from_line(data);
         utf8.normalize();
         assert_eq!(utf8.len(), 3);
-        assert_eq!(utf8.get(0).unwrap().as_bytes(), b"line1");
-        assert_eq!(utf8.get(1).unwrap().as_bytes(), b"line2");
-        assert_eq!(utf8.get(2).unwrap().as_bytes(), b"line3");
+        assert_eq!(utf8.get(0), Some(&b"line1"[..]));
+        assert_eq!(utf8.get(1), Some(&b"line2"[..]));
+        assert_eq!(utf8.get(2), Some(&b"line3"[..]));
     }
 
     #[test]
     fn utf8_normalize_clears_single_empty() {
-        let mut utf8 = Utf8::from_line(Bytes::empty());
+        let data = b"";
+        let mut utf8 = Utf8::from_line(data);
         utf8.normalize();
         assert!(utf8.is_empty());
     }
 
     #[test]
     fn text_to_string() {
-        let text = Text::from_str("hello");
+        let data = b"hello";
+        let text = Text::from_line(data);
         assert_eq!(text.to_string(), "hello");
     }
 
     #[test]
     fn dict_insert_and_get() {
+        let key_name = "name";
+        let value_data = b"value";
         let mut dict = Dict::new();
-        dict.insert(Key::new("name"), Text::from_str("value").into());
+        dict.insert(Key::new(key_name), Text::from_line(value_data).into());
         assert!(dict.get("name").is_some());
     }
 
@@ -676,5 +576,20 @@ mod tests {
     #[should_panic(expected = "newline in key")]
     fn key_rejects_newline() {
         Key::new("bad\nkey");
+    }
+
+    #[test]
+    fn file_borrows_from_buffer() {
+        // Demonstrates the borrowing pattern
+        let buffer = b"key=value";
+        let key_slice = std::str::from_utf8(&buffer[0..3]).unwrap();
+        let value_slice = &buffer[4..9];
+
+        let mut file = File::new();
+        file.insert(Key::new(key_slice), Text::from_line(value_slice).into());
+
+        assert_eq!(file.len(), 1);
+        // buffer is still accessible here - file borrows from it
+        assert_eq!(&buffer[0..3], b"key");
     }
 }

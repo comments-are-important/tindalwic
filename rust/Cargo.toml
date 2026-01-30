@@ -1,0 +1,11 @@
+[package]
+name = "tindalwic"
+version = "0.1.0"
+edition = "2024"
+description = "tindalwic data format and tools"
+license = "MIT"
+authors = ["Comments Are Important <comments.are.important@gmail.com>"]
+
+[dev-dependencies]
+markdown = "1.0.0"
+regex = "1.12.3"

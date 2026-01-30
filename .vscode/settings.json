@@ -5,15 +5,22 @@
         "deepdiff",
         "demarks",
         "elif",
+        "getframe",
+        "indexmap",
+        "memchr",
+        "memrchr",
         "pstats",
         "pycache",
         "PYTHONPYCACHEPREFIX",
+        "rfind",
         "ruamel",
         "rustup",
         "sdist",
         "snakeviz",
+        "splitn",
         "tindalwic",
         "typer",
+        "vadimcn",
         "venv"
     ]
 }

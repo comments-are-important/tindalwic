@@ -5,6 +5,7 @@
         "deepdiff",
         "demarks",
         "elif",
+        "indexmap",
         "pstats",
         "pycache",
         "PYTHONPYCACHEPREFIX",
@@ -14,6 +15,7 @@
         "snakeviz",
         "tindalwic",
         "typer",
-        "venv"
+        "venv",
+        "vadimcn"
     ]
 }

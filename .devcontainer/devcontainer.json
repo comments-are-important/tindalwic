@@ -29,12 +29,14 @@
                 "ms-python.python",
                 "redhat.vscode-yaml",
                 "rust-lang.rust-analyzer",
-                "streetsidesoftware.code-spell-checker"
+                "streetsidesoftware.code-spell-checker",
+                "vadimcn.vscode-lldb"
             ],
             "settings": {
                 "python": {
                     "defaultInterpreterPath": "/home/node/tindalwic.venv/bin/python",
-                    "editor.defaultFormatter": "charliermarsh.ruff"
+                    "editor.defaultFormatter": "charliermarsh.ruff",
+                    "lldb.cargo": "/home/node/.cargo/bin/cargo"
                 },
                 "yaml.schemas": {}
             }

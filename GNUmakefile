@@ -73,3 +73,12 @@ python/build: python/test
 .PHONY: python/build
 
 # =====================================================================================
+
+rust/doc: must-run-inside
+	cd rust
+	cargo doc --document-private-items
+	cd target/doc
+	uv run -- python -m http.server
+.PHONY: rust/doc
+
+# =====================================================================================

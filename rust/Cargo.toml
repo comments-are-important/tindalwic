@@ -1,10 +1,14 @@
 [package]
-name = "alacs"
+name = "tindalwic"
 version = "0.1.0"
 edition = "2024"
-description = "ALACS file format and tools"
+description = "tindalwic data format and tools"
 license = "MIT"
 authors = ["Comments Are Important <comments.are.important@gmail.com>"]
 
 [dependencies]
 indexmap = "2"
+memchr = { version = "2.7.6", default-features = false }
+
+[dev-dependencies]
+markdown = "1.0.0"

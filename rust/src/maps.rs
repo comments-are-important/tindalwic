@@ -1,37 +1,39 @@
 use crate::comments::Comment;
 use crate::values::Value;
-use indexmap::IndexMap;
+//use indexmap::IndexMap;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Key<'a> {
+pub struct Keyed<'a> {
     pub key: &'a str,
     pub gap: bool,
     pub before: Option<Comment<'a>>,
+    pub value: Value<'a>
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Map<'a> {
-    map: IndexMap<&'a str, (Key<'a>, Value<'a>)>,
+    pub vec: Vec<Keyed<'a>>,
 }
 impl<'a> Map<'a> {
     pub fn new() -> Self {
         Map {
-            map: IndexMap::new(),
-            //pairs: Vec::new(),
+            vec: Vec::new(),
         }
     }
     pub fn len(&self) -> usize {
-        self.map.len()
+        self.vec.len()
     }
-    pub fn get(&self, key: &str) -> Option<&(Key<'a>, Value<'a>)> {
-        self.map.get(key)
+    pub fn position(&self, key: &str) -> Option<usize> {
+        self.vec.iter().position(|x|x.key == key)
     }
-    pub fn get_mut(&mut self, key: &str) -> Option<&mut (Key<'a>, Value<'a>)> {
-        self.map.get_mut(key)
+    pub fn find(&self, key: &str) -> Option<&Keyed<'a>> {
+        self.position(key).map(|i|&self.vec[i])
     }
-    pub fn put(&mut self, key:Key<'a>, value:Value<'a>) {
-        let k = key.key;
-        self.map.insert(k, (key,value));
+    pub fn find_mut(&mut self, key: &str) -> Option<&mut Keyed<'a>> {
+        self.position(key).map(|i|&mut self.vec[i])
+    }
+    pub fn push(&mut self, keyed:Keyed<'a>) {
+        self.vec.push(keyed);
     }
     // pub fn swap_values(&mut self, key1: &str, key2: &str) -> bool {
     //     let Some(i) = self.map.get_index_of(key1) else {

@@ -30,10 +30,12 @@ use crate::encoded::Encoded;
 
 #[derive(Debug, Ord, PartialOrd, PartialEq, Eq, Clone, Copy)]
 pub struct Comment<'a> {
+    /// the encoded content (Github Flavored Markdown)
     pub gfm: Encoded<'a>,
 }
 
 impl<'a> Comment<'a> {
+    /// wrap a reference to content into a Comment
     pub fn adopt(gfm: &'a str) -> Option<Self> {
         Some(Comment {
             gfm: Encoded::adopt(gfm),

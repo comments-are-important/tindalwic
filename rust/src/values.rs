@@ -2,12 +2,16 @@ use crate::comments::Comment;
 use crate::encoded::Encoded;
 use crate::maps::Map;
 
+/// the fields of a [Value::Text]
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Text<'a> {
+    /// the encoded UTF-8 content
     pub utf8: Encoded<'a>,
+    /// a Text Value can have a Comment after it
     pub epilog: Option<Comment<'a>>,
 }
 impl<'a> Text<'a> {
+    /// wrap a reference to content into a Text
     pub fn adopt(utf8: &'a str) -> Self {
         Text {
             utf8: Encoded::adopt(utf8),
@@ -15,13 +19,19 @@ impl<'a> Text<'a> {
         }
     }
 }
+
+/// the fields of a [Value::List]
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct List<'a> {
+    /// the items contained in the List
     pub vec: Vec<Value<'a>>,
+    /// a List Value can start with a Comment
     pub prolog: Option<Comment<'a>>,
+    /// a List Value can have a Comment after it
     pub epilog: Option<Comment<'a>>,
 }
 impl<'a> List<'a> {
+    /// take ownership of the items
     pub fn adopt(list: Vec<Value<'a>>) -> Self {
         List {
             vec: list,
@@ -30,17 +40,26 @@ impl<'a> List<'a> {
         }
     }
 }
+
+/// the fields of a [Value::Dict]
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Dict<'a> {
+    /// the entries contained in the Dict
     pub map: Map<'a>,
+    /// a Dict Value can start with a Comment
     pub prolog: Option<Comment<'a>>,
+    /// a Dict Value can have a Comment after it
     pub epilog: Option<Comment<'a>>,
 }
 
+/// the three possible Value types
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Value<'a> {
+    /// a [Text] value holds UTF-8 content
     Text(Text<'a>),
+    /// a [List] value is a linear array of values
     List(List<'a>),
+    /// a [Dict] value is an associative array of Keyed values
     Dict(Dict<'a>),
 }
 
@@ -57,9 +76,9 @@ mod tests {
         let mut hi = String::from("hi");
         let mut text = Text::adopt(&hi);
         text.epilog = Comment::adopt("comment");
-        let mut list = Value::List(List::adopt(vec![Value::Text(text)]));
+        let mut root = Value::List(List::adopt(vec!(Value::Text(text))));
         //hi.clear(); // won't compile
-        let result = path!([0]).text_mut(&mut list).unwrap();
+        let result = path!([0]).text_mut(&mut root).unwrap();
         result.epilog = Comment::adopt("changed");
         //assert_eq!(text.epilog.unwrap().gfm.to_string(), "hi");
         hi.clear();

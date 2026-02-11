@@ -1,6 +1,7 @@
 use crate::values::{Dict, List, Text, Value};
 use std::fmt;
 
+/// an [Err] [Result] for path resolution
 #[derive(Debug, Clone)]
 pub struct PathErr {
     good: &'static [Step],
@@ -48,9 +49,12 @@ impl PathErr {
     }
 }
 
+/// a single step in a [Path]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Step {
+    /// an index into a linear array
     List(usize),
+    /// the key into an associative array
     Dict(&'static str),
 }
 
@@ -65,6 +69,7 @@ impl From<&'static str> for Step {
     }
 }
 
+/// one or more [Step]s
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Path {
     steps: &'static [Step],
@@ -80,6 +85,7 @@ impl From<&'static [Step]> for Path {
 }
 
 impl Path {
+    /// resolve this path, if possible, to a [Value]
     pub fn value<'v>(&self, root: &'v Value<'v>) -> Result<&'v Value<'v>, PathErr> {
         let mut value = root;
         let mut passed = &self.steps[0..0];
@@ -91,8 +97,8 @@ impl Path {
                     .ok_or(PathErr::some(passed, "List too short", step)),
                 (Step::Dict(lookup), Value::Dict(dict)) => dict
                     .map
-                    .get(lookup)
-                    .map(|kv| &kv.1)
+                    .find(lookup)
+                    .map(|k| &k.value)
                     .ok_or(PathErr::some(passed, "Dict missing key", step)),
                 (_, Value::Text(_)) => Err(PathErr::some(passed, "Text", step)),
                 (_, Value::List(_)) => Err(PathErr::some(passed, "List", step)),
@@ -103,6 +109,7 @@ impl Path {
         Ok(value)
     }
 
+    /// resolve this path, if possible, to a mutable [Value]
     pub fn value_mut<'v>(&self, root: &'v mut Value<'v>) -> Result<&'v mut Value<'v>, PathErr> {
         let mut value = root;
         let mut passed = &self.steps[0..0];
@@ -114,8 +121,8 @@ impl Path {
                     .ok_or(PathErr::some(passed, "List too short", step)),
                 (Step::Dict(lookup), Value::Dict(dict)) => dict
                     .map
-                    .get_mut(lookup)
-                    .map(|kv| &mut kv.1)
+                    .find_mut(lookup)
+                    .map(|k| &mut k.value)
                     .ok_or(PathErr::some(passed, "Dict missing key", step)),
                 (_, Value::Text(_)) => Err(PathErr::some(passed, "Text", step)),
                 (_, Value::List(_)) => Err(PathErr::some(passed, "List", step)),
@@ -126,6 +133,7 @@ impl Path {
         Ok(value)
     }
 
+    /// resolve this path, if possible, to a [Text]
     pub fn text<'v>(&self, root: &'v Value<'v>) -> Result<&'v Text<'v>, PathErr> {
         match self.value(root)? {
             Value::Text(text) => Ok(text),
@@ -133,6 +141,7 @@ impl Path {
             Value::Dict(_) => Err(PathErr::none(self.steps, "Dict (not Text)")),
         }
     }
+    /// resolve this path, if possible, to a mutable [Text]
     pub fn text_mut<'v>(&self, root: &'v mut Value<'v>) -> Result<&'v mut Text<'v>, PathErr> {
         match self.value_mut(root)? {
             Value::Text(text) => Ok(text),
@@ -141,6 +150,7 @@ impl Path {
         }
     }
 
+    /// resolve this path, if possible, to a [List]
     pub fn list<'v>(&self, root: &'v Value<'v>) -> Result<&'v List<'v>, PathErr> {
         match self.value(root)? {
             Value::List(list) => Ok(list),
@@ -148,6 +158,7 @@ impl Path {
             Value::Text(_) => Err(PathErr::none(self.steps, "Text (not List)")),
         }
     }
+    /// resolve this path, if possible, to a mutable [List]
     pub fn list_mut<'v>(&self, root: &'v mut Value<'v>) -> Result<&'v mut List<'v>, PathErr> {
         match self.value_mut(root)? {
             Value::List(list) => Ok(list),
@@ -156,6 +167,7 @@ impl Path {
         }
     }
 
+    /// resolve this path, if possible, to a [Dict]
     pub fn dict<'v>(&self, root: &'v Value<'v>) -> Result<&'v Dict<'v>, PathErr> {
         match self.value(root)? {
             Value::Dict(dict) => Ok(dict),
@@ -163,6 +175,7 @@ impl Path {
             Value::Text(_) => Err(PathErr::none(self.steps, "Text (not Dict)")),
         }
     }
+    /// resolve this path, if possible, to a mutable [Dict]
     pub fn dict_mut<'v>(&self, root: &'v mut Value<'v>) -> Result<&'v mut Dict<'v>, PathErr> {
         match self.value_mut(root)? {
             Value::Dict(dict) => Ok(dict),

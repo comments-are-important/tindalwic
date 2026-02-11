@@ -2,7 +2,7 @@ use crate::comments::Comment;
 use crate::encoded::Encoded;
 use crate::maps::Map;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Text<'a> {
     pub utf8: Encoded<'a>,
     pub epilog: Option<Comment<'a>>,
@@ -15,7 +15,7 @@ impl<'a> Text<'a> {
         }
     }
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct List<'a> {
     pub vec: Vec<Value<'a>>,
     pub prolog: Option<Comment<'a>>,
@@ -30,14 +30,14 @@ impl<'a> List<'a> {
         }
     }
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Dict<'a> {
     pub map: Map<'a>,
     pub prolog: Option<Comment<'a>>,
     pub epilog: Option<Comment<'a>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Value<'a> {
     Text(Text<'a>),
     List(List<'a>),
@@ -45,47 +45,7 @@ pub enum Value<'a> {
 }
 
 impl<'a> Value<'a> {
-    pub fn text(&self) -> Option<&Text<'a>> {
-        match self {
-            Value::Text(text) => Some(text),
-            _ => None,
-        }
-    }
-    pub fn text_mut(&mut self) -> Option<&mut Text<'a>> {
-        match self {
-            Value::Text(text) => Some(text),
-            _ => None,
-        }
-    }
-    pub fn at(&self, index: usize) -> Option<&Value<'a>> {
-        match self {
-            Value::List(list) => list.vec.get(index),
-            _ => None,
-        }
-    }
-    pub fn at_mut(&mut self, index: usize) -> Option<&mut Value<'a>> {
-        match self {
-            Value::List(list) => list.vec.get_mut(index),
-            _ => None,
-        }
-    }
-    pub fn get(&self, key: &str) -> Option<&Value<'a>> {
-        match self {
-            Value::Dict(dict) => dict.map.get(key),
-            _ => None,
-        }
-    }
-    pub fn get_mut(&mut self, key: &str) -> Option<&mut Value<'a>> {
-        match self {
-            Value::Dict(dict) => dict.map.get_mut(key),
-            _ => None,
-        }
-    }
 }
-
-// =============================================================================
-// Tests
-// =============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -104,4 +64,9 @@ mod tests {
         //assert_eq!(text.epilog.unwrap().gfm.to_string(), "hi");
         hi.clear();
     }
+    // fn duplicate_a_value() {
+    //    app might want to clone a value (at some index or under some key)
+    //    and add it again (at a different index or under different key)
+    //    and that will need impl Clone for Value
+    // }
 }

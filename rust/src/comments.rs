@@ -28,14 +28,12 @@ use crate::encoded::Encoded;
 /// assert_eq!(html, "<p>with <del>strikethrough</del> extension</p>");
 /// ```
 
-#[derive(Debug, Ord, PartialOrd, PartialEq, Eq)]
+#[derive(Debug, Ord, PartialOrd, PartialEq, Eq, Clone, Copy)]
 pub struct Comment<'a> {
     pub gfm: Encoded<'a>,
 }
 
 impl<'a> Comment<'a> {
-    #![allow(unused)]
-
     pub fn adopt(gfm: &'a str) -> Option<Self> {
         Some(Comment {
             gfm: Encoded::adopt(gfm),
@@ -84,17 +82,3 @@ impl<'a> Comment<'a> {
         self.gfm.build(indent, marker, into);
     }
 }
-
-// =============================================================================
-// Tests
-// =============================================================================
-
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-
-//     fn visible(string: &str) -> String {
-//         string.replace("╶─▸", "\t").replace("▁▁▎", "\n")
-//     }
-
-// }

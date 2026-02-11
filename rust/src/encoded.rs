@@ -11,7 +11,7 @@
 /// insist that the caller not drop the source of the string slice without first/also
 /// dropping the Comment.
 
-#[derive(Debug, Eq)]
+#[derive(Debug, Eq, Clone, Copy)]
 pub struct Encoded<'a> {
     verbatim: &'a str,
     dedent: usize, // MAX means single-line
@@ -155,10 +155,6 @@ impl<'a> Encoded<'a> {
     }
 }
 
-// =============================================================================
-// Tests
-// =============================================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -183,24 +179,11 @@ mod tests {
 
         Expect(visible("a▁▁▎b"))
             .from(0, "a▁▁▎╶─▸b▁▁▎...")
-            .from(1, "a▁▁▎╶─▸╶─▸b▁▁▎...")
-            .from(2, "a▁▁▎╶─▸╶─▸╶─▸b▁▁▎...");
+            .from(1, "a▁▁▎╶─▸╶─▸b▁▁▎╶─▸...")
+            .from(2, "a▁▁▎╶─▸╶─▸╶─▸b▁▁▎╶─▸╶─▸...");
 
-        // fn test(source: &str, expect: Option<&str>) {
-        //     let actual = Comment::octothorpe(source).map(|x| x.vec());
-        //     assert_eq!(actual, expect.map(|x| x.split("\n").collect()));
-        // }
-        // test("...", None);
-        // test("\t...", None);
-        // test("\n#X", None); // line ends before the comment
-        //
-        // test("#C", Some("C"));
-        // test("#C\n...", Some("C"));
-        // test("\t\t#C", Some("C")); // indent == 2
-        // test("#C\n#D", Some("C")); // D is its own Comment
-        //
-        // test("#A\n\tB", Some("A\nB")); // continued by indenting more
-        // test("#A\n\tB\nX", Some("A\nB")); // stopped by dedent
-        // test("\t\t\t#A\n\t\t\t\t\t\tB", Some("A\n\t\tB")); // tabs within
+        Expect(visible("a▁▁▎╶─▸b"))
+            .from(0, "a▁▁▎╶─▸╶─▸b▁▁▎...")
+            .from(1, "a▁▁▎╶─▸╶─▸╶─▸b▁▁▎╶─▸...");
     }
 }

@@ -1,5 +1,3 @@
-#![allow(unused)]
-
 use crate::values::{Dict, List, Text, Value};
 use std::fmt;
 
@@ -94,6 +92,7 @@ impl Path {
                 (Step::Dict(lookup), Value::Dict(dict)) => dict
                     .map
                     .get(lookup)
+                    .map(|kv| &kv.1)
                     .ok_or(PathErr::some(passed, "Dict missing key", step)),
                 (_, Value::Text(_)) => Err(PathErr::some(passed, "Text", step)),
                 (_, Value::List(_)) => Err(PathErr::some(passed, "List", step)),
@@ -116,6 +115,7 @@ impl Path {
                 (Step::Dict(lookup), Value::Dict(dict)) => dict
                     .map
                     .get_mut(lookup)
+                    .map(|kv| &mut kv.1)
                     .ok_or(PathErr::some(passed, "Dict missing key", step)),
                 (_, Value::Text(_)) => Err(PathErr::some(passed, "Text", step)),
                 (_, Value::List(_)) => Err(PathErr::some(passed, "List", step)),
@@ -176,8 +176,8 @@ impl fmt::Display for Path {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for step in self.steps {
             match step {
-                Step::List(index) => write!(f, "[{}]", index),
-                Step::Dict(lookup) => write!(f, ".{}", lookup),
+                Step::List(index) => write!(f, "[{}]", index)?,
+                Step::Dict(lookup) => write!(f, ".{}", lookup)?,
             };
         }
         Ok(())

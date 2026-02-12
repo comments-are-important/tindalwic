@@ -4,9 +4,9 @@ use std::fmt;
 /// an [Err] [Result] for path resolution
 #[derive(Debug, Clone)]
 pub struct PathErr {
-    good: &'static [Step],
+    good: &'static [PathStep],
     have: &'static str,
-    fail: Option<&'static Step>,
+    fail: Option<&'static PathStep>,
 }
 
 impl fmt::Display for PathErr {
@@ -33,14 +33,14 @@ impl fmt::Display for PathErr {
     }
 }
 impl PathErr {
-    fn some(good: &'static [Step], have: &'static str, fail: &'static Step) -> Self {
+    fn some(good: &'static [PathStep], have: &'static str, fail: &'static PathStep) -> Self {
         PathErr {
             good,
             have,
             fail: Some(fail),
         }
     }
-    fn none(good: &'static [Step], have: &'static str) -> Self {
+    fn none(good: &'static [PathStep], have: &'static str) -> Self {
         PathErr {
             good,
             have,
@@ -51,32 +51,32 @@ impl PathErr {
 
 /// a single step in a [Path]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Step {
+pub enum PathStep {
     /// an index into a linear array
     List(usize),
     /// the key into an associative array
     Dict(&'static str),
 }
 
-impl From<usize> for Step {
+impl From<usize> for PathStep {
     fn from(value: usize) -> Self {
-        Step::List(value)
+        PathStep::List(value)
     }
 }
-impl From<&'static str> for Step {
+impl From<&'static str> for PathStep {
     fn from(value: &'static str) -> Self {
-        Step::Dict(value)
+        PathStep::Dict(value)
     }
 }
 
 /// one or more [Step]s
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Path {
-    steps: &'static [Step],
+    steps: &'static [PathStep],
 }
 
-impl From<&'static [Step]> for Path {
-    fn from(steps: &'static [Step]) -> Self {
+impl From<&'static [PathStep]> for Path {
+    fn from(steps: &'static [PathStep]) -> Self {
         if steps.is_empty() {
             panic!("need at least one step")
         }
@@ -91,11 +91,11 @@ impl Path {
         let mut passed = &self.steps[0..0];
         for step in self.steps {
             value = match (step, value) {
-                (Step::List(index), Value::List(list)) => list
+                (PathStep::List(index), Value::List(list)) => list
                     .vec
                     .get(*index)
                     .ok_or(PathErr::some(passed, "List too short", step)),
-                (Step::Dict(lookup), Value::Dict(dict)) => dict
+                (PathStep::Dict(lookup), Value::Dict(dict)) => dict
                     .find(lookup)
                     .map(|k| &k.value)
                     .ok_or(PathErr::some(passed, "Dict missing key", step)),
@@ -114,11 +114,11 @@ impl Path {
         let mut passed = &self.steps[0..0];
         for step in self.steps {
             value = match (step, value) {
-                (Step::List(index), Value::List(list)) => list
+                (PathStep::List(index), Value::List(list)) => list
                     .vec
                     .get_mut(*index)
                     .ok_or(PathErr::some(passed, "List too short", step)),
-                (Step::Dict(lookup), Value::Dict(dict)) => dict
+                (PathStep::Dict(lookup), Value::Dict(dict)) => dict
                     .find_mut(lookup)
                     .map(|k| &mut k.value)
                     .ok_or(PathErr::some(passed, "Dict missing key", step)),
@@ -187,12 +187,26 @@ impl fmt::Display for Path {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for step in self.steps {
             match step {
-                Step::List(index) => write!(f, "[{}]", index)?,
-                Step::Dict(lookup) => write!(f, ".{}", lookup)?,
+                PathStep::List(index) => write!(f, "[{}]", index)?,
+                PathStep::Dict(lookup) => write!(f, ".{}", lookup)?,
             };
         }
         Ok(())
     }
+}
+
+/// build a [Path] from steps
+#[macro_export]
+macro_rules! path {
+    ($($step:tt),+) => {
+        $crate::Path::from(&[$($crate::path!(@step $step)),+][..])
+    };
+    (@step [$n:expr]) => {
+        $crate::PathStep::List($n)
+    };
+    (@step $s:literal) => {
+        $crate::PathStep::Dict($s)
+    };
 }
 
 #[cfg(test)]

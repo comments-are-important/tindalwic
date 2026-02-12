@@ -1,6 +1,5 @@
 use crate::comments::Comment;
 use crate::encoded::Encoded;
-use super::Keyed;
 
 /// the fields of a [Value::Text]
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
@@ -74,6 +73,21 @@ impl<'a> List<'a> {
     }
 }
 
+/// an association.
+///
+/// for performance reasons these are stored in a [Vec].
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
+pub struct Keyed<'a> {
+    /// the key being associated to the value.
+    pub key: &'a str,
+    /// a key can have a blank line before it (before its comment)
+    pub gap: bool,
+    /// a key can have a comment before it (after its blank line).
+    pub before: Option<Comment<'a>>,
+    /// the value associated to the key
+    pub value: Value<'a>,
+}
+
 /// the fields of a [Value::Dict]
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct Dict<'a> {
@@ -85,8 +99,44 @@ pub struct Dict<'a> {
     pub epilog: Option<Comment<'a>>,
 }
 
-impl<'a> Dict<'a>{
-impl_keyed_vec!();
+macro_rules! impl_keyed_vec {
+    () => {
+        /// returns number of entries.
+        pub fn len(&self) -> usize {
+            self.vec.len()
+        }
+        /// returns the position of the entry with the given key.
+        pub fn position(&self, key: &str) -> Option<usize> {
+            self.vec.iter().position(|x| x.key == key)
+        }
+        /// returns a reference to the entry with the given key.
+        pub fn find(&self, key: &str) -> Option<&Keyed<'a>> {
+            self.position(key).map(|i| &self.vec[i])
+        }
+        /// returns a mutable reference to the entry with the given key.
+        pub fn find_mut(&mut self, key: &str) -> Option<&mut Keyed<'a>> {
+            self.position(key).map(|i| &mut self.vec[i])
+        }
+        /// append the given entry to the end of the vec.
+        pub fn push(&mut self, keyed: Keyed<'a>) {
+            self.vec.push(keyed);
+        }
+        pub(crate) fn encode_keyed(&self, indent: usize, into: &mut String) {
+            for keyed in &self.vec {
+                if keyed.gap {
+                    into.push('\n');
+                }
+                if let Some(before) = keyed.before {
+                    before.encode(indent, "//", into);
+                }
+                keyed.value.encode(indent, Some(&keyed), into);
+            }
+        }
+    };
+}
+
+impl<'a> Dict<'a> {
+    impl_keyed_vec!();
     /// write the encoding of this Dict into the given String.
     pub(crate) fn encode(&self, indent: usize, keyed: Option<&Keyed<'a>>, into: &mut String) {
         into.extend(std::iter::repeat_n('\t', indent));

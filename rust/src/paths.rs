@@ -225,7 +225,7 @@ mod tests {
         let list = Value::List(List::adopt(vec![inner]));
 
         let resolved = path!([0]).text(&list).unwrap();
-        assert_eq!(resolved.utf8.to_string(), "hello");
+        assert_eq!(resolved.to_string(), "hello");
     }
 
     #[test]

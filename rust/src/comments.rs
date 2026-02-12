@@ -1,4 +1,3 @@
-use crate::encoded::Encoded;
 
 /// Metadata about a Value or a File.
 ///
@@ -21,25 +20,145 @@ use crate::encoded::Encoded;
 /// ```
 /// let comment = tindalwic::Comment::adopt("with ~strikethrough~ extension");
 ///
-/// let html = markdown::to_html_with_options(&comment.unwrap().gfm.to_string(), &markdown::Options::gfm())
+/// let html = markdown::to_html_with_options(&comment.to_string(), &markdown::Options::gfm())
 ///   .expect("should never error, according to:
 ///      https://docs.rs/markdown/latest/markdown/fn.to_html_with_options.html#errors");
 ///
 /// assert_eq!(html, "<p>with <del>strikethrough</del> extension</p>");
 /// ```
 
-#[derive(Debug, Ord, PartialOrd, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Ord, PartialOrd, PartialEq, Eq, Clone, Copy, Default)]
 pub struct Comment<'a> {
-    /// the encoded content (Github Flavored Markdown)
-    pub gfm: Encoded<'a>,
+    encoded: &'a str,
+    dedent: usize, // MAX means single-line
+}
+
+macro_rules! impl_encoded_dedent {
+    () => {
+        /// Returns an [Iterator] over the lines (without newline chars).
+        ///
+        /// This is the most efficient way to access the content. No UTF-8 bytes are moved,
+        /// the returned slices simply skip past the indentation TAB chars.
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// let comment = tindalwic::Comment::adopt("zero\none\ntwo");
+        /// let expect = ["zero", "one", "two"];
+        /// for (index, line) in comment.lines().enumerate() {
+        ///     assert_eq!(line, expect[index]);
+        /// }
+        /// ```
+        pub fn lines(&self) -> impl Iterator<Item = &'a str> {
+            // that return type is very tricky to satisfy: having two branches here (one
+            // optimized for absent indentation) causes E0308 incompatible types:
+            //   "distinct uses of `impl Trait` result in different opaque types"
+            // attempting to hide them behind closures does not help either:
+            //   "no two closures, even if identical, have the same type"
+            let d = if self.dedent == usize::MAX {
+                0
+            } else {
+                self.dedent
+            };
+            self.encoded
+                .split('\n')
+                .enumerate()
+                .map(move |(i, s)| if i == 0 || d == 0 { s } else { &s[d..] })
+        }
+
+        /// Gathers the [Self::lines] into a freshly allocated [String].
+        ///
+        /// # Examples
+        ///
+        /// ```
+        /// let utf8 = "zero\none\ntwo";
+        /// let comment = tindalwic::Comment::adopt(utf8);
+        /// assert_eq!(comment.to_string(), utf8);
+        /// ```
+        pub fn to_string(&self) -> String {
+            if self.dedent == 0 || self.dedent == usize::MAX {
+                return String::from(self.encoded);
+            }
+            let mut string = String::new();
+            for line in self.lines() {
+                string.push_str(line);
+                string.push('\n');
+            }
+            if string.len() != 0 {
+                string.truncate(string.len() - 1);
+            }
+            string
+        }
+
+        /// Constructor from a string slice.
+        pub fn adopt(utf8: &'a str) -> Self {
+            Self {
+                encoded: utf8,
+                dedent: if utf8.contains('\n') { 0 } else { usize::MAX },
+                ..Default::default()
+            }
+        }
+
+        pub(crate) fn parse(source: &'a str, indent: usize) -> Self {
+            let bytes = source.as_bytes();
+            let mut newlines = 0usize;
+            let indent = indent + 1;
+            let mut cursor = 0;
+            'outer: while cursor < bytes.len() {
+                if bytes[cursor] != b'\n' {
+                    cursor += 1;
+                    continue;
+                }
+                if cursor + indent >= bytes.len() {
+                    break;
+                }
+                for offset in 0..indent {
+                    if bytes[cursor + 1 + offset] != b'\t' {
+                        break 'outer;
+                    }
+                }
+                cursor += 1 + indent;
+                newlines += 1;
+            }
+            Self {
+                encoded: &source[..cursor],
+                dedent: if newlines == 0 { usize::MAX } else { indent },
+                ..Default::default()
+            }
+        }
+
+        /// write the encoding of this Comment into the given String.
+        pub(crate) fn encode_utf8(&self, indent: usize, marker: &'static str, into: &mut String) {
+            into.extend(std::iter::repeat_n('\t', indent));
+            into.push_str(marker);
+            let indent = indent + 1;
+            if indent == self.dedent || self.dedent == usize::MAX {
+                into.push_str(self.encoded);
+                into.push('\n');
+            } else {
+                let mut lines = self.lines();
+                let Some(first) = lines.next() else {
+                    into.push('\n');
+                    return;
+                };
+                into.push_str(first);
+                into.push('\n');
+                for line in lines {
+                    into.extend(std::iter::repeat_n('\t', indent));
+                    into.push_str(&line[self.dedent..]);
+                    into.push('\n');
+                }
+            }
+        }
+    };
 }
 
 impl<'a> Comment<'a> {
-    /// wrap a reference to content into a Comment
-    pub fn adopt(gfm: &'a str) -> Option<Self> {
-        Some(Comment {
-            gfm: Encoded::adopt(gfm),
-        })
+    impl_encoded_dedent!();
+
+    /// adopt and wrap into [Option::Some].
+    pub fn some(utf8:&'a str) -> Option<Self> {
+        Some(Comment::adopt(utf8))
     }
 
     /// Attempt to parse a `#` Comment.
@@ -54,9 +173,7 @@ impl<'a> Comment<'a> {
         if indent >= source.len() || source.as_bytes()[indent] != b'#' {
             None
         } else {
-            Some(Comment {
-                gfm: Encoded::parse(&source[indent + 1..], indent),
-            })
+            Some(Comment::parse(&source[indent + 1..], indent))
         }
     }
 
@@ -73,14 +190,8 @@ impl<'a> Comment<'a> {
         if indent + 1 >= source.len() || bytes[indent] != b'/' || bytes[indent + 1] != b'/' {
             None
         } else {
-            Some(Comment {
-                gfm: Encoded::parse(&source[indent + 2..], indent),
-            })
+            Some(Comment::parse(&source[indent + 2..], indent))
         }
     }
 
-    /// write the encoding of this Comment into the given String.
-    pub(crate) fn encode(&self, indent: usize, marker: &'static str, into: &mut String) {
-        self.gfm.encode(indent, marker, into);
-    }
 }

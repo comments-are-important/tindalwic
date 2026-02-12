@@ -50,7 +50,7 @@ impl<'a> Encoded<'a> {
     /// ```
     /// let comment = tindalwic::Comment::adopt("zero\none\ntwo");
     /// let expect = ["zero", "one", "two"];
-    /// for (index, line) in comment.unwrap().gfm.lines().enumerate() {
+    /// for (index, line) in comment.lines().enumerate() {
     ///     assert_eq!(line, expect[index]);
     /// }
     /// ```
@@ -78,7 +78,7 @@ impl<'a> Encoded<'a> {
     /// ```
     /// let utf8 = "zero\none\ntwo";
     /// let comment = tindalwic::Comment::adopt(utf8);
-    /// assert_eq!(comment.unwrap().gfm.to_string(), utf8);
+    /// assert_eq!(comment.to_string(), utf8);
     /// ```
     pub fn to_string(&self) -> String {
         if self.dedent == 0 || self.dedent == usize::MAX {

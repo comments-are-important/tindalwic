@@ -1,8 +1,8 @@
 #![warn(missing_docs)] //, unused
 //! Text in Nested Dicts and Lists - with Important Comments
 
+#[macro_use]
 mod comments;
-mod encoded;
 #[macro_use]
 mod paths;
 #[macro_use]
@@ -31,10 +31,10 @@ impl<'a> File<'a> {
     pub fn encode(&self, into: &mut String) {
         into.clear();
         if let Some(hashbang) = self.hashbang {
-            hashbang.encode(0, "#!", into);
+            hashbang.encode_utf8(0, "#!", into);
         }
         if let Some(prolog) = self.prolog {
-            prolog.encode(0, "#", into);
+            prolog.encode_utf8(0, "#", into);
         }
         self.encode_keyed(0, into);
     }
@@ -80,19 +80,15 @@ mod test {
     #[test]
     fn encode_fully_commented_file() {
         let mut file = File {
-            hashbang: Comment::adopt("/usr/bin/env -S app argument"),
-            prolog: Comment::adopt(" this is the prolog for the file"),
+            hashbang: Comment::some("/usr/bin/env -S app argument"),
+            prolog: Comment::some(" this is the prolog for the file"),
             ..Default::default()
         };
         file.push(Keyed {
             key: "one",
             gap: true,
-            before: Comment::adopt(" about key one"),
-            value: Value::Text(Text {
-                utf8: encoded::Encoded::adopt("one"),
-                epilog: Comment::adopt(" about value one"),
-                ..Default::default()
-            }),
+            before: Comment::some(" about key one"),
+            value: Value::Text(Text::commented("one", " about value one")),
             ..Default::default()
         });
         assert_eq!(

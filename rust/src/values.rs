@@ -1,22 +1,24 @@
 use crate::comments::Comment;
-use crate::encoded::Encoded;
 
 /// the fields of a [Value::Text]
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct Text<'a> {
-    /// the encoded UTF-8 content
-    pub utf8: Encoded<'a>,
+    encoded: &'a str,
+    dedent: usize, // MAX means single-line
     /// a Text Value can have a Comment after it
     pub epilog: Option<Comment<'a>>,
 }
 impl<'a> Text<'a> {
-    /// wrap a reference to content into a Text
-    pub fn adopt(utf8: &'a str) -> Self {
+    impl_encoded_dedent!();
+
+    /// construct a fully commented Text.
+    pub fn commented(utf8:&'a str, epilog:&'a str) -> Self {
         Text {
-            utf8: Encoded::adopt(utf8),
-            epilog: None,
+            epilog: Comment::some(epilog),
+            ..Text::adopt(utf8)
         }
     }
+
     /// write the encoding of this Text into the given String.
     pub(crate) fn encode(&self, indent: usize, keyed: Option<&Keyed<'a>>, into: &mut String) {
         into.extend(std::iter::repeat_n('\t', indent));
@@ -26,9 +28,9 @@ impl<'a> Text<'a> {
         }
         into.push_str(">\n");
         let indent = indent + 1;
-        self.utf8.encode(indent, "", into);
+        self.encode_utf8(indent, "", into);
         if let Some(epilog) = self.epilog {
-            epilog.encode(indent, "#", into);
+            epilog.encode_utf8(indent, "#", into);
         }
     }
 }
@@ -62,13 +64,13 @@ impl<'a> List<'a> {
         into.push_str("]\n");
         let indent = indent + 1;
         if let Some(prolog) = self.prolog {
-            prolog.encode(indent, "#", into);
+            prolog.encode_utf8(indent, "#", into);
         }
         for item in &self.vec {
             item.encode(indent, None, into);
         }
         if let Some(epilog) = self.epilog {
-            epilog.encode(indent, "#", into);
+            epilog.encode_utf8(indent, "#", into);
         }
     }
 }
@@ -127,7 +129,7 @@ macro_rules! impl_keyed_vec {
                     into.push('\n');
                 }
                 if let Some(before) = keyed.before {
-                    before.encode(indent, "//", into);
+                    before.encode_utf8(indent, "//", into);
                 }
                 keyed.value.encode(indent, Some(&keyed), into);
             }
@@ -147,11 +149,11 @@ impl<'a> Dict<'a> {
         into.push_str("}\n");
         let indent = indent + 1;
         if let Some(prolog) = self.prolog {
-            prolog.encode(indent, "#", into);
+            prolog.encode_utf8(indent, "#", into);
         }
         self.encode_keyed(indent, into);
         if let Some(epilog) = self.epilog {
-            epilog.encode(indent, "#", into);
+            epilog.encode_utf8(indent, "#", into);
         }
     }
 }
@@ -193,11 +195,11 @@ mod tests {
     fn zzz() {
         let mut hi = String::from("hi");
         let mut text = Text::adopt(&hi);
-        text.epilog = Comment::adopt("comment");
+        text.epilog = Comment::some("comment");
         let mut root = Value::List(List::adopt(vec![Value::Text(text)]));
         //hi.clear(); // won't compile
         let result = path!([0]).text_mut(&mut root).unwrap();
-        result.epilog = Comment::adopt("changed");
+        result.epilog = Comment::some("changed");
         //assert_eq!(text.epilog.unwrap().gfm.to_string(), "hi");
         hi.clear();
     }

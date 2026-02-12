@@ -1,7 +1,7 @@
 use crate::comments::Comment;
 
 /// the fields of a [Value::Text]
-#[derive(Debug, PartialEq, Eq, Clone, Default)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Text<'a> {
     encoded: &'a str,
     dedent: usize, // MAX means single-line
@@ -9,14 +9,13 @@ pub struct Text<'a> {
     pub epilog: Option<Comment<'a>>,
 }
 impl<'a> Text<'a> {
-    impl_encoded_dedent!();
+    impl_encoded_dedent!(epilog:None);
 
     /// construct a fully commented Text.
     pub fn commented(utf8:&'a str, epilog:&'a str) -> Self {
-        Text {
-            epilog: Comment::some(epilog),
-            ..Text::adopt(utf8)
-        }
+        let mut text = Text::adopt(utf8);
+        text.epilog = Comment::some(epilog);
+        text
     }
 
     /// write the encoding of this Text into the given String.
@@ -172,7 +171,7 @@ pub enum Value<'a> {
 /// an empty Text value
 impl Default for Value<'static> {
     fn default() -> Self {
-        Value::Text(Text::default())
+        Value::Text(Text::adopt(""))
     }
 }
 

@@ -34,7 +34,7 @@ pub struct Comment<'a> {
 }
 
 macro_rules! impl_encoded_dedent {
-    () => {
+    ( $( $field:ident : $value:expr )? ) => {
         /// Returns an [Iterator] over the lines (without newline chars).
         ///
         /// This is the most efficient way to access the content. No UTF-8 bytes are moved,
@@ -95,7 +95,7 @@ macro_rules! impl_encoded_dedent {
             Self {
                 encoded: utf8,
                 dedent: if utf8.contains('\n') { 0 } else { usize::MAX },
-                ..Default::default()
+                $( $field: $value, )?
             }
         }
 
@@ -103,7 +103,7 @@ macro_rules! impl_encoded_dedent {
             let bytes = source.as_bytes();
             let mut newlines = 0usize;
             let indent = indent + 1;
-            let mut cursor = 0;
+            let mut cursor = 0usize;
             'outer: while cursor < bytes.len() {
                 if bytes[cursor] != b'\n' {
                     cursor += 1;
@@ -123,7 +123,7 @@ macro_rules! impl_encoded_dedent {
             Self {
                 encoded: &source[..cursor],
                 dedent: if newlines == 0 { usize::MAX } else { indent },
-                ..Default::default()
+                $( $field: $value, )?
             }
         }
 

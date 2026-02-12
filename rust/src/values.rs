@@ -1,9 +1,9 @@
 use crate::comments::Comment;
 use crate::encoded::Encoded;
-use crate::maps::{Keyed, Map};
+use super::Keyed;
 
 /// the fields of a [Value::Text]
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct Text<'a> {
     /// the encoded UTF-8 content
     pub utf8: Encoded<'a>,
@@ -19,7 +19,7 @@ impl<'a> Text<'a> {
         }
     }
     /// write the encoding of this Text into the given String.
-    pub fn build(&self, indent: usize, keyed: Option<&Keyed<'a>>, into: &mut String) {
+    pub(crate) fn encode(&self, indent: usize, keyed: Option<&Keyed<'a>>, into: &mut String) {
         into.extend(std::iter::repeat_n('\t', indent));
         into.push('<');
         if let Some(keyed) = keyed {
@@ -27,15 +27,15 @@ impl<'a> Text<'a> {
         }
         into.push_str(">\n");
         let indent = indent + 1;
-        self.utf8.build(indent, "", into);
+        self.utf8.encode(indent, "", into);
         if let Some(epilog) = self.epilog {
-            epilog.build(indent, "#", into);
+            epilog.encode(indent, "#", into);
         }
     }
 }
 
 /// the fields of a [Value::List]
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct List<'a> {
     /// the items contained in the List
     pub vec: Vec<Value<'a>>,
@@ -54,7 +54,7 @@ impl<'a> List<'a> {
         }
     }
     /// write the encoding of this List into the given String.
-    pub fn build(&self, indent: usize, keyed: Option<&Keyed<'a>>, into: &mut String) {
+    pub(crate) fn encode(&self, indent: usize, keyed: Option<&Keyed<'a>>, into: &mut String) {
         into.extend(std::iter::repeat_n('\t', indent));
         into.push('[');
         if let Some(keyed) = keyed {
@@ -63,30 +63,32 @@ impl<'a> List<'a> {
         into.push_str("]\n");
         let indent = indent + 1;
         if let Some(prolog) = self.prolog {
-            prolog.build(indent, "#", into);
+            prolog.encode(indent, "#", into);
         }
         for item in &self.vec {
-            item.build(indent, None, into);
+            item.encode(indent, None, into);
         }
         if let Some(epilog) = self.epilog {
-            epilog.build(indent, "#", into);
+            epilog.encode(indent, "#", into);
         }
     }
 }
 
 /// the fields of a [Value::Dict]
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct Dict<'a> {
     /// the entries contained in the Dict
-    pub map: Map<'a>,
+    pub vec: Vec<Keyed<'a>>,
     /// a Dict Value can start with a Comment
     pub prolog: Option<Comment<'a>>,
     /// a Dict Value can have a Comment after it
     pub epilog: Option<Comment<'a>>,
 }
+
 impl<'a> Dict<'a>{
+impl_keyed_vec!();
     /// write the encoding of this Dict into the given String.
-    fn build(&self, indent: usize, keyed: Option<&Keyed<'a>>, into: &mut String) {
+    pub(crate) fn encode(&self, indent: usize, keyed: Option<&Keyed<'a>>, into: &mut String) {
         into.extend(std::iter::repeat_n('\t', indent));
         into.push('{');
         if let Some(keyed) = keyed {
@@ -95,19 +97,11 @@ impl<'a> Dict<'a>{
         into.push_str("}\n");
         let indent = indent + 1;
         if let Some(prolog) = self.prolog {
-            prolog.build(indent, "#", into);
+            prolog.encode(indent, "#", into);
         }
-        for keyed in &self.map.vec {
-            if keyed.gap {
-                into.push('\n');
-            }
-            if let Some(before) = keyed.before {
-                before.build(indent, "//", into);
-            }
-            keyed.value.build(indent, Some(&keyed), into);
-        }
+        self.encode_keyed(indent, into);
         if let Some(epilog) = self.epilog {
-            epilog.build(indent, "#", into);
+            epilog.encode(indent, "#", into);
         }
     }
 }
@@ -123,13 +117,20 @@ pub enum Value<'a> {
     Dict(Dict<'a>),
 }
 
+/// an empty Text value
+impl Default for Value<'static> {
+    fn default() -> Self {
+        Value::Text(Text::default())
+    }
+}
+
 impl<'a> Value<'a> {
-    /// write the encoding of this LiValuest into the given String.
-    pub(crate) fn build(&self, indent: usize, keyed: Option<&Keyed<'a>>, into: &mut String) {
+    /// write the encoding of this Value into the given String.
+    pub(crate) fn encode(&self, indent: usize, keyed: Option<&Keyed<'a>>, into: &mut String) {
         match self {
-            Value::Text(text) => text.build(indent, keyed, into),
-            Value::List(list) => list.build(indent, keyed, into),
-            Value::Dict(dict) => dict.build(indent, keyed, into),
+            Value::Text(text) => text.encode(indent, keyed, into),
+            Value::List(list) => list.encode(indent, keyed, into),
+            Value::Dict(dict) => dict.encode(indent, keyed, into),
         }
     }
 }
@@ -137,7 +138,6 @@ impl<'a> Value<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::path;
 
     #[test]
     fn zzz() {

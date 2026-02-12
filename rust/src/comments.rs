@@ -19,7 +19,7 @@ use crate::encoded::Encoded;
 /// # Examples
 ///
 /// ```
-/// let comment = tindalwic::comment("with ~strikethrough~ extension");
+/// let comment = tindalwic::Comment::adopt("with ~strikethrough~ extension");
 ///
 /// let html = markdown::to_html_with_options(&comment.unwrap().gfm.to_string(), &markdown::Options::gfm())
 ///   .expect("should never error, according to:
@@ -80,7 +80,7 @@ impl<'a> Comment<'a> {
     }
 
     /// write the encoding of this Comment into the given String.
-    pub(crate) fn build(&self, indent: usize, marker: &'static str, into: &mut String) {
-        self.gfm.build(indent, marker, into);
+    pub(crate) fn encode(&self, indent: usize, marker: &'static str, into: &mut String) {
+        self.gfm.encode(indent, marker, into);
     }
 }

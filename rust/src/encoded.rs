@@ -11,7 +11,7 @@
 /// insist that the caller not drop the source of the string slice without first/also
 /// dropping the Comment.
 
-#[derive(Debug, Eq, Clone, Copy)]
+#[derive(Debug, Eq, Clone, Copy, Default)]
 pub struct Encoded<'a> {
     verbatim: &'a str,
     dedent: usize, // MAX means single-line
@@ -48,7 +48,7 @@ impl<'a> Encoded<'a> {
     /// # Examples
     ///
     /// ```
-    /// let comment = tindalwic::comment("zero\none\ntwo");
+    /// let comment = tindalwic::Comment::adopt("zero\none\ntwo");
     /// let expect = ["zero", "one", "two"];
     /// for (index, line) in comment.unwrap().gfm.lines().enumerate() {
     ///     assert_eq!(line, expect[index]);
@@ -77,7 +77,7 @@ impl<'a> Encoded<'a> {
     ///
     /// ```
     /// let utf8 = "zero\none\ntwo";
-    /// let comment = tindalwic::comment(utf8);
+    /// let comment = tindalwic::Comment::adopt(utf8);
     /// assert_eq!(comment.unwrap().gfm.to_string(), utf8);
     /// ```
     pub fn to_string(&self) -> String {
@@ -131,7 +131,7 @@ impl<'a> Encoded<'a> {
     }
 
     /// write the encoding of this Comment into the given String.
-    pub(crate) fn build(&self, indent: usize, marker: &'static str, into: &mut String) {
+    pub(crate) fn encode(&self, indent: usize, marker: &'static str, into: &mut String) {
         into.extend(std::iter::repeat_n('\t', indent));
         into.push_str(marker);
         let indent = indent + 1;

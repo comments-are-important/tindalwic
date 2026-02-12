@@ -96,7 +96,6 @@ impl Path {
                     .get(*index)
                     .ok_or(PathErr::some(passed, "List too short", step)),
                 (Step::Dict(lookup), Value::Dict(dict)) => dict
-                    .map
                     .find(lookup)
                     .map(|k| &k.value)
                     .ok_or(PathErr::some(passed, "Dict missing key", step)),
@@ -120,7 +119,6 @@ impl Path {
                     .get_mut(*index)
                     .ok_or(PathErr::some(passed, "List too short", step)),
                 (Step::Dict(lookup), Value::Dict(dict)) => dict
-                    .map
                     .find_mut(lookup)
                     .map(|k| &mut k.value)
                     .ok_or(PathErr::some(passed, "Dict missing key", step)),
@@ -200,7 +198,6 @@ impl fmt::Display for Path {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::path;
 
     #[test]
     fn path_display() {

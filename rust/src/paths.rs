@@ -221,8 +221,8 @@ mod tests {
     #[test]
     fn resolve_list() {
         use crate::values::{List, Text};
-        let inner = Value::Text(Text::adopt("hello"));
-        let list = Value::List(List::adopt(vec![inner]));
+        let inner = Value::Text(Text::from("hello"));
+        let list = Value::List(List::from(vec![inner]));
 
         let resolved = path!([0]).text(&list).unwrap();
         assert_eq!(resolved.to_string(), "hello");
@@ -231,8 +231,8 @@ mod tests {
     #[test]
     fn resolve_failure() {
         use crate::values::{List, Text};
-        let inner = Value::Text(Text::adopt("hello"));
-        let list = Value::List(List::adopt(vec![inner]));
+        let inner = Value::Text(Text::from("hello"));
+        let list = Value::List(List::from(vec![inner]));
 
         path!([5]).value(&list).unwrap_err();
     }

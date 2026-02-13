@@ -15,7 +15,7 @@ pub use values::{Dict, Keyed, List, Text, Value};
 /// the outermost context.
 ///
 /// very similar to a [Dict], just with different comments.
-#[derive(Debug, PartialEq, Eq, Clone, Default)]
+#[derive(Clone, Debug)]
 pub struct File<'a> {
     /// the entries contained in the File
     pub vec: Vec<Keyed<'a>>,
@@ -24,16 +24,26 @@ pub struct File<'a> {
     /// a file can have an introductory Comment
     pub prolog: Option<Comment<'a>>,
 }
+impl<'a> From<Vec<Keyed<'a>>> for File<'a> {
+    /// take ownership of the items
+    fn from(list: Vec<Keyed<'a>>) -> Self {
+        File {
+            vec: list,
+            hashbang: None,
+            prolog: None,
+        }
+    }
+}
 
 impl<'a> File<'a> {
     impl_keyed_vec!();
     /// write the encoding of this File `into` the String (clearing it first).
     pub fn encode(&self, into: &mut String) {
         into.clear();
-        if let Some(hashbang) = self.hashbang {
+        if let Some(hashbang) = &self.hashbang {
             hashbang.encode_utf8(0, "#!", into);
         }
-        if let Some(prolog) = self.prolog {
+        if let Some(prolog) = &self.prolog {
             prolog.encode_utf8(0, "#", into);
         }
         self.encode_keyed(0, into);
@@ -43,6 +53,16 @@ impl<'a> File<'a> {
         let mut bytes = String::new();
         self.encode(&mut bytes);
         bytes
+    }
+    /// add a hashbang Comment.
+    pub fn with_hashbang(mut self, hashbang: &'a str) -> Self {
+        self.hashbang = Comment::some(hashbang);
+        self
+    }
+    /// add a prolog Comment.
+    pub fn with_prolog(mut self, prolog: &'a str) -> Self {
+        self.prolog = Comment::some(prolog);
+        self
     }
 }
 
@@ -57,17 +77,10 @@ mod test {
     #[test]
     fn encode_uncommented_file() {
         assert_eq!(
-            File {
-                vec: vec![Keyed {
-                    key: "one",
-                    value: Value::List(List {
-                        vec: vec![Value::default()],
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                }],
-                ..Default::default()
-            }
+            File::from(vec![Keyed::from(
+                "one",
+                Value::List(List::from(vec![Value::Text(Text::from(""))]))
+            )])
             .tindalwic(),
             visible(
                 "[one]
@@ -79,17 +92,14 @@ mod test {
     }
     #[test]
     fn encode_fully_commented_file() {
-        let mut file = File {
-            hashbang: Comment::some("/usr/bin/env -S app argument"),
-            prolog: Comment::some(" this is the prolog for the file"),
-            ..Default::default()
-        };
+        let mut file = File::from(vec![])
+            .with_hashbang("/usr/bin/env -S app argument")
+            .with_prolog(" this is the prolog for the file");
         file.push(Keyed {
             key: "one",
             gap: true,
             before: Comment::some(" about key one"),
-            value: Value::Text(Text::commented("one", " about value one")),
-            ..Default::default()
+            value: Value::Text(Text::from("one").with_epilog(" about value one")),
         });
         assert_eq!(
             file.tindalwic(),

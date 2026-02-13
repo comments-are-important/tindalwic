@@ -1,23 +1,13 @@
 use crate::comments::Comment;
 
-/// the fields of a [Value::Text]
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Text<'a> {
-    encoded: &'a str,
-    dedent: usize, // MAX means single-line
-    /// a Text Value can have a Comment after it
-    pub epilog: Option<Comment<'a>>,
+encoded_dedent_struct! {
+    /// the fields of a [Value::Text]
+    pub struct Text<'a> {
+        /// a Text Value can have a Comment after it
+        epilog,
+    }
 }
 impl<'a> Text<'a> {
-    impl_encoded_dedent!(epilog:None);
-
-    /// construct a fully commented Text.
-    pub fn commented(utf8:&'a str, epilog:&'a str) -> Self {
-        let mut text = Text::adopt(utf8);
-        text.epilog = Comment::some(epilog);
-        text
-    }
-
     /// write the encoding of this Text into the given String.
     pub(crate) fn encode(&self, indent: usize, keyed: Option<&Keyed<'a>>, into: &mut String) {
         into.extend(std::iter::repeat_n('\t', indent));
@@ -28,14 +18,20 @@ impl<'a> Text<'a> {
         into.push_str(">\n");
         let indent = indent + 1;
         self.encode_utf8(indent, "", into);
-        if let Some(epilog) = self.epilog {
+        if let Some(epilog) = &self.epilog {
             epilog.encode_utf8(indent, "#", into);
         }
+    }
+
+    /// add an epilog Comment.
+    pub fn with_epilog(mut self, epilog: &'a str) -> Self {
+        self.epilog = Comment::some(epilog);
+        self
     }
 }
 
 /// the fields of a [Value::List]
-#[derive(Debug, PartialEq, Eq, Clone, Default)]
+#[derive(Clone, Debug)]
 pub struct List<'a> {
     /// the items contained in the List
     pub vec: Vec<Value<'a>>,
@@ -44,15 +40,17 @@ pub struct List<'a> {
     /// a List Value can have a Comment after it
     pub epilog: Option<Comment<'a>>,
 }
-impl<'a> List<'a> {
+impl<'a> From<Vec<Value<'a>>> for List<'a> {
     /// take ownership of the items
-    pub fn adopt(list: Vec<Value<'a>>) -> Self {
+    fn from(list: Vec<Value<'a>>) -> Self {
         List {
             vec: list,
             prolog: None,
             epilog: None,
         }
     }
+}
+impl<'a> List<'a> {
     /// write the encoding of this List into the given String.
     pub(crate) fn encode(&self, indent: usize, keyed: Option<&Keyed<'a>>, into: &mut String) {
         into.extend(std::iter::repeat_n('\t', indent));
@@ -62,22 +60,34 @@ impl<'a> List<'a> {
         }
         into.push_str("]\n");
         let indent = indent + 1;
-        if let Some(prolog) = self.prolog {
+        if let Some(prolog) = &self.prolog {
             prolog.encode_utf8(indent, "#", into);
         }
         for item in &self.vec {
             item.encode(indent, None, into);
         }
-        if let Some(epilog) = self.epilog {
+        if let Some(epilog) = &self.epilog {
             epilog.encode_utf8(indent, "#", into);
         }
+    }
+
+    /// add a prolog Comment.
+    pub fn with_prolog(mut self, prolog: &'a str) -> Self {
+        self.prolog = Comment::some(prolog);
+        self
+    }
+
+    /// add an epilog Comment.
+    pub fn with_epilog(mut self, epilog: &'a str) -> Self {
+        self.epilog = Comment::some(epilog);
+        self
     }
 }
 
 /// an association.
 ///
 /// for performance reasons these are stored in a [Vec].
-#[derive(Debug, PartialEq, Eq, Clone, Default)]
+#[derive(Clone, Debug)]
 pub struct Keyed<'a> {
     /// the key being associated to the value.
     pub key: &'a str,
@@ -88,9 +98,19 @@ pub struct Keyed<'a> {
     /// the value associated to the key
     pub value: Value<'a>,
 }
+impl<'a> Keyed<'a> {
+    pub fn from(key:&'a str, value: Value<'a>) -> Self {
+        Keyed {
+            key,
+            gap: false,
+            before: None,
+            value,
+        }
+    }
+}
 
 /// the fields of a [Value::Dict]
-#[derive(Debug, PartialEq, Eq, Clone, Default)]
+#[derive(Clone, Debug)]
 pub struct Dict<'a> {
     /// the entries contained in the Dict
     pub vec: Vec<Keyed<'a>>,
@@ -100,6 +120,16 @@ pub struct Dict<'a> {
     pub epilog: Option<Comment<'a>>,
 }
 
+impl<'a> From<Vec<Keyed<'a>>> for Dict<'a> {
+    /// take ownership of the items
+    fn from(list: Vec<Keyed<'a>>) -> Self {
+        Dict {
+            vec: list,
+            prolog: None,
+            epilog: None,
+        }
+    }
+}
 macro_rules! impl_keyed_vec {
     () => {
         /// returns number of entries.
@@ -127,7 +157,7 @@ macro_rules! impl_keyed_vec {
                 if keyed.gap {
                     into.push('\n');
                 }
-                if let Some(before) = keyed.before {
+                if let Some(before) = &keyed.before {
                     before.encode_utf8(indent, "//", into);
                 }
                 keyed.value.encode(indent, Some(&keyed), into);
@@ -147,18 +177,30 @@ impl<'a> Dict<'a> {
         }
         into.push_str("}\n");
         let indent = indent + 1;
-        if let Some(prolog) = self.prolog {
+        if let Some(prolog) = &self.prolog {
             prolog.encode_utf8(indent, "#", into);
         }
         self.encode_keyed(indent, into);
-        if let Some(epilog) = self.epilog {
+        if let Some(epilog) = &self.epilog {
             epilog.encode_utf8(indent, "#", into);
         }
+    }
+
+    /// add a prolog Comment.
+    pub fn with_prolog(mut self, prolog: &'a str) -> Self {
+        self.prolog = Comment::some(prolog);
+        self
+    }
+
+    /// add an epilog Comment.
+    pub fn with_epilog(mut self, epilog: &'a str) -> Self {
+        self.epilog = Comment::some(epilog);
+        self
     }
 }
 
 /// the three possible Value types
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, Clone)]
 pub enum Value<'a> {
     /// a [Text] value holds UTF-8 content
     Text(Text<'a>),
@@ -166,13 +208,6 @@ pub enum Value<'a> {
     List(List<'a>),
     /// a [Dict] value is an associative array of Keyed values
     Dict(Dict<'a>),
-}
-
-/// an empty Text value
-impl Default for Value<'static> {
-    fn default() -> Self {
-        Value::Text(Text::adopt(""))
-    }
 }
 
 impl<'a> Value<'a> {
@@ -193,9 +228,9 @@ mod tests {
     #[test]
     fn zzz() {
         let mut hi = String::from("hi");
-        let mut text = Text::adopt(&hi);
+        let mut text = Text::from(&hi[..]);
         text.epilog = Comment::some("comment");
-        let mut root = Value::List(List::adopt(vec![Value::Text(text)]));
+        let mut root = Value::List(List::from(vec![Value::Text(text)]));
         //hi.clear(); // won't compile
         let result = path!([0]).text_mut(&mut root).unwrap();
         result.epilog = Comment::some("changed");

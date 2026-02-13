@@ -12,31 +12,19 @@ pub use comments::Comment;
 pub use paths::{Path, PathErr, PathStep};
 pub use values::{Dict, Keyed, List, Text, Value};
 
-/// the outermost context.
-///
-/// very similar to a [Dict], just with different comments.
-#[derive(Clone, Debug)]
-pub struct File<'a> {
-    /// the entries contained in the File
-    pub vec: Vec<Keyed<'a>>,
-    /// a File can start with a Unix `#!` comment
-    pub hashbang: Option<Comment<'a>>,
-    /// a file can have an introductory Comment
-    pub prolog: Option<Comment<'a>>,
-}
-impl<'a> From<Vec<Keyed<'a>>> for File<'a> {
-    /// take ownership of the items
-    fn from(list: Vec<Keyed<'a>>) -> Self {
-        File {
-            vec: list,
-            hashbang: None,
-            prolog: None,
-        }
+keyed_vec_struct!{
+    /// the outermost context.
+    ///
+    /// very similar to a [Dict], just with different comments.
+    pub struct File<'a> {
+        /// a File can start with a Unix `#!` comment
+        hashbang,
+        /// a file can have an introductory Comment
+        prolog,
     }
 }
 
 impl<'a> File<'a> {
-    impl_keyed_vec!();
     /// write the encoding of this File `into` the String (clearing it first).
     pub fn encode(&self, into: &mut String) {
         into.clear();

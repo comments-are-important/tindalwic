@@ -1,4 +1,4 @@
-macro_rules! encoded_dedent_struct {
+macro_rules! encoded_utf8_struct {
     {
         $(#[$struct_meta:meta])*
         $vis:vis struct $name:ident<$lifetime:lifetime> {
@@ -21,26 +21,6 @@ macro_rules! encoded_dedent_struct {
                 }
             }
         }
-        // impl<$lifetime> Ord for $name<$lifetime> {
-        //     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        //         if self.dedent == other.dedent {
-        //             self.encoded.cmp(other.encoded)
-        //         } else {
-        //             self.lines().cmp(other.lines())
-        //         }
-        //     }
-        // }
-        // impl<$lifetime> PartialOrd for $name<$lifetime> {
-        //     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        //         Some(self.cmp(other))
-        //     }
-        // }
-        // impl<$lifetime> PartialEq for $name<$lifetime> {
-        //     fn eq(&self, other: &Self) -> bool {
-        //         self.cmp(other) == std::cmp::Ordering::Equal
-        //     }
-        // }
-        // impl<$lifetime> Eq for $name<$lifetime> {}
         impl<$lifetime> $name<$lifetime> {
 
             /// Returns an [Iterator] over the lines (without newline chars).
@@ -58,7 +38,7 @@ macro_rules! encoded_dedent_struct {
             ///     assert_eq!(line, expect[index]);
             /// }
             /// ```
-            pub fn lines(&self) -> impl Iterator<Item = &'a str> {
+            pub fn lines(&self) -> impl Iterator<Item = &$lifetime str> {
                 // that return type is very tricky to satisfy: having two branches here (one
                 // optimized for absent indentation) causes E0308 incompatible types:
                 //   "distinct uses of `impl Trait` result in different opaque types"
@@ -99,7 +79,7 @@ macro_rules! encoded_dedent_struct {
                 string
             }
 
-            pub(crate) fn parse_utf8(source: &'a str, indent: usize) -> Self {
+            pub(crate) fn parse_utf8(source: &$lifetime str, indent: usize) -> Self {
                 let bytes = source.as_bytes();
                 let mut newlines = 0usize;
                 let indent = indent + 1;
@@ -154,7 +134,7 @@ macro_rules! encoded_dedent_struct {
     };
 }
 
-encoded_dedent_struct! {
+encoded_utf8_struct! {
     /// Metadata about a Value or a File.
     ///
     /// The content is UTF-8 Github Flavored Markdown and kept in the encoded form. The
@@ -186,10 +166,11 @@ encoded_dedent_struct! {
 }
 
 impl<'a> Comment<'a> {
-    /// instantiate into [Option::Some].
-    pub fn some(utf8: &'a str) -> Option<Self> {
-        Some(Comment::from(utf8))
-    }
+        /// instantiate into [Option::Some].
+        pub fn some(utf8: &'a str) -> Option<Self> {
+            Some(Comment::from(utf8))
+        }
+
 
     /// Attempt to parse a `#` Comment.
     ///

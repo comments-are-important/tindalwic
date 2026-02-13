@@ -1,12 +1,13 @@
 use crate::comments::Comment;
 
-encoded_dedent_struct! {
+encoded_utf8_struct! {
     /// the fields of a [Value::Text]
     pub struct Text<'a> {
         /// a Text Value can have a Comment after it
-        epilog,
+        epilog
     }
 }
+
 impl<'a> Text<'a> {
     /// write the encoding of this Text into the given String.
     pub(crate) fn encode(&self, indent: usize, keyed: Option<&Keyed<'a>>, into: &mut String) {
@@ -41,7 +42,7 @@ pub struct List<'a> {
     pub epilog: Option<Comment<'a>>,
 }
 impl<'a> From<Vec<Value<'a>>> for List<'a> {
-    /// take ownership of the items
+    /// convert a vector of items into a List.
     fn from(list: Vec<Value<'a>>) -> Self {
         List {
             vec: list,
@@ -99,6 +100,7 @@ pub struct Keyed<'a> {
     pub value: Value<'a>,
 }
 impl<'a> Keyed<'a> {
+    /// convert a key and a value into an entry (for a Dict).
     pub fn from(key:&'a str, value: Value<'a>) -> Self {
         Keyed {
             key,
@@ -109,65 +111,76 @@ impl<'a> Keyed<'a> {
     }
 }
 
-/// the fields of a [Value::Dict]
-#[derive(Clone, Debug)]
-pub struct Dict<'a> {
-    /// the entries contained in the Dict
-    pub vec: Vec<Keyed<'a>>,
-    /// a Dict Value can start with a Comment
-    pub prolog: Option<Comment<'a>>,
-    /// a Dict Value can have a Comment after it
-    pub epilog: Option<Comment<'a>>,
-}
-
-impl<'a> From<Vec<Keyed<'a>>> for Dict<'a> {
-    /// take ownership of the items
-    fn from(list: Vec<Keyed<'a>>) -> Self {
-        Dict {
-            vec: list,
-            prolog: None,
-            epilog: None,
+macro_rules! keyed_vec_struct {
+    {
+        $(#[$struct_meta:meta])*
+        $vis:vis struct $name:ident<$lifetime:lifetime> {
+            $( $(#[$comment_meta:meta])* $comment:ident ),* $(,)?
         }
-    }
-}
-macro_rules! impl_keyed_vec {
-    () => {
-        /// returns number of entries.
-        pub fn len(&self) -> usize {
-            self.vec.len()
+    } => {
+        $(#[$struct_meta])*
+        #[derive(Clone, Debug)]
+        pub struct $name<$lifetime> {
+            #[doc = concat!("the entries contained in this ", stringify!($name))]
+            pub vec: Vec<Keyed<'a>>,
+            $( $(#[$comment_meta])* $comment: Option<Comment<$lifetime>>, )*
         }
-        /// returns the position of the entry with the given key.
-        pub fn position(&self, key: &str) -> Option<usize> {
-            self.vec.iter().position(|x| x.key == key)
-        }
-        /// returns a reference to the entry with the given key.
-        pub fn find(&self, key: &str) -> Option<&Keyed<'a>> {
-            self.position(key).map(|i| &self.vec[i])
-        }
-        /// returns a mutable reference to the entry with the given key.
-        pub fn find_mut(&mut self, key: &str) -> Option<&mut Keyed<'a>> {
-            self.position(key).map(|i| &mut self.vec[i])
-        }
-        /// append the given entry to the end of the vec.
-        pub fn push(&mut self, keyed: Keyed<'a>) {
-            self.vec.push(keyed);
-        }
-        pub(crate) fn encode_keyed(&self, indent: usize, into: &mut String) {
-            for keyed in &self.vec {
-                if keyed.gap {
-                    into.push('\n');
+        impl<'a> From<Vec<Keyed<'a>>> for $name<'a> {
+            /// convert a [Vec] of entries into a Dict.
+            fn from(entries: Vec<Keyed<'a>>) -> Self {
+                $name {
+                    vec: entries,
+                    $( $comment: None, )*
                 }
-                if let Some(before) = &keyed.before {
-                    before.encode_utf8(indent, "//", into);
+            }
+        }
+        impl<'a> $name<'a> {
+            /// returns number of entries.
+            pub fn len(&self) -> usize {
+                self.vec.len()
+            }
+            /// returns the position of the entry with the given key.
+            pub fn position(&self, key: &str) -> Option<usize> {
+                self.vec.iter().position(|x| x.key == key)
+            }
+            /// returns a reference to the entry with the given key.
+            pub fn find(&self, key: &str) -> Option<&Keyed<'a>> {
+                self.position(key).map(|i| &self.vec[i])
+            }
+            /// returns a mutable reference to the entry with the given key.
+            pub fn find_mut(&mut self, key: &str) -> Option<&mut Keyed<'a>> {
+                self.position(key).map(|i| &mut self.vec[i])
+            }
+            /// append the given entry to the end of the vec.
+            pub fn push(&mut self, keyed: Keyed<'a>) {
+                self.vec.push(keyed);
+            }
+            pub(crate) fn encode_keyed(&self, indent: usize, into: &mut String) {
+                for keyed in &self.vec {
+                    if keyed.gap {
+                        into.push('\n');
+                    }
+                    if let Some(before) = &keyed.before {
+                        before.encode_utf8(indent, "//", into);
+                    }
+                    keyed.value.encode(indent, Some(&keyed), into);
                 }
-                keyed.value.encode(indent, Some(&keyed), into);
             }
         }
     };
 }
 
+keyed_vec_struct!{
+    /// the fields of a [Value::Dict]
+    pub struct Dict<'a> {
+        /// a Dict Value can start with a Comment
+        prolog,
+        /// a Dict Value can have a Comment after it
+        epilog,
+    }
+}
+
 impl<'a> Dict<'a> {
-    impl_keyed_vec!();
     /// write the encoding of this Dict into the given String.
     pub(crate) fn encode(&self, indent: usize, keyed: Option<&Keyed<'a>>, into: &mut String) {
         into.extend(std::iter::repeat_n('\t', indent));
@@ -200,7 +213,7 @@ impl<'a> Dict<'a> {
 }
 
 /// the three possible Value types
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub enum Value<'a> {
     /// a [Text] value holds UTF-8 content
     Text(Text<'a>),

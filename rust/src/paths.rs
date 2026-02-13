@@ -2,7 +2,7 @@ use crate::values::{Dict, List, Text, Value};
 use std::fmt;
 
 /// an [Err] [Result] for path resolution
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct PathErr {
     good: &'static [PathStep],
     have: &'static str,
@@ -50,7 +50,7 @@ impl PathErr {
 }
 
 /// a single step in a [Path]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub enum PathStep {
     /// an index into a linear array
     List(usize),
@@ -70,7 +70,7 @@ impl From<&'static str> for PathStep {
 }
 
 /// one or more [Step]s
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct Path {
     steps: &'static [PathStep],
 }

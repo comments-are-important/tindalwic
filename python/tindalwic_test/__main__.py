@@ -1,19 +1,52 @@
+import pprint
 import sys
+from io import StringIO
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any, TypeVar
 
+from deepdiff import DeepDiff
 from rich.progress import track
 from typer import Typer, Exit, Option
 
-from . import TimedTindalwic, TimedRuamel, unit_tests
-from .equals import diff_any, diff_translate, diff_ruamel
+from . import FileSeparated, TimedTindalwic, unit_tests
+from .ruamel import TimedRuamel
 from .generate import Random
 
+T = TypeVar("T")
 
-def FAILED(message: str):
+
+def diff(was: T, now: T) -> bool:
+    if was == now:
+        return False
+    print()
+    print(DeepDiff(was, now, verbose_level=2).pretty())
+    return True
+
+
+def FAILED(message: str, report: Path | None = None, **files):
     print(f"FAILED {message}", file=sys.stderr)
+    if report:
+        old = set(report.iterdir())
+        for name, contents in files.items():
+            path = report / name.replace('_','.')
+            match contents:
+                case str():
+                    print(f"  {path}")
+                    path.write_text(contents)
+                case bytes():
+                    print(f"  {path}")
+                    path.write_bytes(contents)
+                case _:
+                    print(f"  {path} ??? {type(contents)}")
+            old.discard(path)
+        for it in old:
+            it.unlink()
     raise Exit(code=1)
 
+def pretty(any:Any) -> str:
+    buffer = StringIO()
+    pprint.pprint(any, buffer, 4, 120, sort_dicts=False)
+    return buffer.getvalue()
 
 app = Typer()
 profile_option = Option(
@@ -33,6 +66,12 @@ widest_option = Option(
     help="limit the breadth of generated random data structure",
     min=0,
 )
+failures_option = Option(
+    help="write failure details to this directory",
+    exists=True,
+    dir_okay=True,
+    file_okay=False,
+)
 
 
 @app.command(
@@ -47,6 +86,7 @@ def main(
     loops: Annotated[int, loops_option] = 250,
     deepest: Annotated[int, deepest_option] = 6,
     widest: Annotated[int, widest_option] = 8,
+    failures: Annotated[Path | None, failures_option] = None,
 ):
     if pstats and pstats.exists():
         FAILED(f"won't overwrite: {pstats}")
@@ -54,31 +94,71 @@ def main(
     if unit_tests.problem_count():
         FAILED("unit tests")
 
-    random = Random(deepest=deepest, widest=widest)
-    memory = TimedTindalwic(pstats)
-    ruamel = None if pstats else TimedRuamel(memory)
-
     if loops:
+        random = Random(deepest=deepest, widest=widest, empties=False)
+        memory = TimedTindalwic(pstats)
+        ruamel = None if pstats else TimedRuamel(memory)
+        empties = 0
+
         for loop in track(range(loops)):
-            separated = memory.separated(random.file())
 
-            if diff_any(separated.file, memory.file(separated.python)):
-                FAILED("to python and back")
+            original = memory.separated(random.file())
 
-            with memory.encode(separated.file) as buffer:
-                if diff_any(separated, memory.separated(memory.decode(buffer))):
-                    FAILED("encode then decode")
+            modified_file = memory.file(original.python)
 
-            if ruamel:
-                yaml = ruamel.translate(separated.file)
-                if diff_translate(separated, yaml):
-                    FAILED("YAML translate")
-                if diff_ruamel(yaml, ruamel.roundtrip(yaml)):
-                    FAILED("YAML roundtrip")
+            if diff(original.file, modified_file):
+                FAILED(
+                    "to python and back",
+                    failures,
+                    original_tindalwic=memory.encode(original.file).getvalue(),
+                    original_py = pretty(original.file),
+                    modified_tindalwic=memory.encode(modified_file).getvalue(),
+                    modified_py = pretty(modified_file),
+                )
+
+            encoded = memory.encode(original.file).getvalue()
+            modified = memory.separated(memory.decode(encoded))
+
+            if diff(original, modified) :
+                FAILED("encode then decode",
+                    failures,
+                    original_tindalwic=memory.encode(original.file).getvalue(),
+                    original_py = pretty(original.file),
+                    modified_tindalwic=memory.encode(modified.file).getvalue(),
+                    modified_py = pretty(modified.file),
+                )
+
+            if not ruamel:
+                continue
+            translated = ruamel.translate(original)
+            if not translated:
+                empties += 1
+                continue
+
+            if diff(original.comments, translated.comments):
+                FAILED("translation changed comments",
+                    failures,
+                    original_tindalwic=memory.encode(original.file).getvalue(),
+                    original_yaml = original.yaml,
+                    original_comments = "\n".join(original.comments),
+                    translated_comments="\n".join(translated.comments),
+                )
+
+            roundtrip = ruamel.roundtrip(translated)
+            if diff(translated, roundtrip):
+                FAILED("YAML roundtrip",
+                    failures,
+                    translated_py = pretty(translated.ruamel),
+                    translated_comments="\n".join(translated.comments),
+                    roundtrip_py = pretty(roundtrip.ruamel if roundtrip else None),
+                    roundtrip_comments="\n".join(roundtrip.comments if roundtrip else ()),
+                )
 
         memory.timers()
-        if ruamel:
-            ruamel.timers()
+        if empties == loops:
+            FAILED("all the random data contained empties, no ruamel.yaml timing")
+        elif ruamel:
+            ruamel.timers(empties, loops)
 
 
 if __name__ == "__main__":

@@ -75,13 +75,16 @@ class TestUTF8(TestCase):
     def test_repr(self):
         self.assertEqual(repr(UTF8()), "UTF8()")
         self.assertEqual(repr(Comment(UserString("c"))), "Comment(b'c')")
-        self.assertEqual(repr(Text("1", "2")), r"Text(b'1\n2')")
+        self.assertEqual(repr(Text("1\n2")), r"Text(b'1\n2')")
 
-    def test_normalize(self):
-        text = Text(b"1\n2\n3", bytearray(b"4\n5\n6"), memoryview(b"7\n8\n9"))
-        self.assertEqual(len(text), 3)
-        text.normalize(None)
-        self.assertEqual(len(text), 9)
+    def test_dedent(self):
+        with self.assertValueError("dedent==4 tabs==2"):
+            list(Text(b"\n\t\tnope", 4).lines())
+
+    def test_eq(self):
+        self.assertFalse(UTF8(b"") == "")
+        # not sure about this, maybe they should not be...
+        self.assertTrue(Text(b"tindalwic") == Comment(b"tindalwic"))
 
 
 class TestKey(TestCase):
@@ -122,17 +125,17 @@ class TestIndent(TestCase):
 
 class TestYAML(TestCase):
     def assertEncoded(self, file: File, *lines: bytes) -> None:
-        yaml = b"--- !map\n" + b"\n".join(lines) + b"\n...\n"
+        yaml = b"\n".join(lines) + b"\n"
         self.assertEqual(YAML().encode(file).getvalue(), yaml)
 
     def test_empty_file(self):
-        self.assertEncoded(File(), b"{}")
+        self.assertEncoded(File(), b"{}#")
 
     def test_empty_arrays(self):
-        self.assertEncoded(File(d=Dict(), l=List()), b'"d": {}', b'"l": []')
+        self.assertEncoded(File(d=Dict(), l=List()), b'"d": {}#', b'"l": []#')
 
     def test_empty_text(self):
-        self.assertEncoded(File(t=Text()), b'"t": |2-')
+        self.assertEncoded(File(t=Text()), b'"t": ""')
 
     def test_text_normal(self):
         self.assertEncoded(File(t=Text("one\ntwo")), b'"t": |2-\n  one\n  two')
@@ -156,8 +159,6 @@ class TestMiscAndErrors(TestCase):
     def test_text_repr(self):
         self.assertReprEval("Text()")
         self.assertReprEval("Text(after=Comment(b'a'))")
-        self.assertReprEval("Text(b'')")
-        self.assertReprEval("Text(b'',after=Comment(b'a'))")
         self.assertReprEval("Text(b'1')")
         self.assertReprEval("Text(b'1',after=Comment(b'a'))")
         self.assertReprEval(r"Text(b'1\n2')")
@@ -215,6 +216,14 @@ class TestMiscAndErrors(TestCase):
 
 
 class TestPython(TestCase):
+    def test_bytes(self):
+        value = b"v"
+        self.assertEqual(RAM().file({"k": value}), File(k=Text(b"v")))
+        value = bytearray(value)
+        self.assertEqual(RAM().file({"k": value}), File(k=Text(b"v")))
+        value = memoryview(value)
+        self.assertEqual(RAM().file({"k": value}), File(k=Text(b"v")))
+
     def test_impossible_none_no_error(self):
         with self.assertAssertionError("impossible: got None, but no error"):
             Impossible(None).python(File())
@@ -267,13 +276,6 @@ class TestFile(TestCase):
 
 
 class TestEncode(TestCase):
-    def test_denormalized(self):
-        text = Text("")
-        text.comment_after = Comment()
-        text.comment_after.append(b"")  # now it is not normalized
-        with RAM().encode(File(k=text)) as buffer:
-            self.assertEqual(buffer.tobytes().decode(), "k=\n#")
-
     illegal: ClassVar[str] = "illegal non-`Value` data"
 
     def test_illegal_key(self):

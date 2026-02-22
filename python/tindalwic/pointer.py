@@ -56,7 +56,7 @@ class Indent:
             case str(key):
                 into.write(key)
             case key if key is ...:
-                into.write("~...") # for testing purposes
+                into.write("~...")  # for testing purposes
             case key:
-                into.write(str(key).replace("~","~0").replace("/","~1"))
+                into.write(str(key).replace("~", "~0").replace("/", "~1"))
         return into

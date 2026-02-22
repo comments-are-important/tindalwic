@@ -3,43 +3,10 @@ from cProfile import Profile
 from io import BytesIO
 from pathlib import Path
 from time import perf_counter_ns
-from typing import NamedTuple, Any, Self
+from typing import NamedTuple
 
 from tindalwic import RAM, File, Encoded, Comment
-import tindalwic.yaml
-import ruamel.yaml
-from ruamel.yaml.comments import CommentedMap
-from ruamel.yaml.scanner import ScannerError
-
-
-class FileSeparated(NamedTuple):
-    file: File
-    python: dict[str, str | list | dict]
-    comments: list[str]
-    yaml: bytes
-
-
-class StealComments(tindalwic.yaml.YAML):
-    def __init__(self):
-        super().__init__()
-        self.comments = list[str]()
-
-    def encode(self, file: File) -> BytesIO:
-        self.comments.clear()
-        return super().encode(file)
-
-    def _comment(self, indent: bytes, prefix: bytes, comment: Comment | None) -> None:
-        super()._comment(indent, prefix, comment)
-        if comment is not None:
-            if not indent and prefix == b"!":
-                before= f"#{prefix.decode()}"
-            else:
-                before =  f"#{len(indent)}{prefix.decode()}"
-            for line in comment:
-                if isinstance(line, memoryview):
-                    line = line.tobytes()
-                self.comments.append(f"{before}{line.decode()}")
-
+from tindalwic.yaml import YAML
 
 class Timer:
     def __init__(self, denominator: "Timer|None" = None):
@@ -71,14 +38,33 @@ class Timer:
         return round(self.avg / denom, 2)
 
 
+class FileSeparated(NamedTuple):
+    file: File
+    python: dict[str, str | list | dict]
+    comments: list[str]
+    yaml: bytes
+
+
+class StealComments(YAML):
+    def __init__(self):
+        super().__init__()
+        self.comments = list[str]()
+
+    def _comment_lines(self, marked: bytes, prefix: bytes, comment: Comment) -> None:
+        for line in comment.lines():
+            if isinstance(line, memoryview):
+                line = line.tobytes()
+            self.comments.append(f"{marked.decode()}{prefix.decode()}{line.decode()}")
+            super()._utf8(marked, prefix, (line,))
+
+
 class TimedTindalwic:
-    def __init__(self, pstats:Path|None):
+    def __init__(self, pstats: Path | None):
         self.python_timer = Timer()
         self.file_timer = Timer()
         self.encode_timer = Timer()
         self.decode_timer = Timer()
         self.memory = RAM()
-        self.steal = StealComments()
         self.pstats = pstats
         self.profile = Profile(builtins=False) if pstats else None
 
@@ -90,7 +76,7 @@ class TimedTindalwic:
         with self.profile if self.profile else self.file_timer:
             return self.memory.file(mapping)
 
-    def encode(self, file: File) -> memoryview:
+    def encode(self, file: File, into: BytesIO | None = None) -> BytesIO:
         with self.profile if self.profile else self.encode_timer:
             return self.memory.encode(file)
 
@@ -111,66 +97,7 @@ class TimedTindalwic:
 
     def separated(self, file: File) -> FileSeparated:
         python = self.python(file)
-        yaml = self.steal.encode(file).getvalue()
-        return FileSeparated(file, python, self.steal.comments, yaml)
-
-
-class TimedRuamel:
-    def __init__(self, memory: TimedTindalwic):
-        self.trans_timer = Timer()
-        self.dump_timer = Timer(memory.encode_timer)
-        self.load_timer = Timer(memory.decode_timer)
-        self.buffer = tindalwic.yaml.YAML()
-        self.ruamel = ruamel.yaml.YAML(typ="rt")
-        self.ruamel.indent(mapping=2, sequence=4, offset=2)
-        if self.preserves(b"comment", b"{}\n#comment"):
-            raise ValueError("ruamel fixed after empty bug")
-
-
-    def load(self, value: bytes | None) -> Any:
-        if value is not None:
-            self.buffer.seek(0)
-            self.buffer.truncate()
-            self.buffer.write(value)
-        self.buffer.seek(0)
-        return self.ruamel.load(self.buffer)
-
-    def dump(self, any: Any) -> Self:
-        self.buffer.seek(0)
-        self.buffer.truncate()
-        self.ruamel.dump(any, self.buffer)
-        return self
-
-    def __bytes__(self) -> bytes:
-        self.buffer.seek(0)
-        return self.buffer.getvalue()
-
-    def preserves(self, mark: bytes, value: bytes) -> bool:
-        return mark in bytes(self.dump(self.load(value)))
-
-    def _load_file(self) -> CommentedMap:
-        try:
-            with self.load_timer:
-                result = self.load(None)
-        except ScannerError:
-            print(bytes(self).decode())
-            raise
-        if not isinstance(result, CommentedMap):
-            raise AssertionError(f"expected CommentedMap, got: {type(result)}")
-        return result
-
-    def roundtrip(self, file: CommentedMap) -> CommentedMap:
-        with self.dump_timer:
-            self.dump(file)
-        return self._load_file()
-
-    def translate(self, file: File) -> CommentedMap:
-        with self.trans_timer:
-            self.buffer.encode(file)
-        return self._load_file()
-
-    def timers(self) -> None:
-        print("   ruamel.yaml RT")
-        print(f"\t  dump = {self.dump_timer.avg}  ({self.dump_timer.mul})")
-        print(f"\t  load = {self.load_timer.avg}  ({self.load_timer.mul})")
-        print(f"\t trans = {self.trans_timer.avg}")
+        steal = StealComments()
+        yaml = steal.encode(file).getvalue()
+        assert yaml == YAML().encode(file).getvalue()
+        return FileSeparated(file, python, steal.comments, yaml)

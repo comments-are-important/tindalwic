@@ -2,13 +2,14 @@ import pprint
 import sys
 from io import StringIO
 from pathlib import Path
+from traceback import format_exception
 from typing import Annotated, Any, TypeVar
 
 from deepdiff import DeepDiff
 from rich.progress import track
 from typer import Typer, Exit, Option
 
-from . import FileSeparated, TimedTindalwic, unit_tests
+from . import TimedTindalwic, unit_tests
 from .ruamel import TimedRuamel
 from .generate import Random
 
@@ -25,10 +26,12 @@ def diff(was: T, now: T) -> bool:
 
 def FAILED(message: str, report: Path | None = None, **files):
     print(f"FAILED {message}", file=sys.stderr)
+    error: BaseException | None = None
     if report:
         old = set(report.iterdir())
+        (report / ".gitignore").write_text("*")
         for name, contents in files.items():
-            path = report / name.replace('_','.')
+            path = report / name.replace("_", ".")
             match contents:
                 case str():
                     print(f"  {path}")
@@ -36,17 +39,26 @@ def FAILED(message: str, report: Path | None = None, **files):
                 case bytes():
                     print(f"  {path}")
                     path.write_bytes(contents)
+                case BaseException():
+                    print(f"  {path}")
+                    path.write_text("".join(format_exception(contents)))
+                    error = contents
+                case None:
+                    continue
                 case _:
                     print(f"  {path} ??? {type(contents)}")
             old.discard(path)
         for it in old:
-            it.unlink()
-    raise Exit(code=1)
+            if it.name != ".gitignore":
+                it.unlink()
+    raise error or Exit(code=1)
 
-def pretty(any:Any) -> str:
+
+def pretty(any: Any) -> str:
     buffer = StringIO()
     pprint.pprint(any, buffer, 4, 120, sort_dicts=False)
     return buffer.getvalue()
+
 
 app = Typer()
 profile_option = Option(
@@ -101,7 +113,6 @@ def main(
         empties = 0
 
         for loop in track(range(loops)):
-
             original = memory.separated(random.file())
 
             modified_file = memory.file(original.python)
@@ -111,21 +122,22 @@ def main(
                     "to python and back",
                     failures,
                     original_tindalwic=memory.encode(original.file).getvalue(),
-                    original_py = pretty(original.file),
+                    original_py=pretty(original.file),
                     modified_tindalwic=memory.encode(modified_file).getvalue(),
-                    modified_py = pretty(modified_file),
+                    modified_py=pretty(modified_file),
                 )
 
             encoded = memory.encode(original.file).getvalue()
             modified = memory.separated(memory.decode(encoded))
 
-            if diff(original, modified) :
-                FAILED("encode then decode",
+            if diff(original, modified):
+                FAILED(
+                    "encode then decode",
                     failures,
                     original_tindalwic=memory.encode(original.file).getvalue(),
-                    original_py = pretty(original.file),
+                    original_py=pretty(original.file),
                     modified_tindalwic=memory.encode(modified.file).getvalue(),
-                    modified_py = pretty(modified.file),
+                    modified_py=pretty(modified.file),
                 )
 
             if not ruamel:
@@ -135,23 +147,33 @@ def main(
                 empties += 1
                 continue
 
-            if diff(original.comments, translated.comments):
-                FAILED("translation changed comments",
+            if ruamel.error or diff(original.comments, translated.comments):
+                FAILED(
+                    "translation changed comments",
                     failures,
                     original_tindalwic=memory.encode(original.file).getvalue(),
-                    original_yaml = original.yaml,
-                    original_comments = "\n".join(original.comments),
+                    original_yaml=original.yaml,
+                    original_comments="\n".join(original.comments),
+                    translated_py=pretty(translated.ruamel),
                     translated_comments="\n".join(translated.comments),
+                    error=ruamel.error,
                 )
 
             roundtrip = ruamel.roundtrip(translated)
-            if diff(translated, roundtrip):
-                FAILED("YAML roundtrip",
+            if ruamel.error or diff(translated, roundtrip):
+                roundtrip_ruamel = roundtrip.ruamel if roundtrip else ...
+                roundtrip_comments = roundtrip.comments if roundtrip else ()
+                FAILED(
+                    "YAML roundtrip",
                     failures,
-                    translated_py = pretty(translated.ruamel),
+                    original_tindalwic=memory.encode(original.file).getvalue(),
+                    original_yaml=original.yaml,
+                    translated_py=pretty(translated.ruamel),
                     translated_comments="\n".join(translated.comments),
-                    roundtrip_py = pretty(roundtrip.ruamel if roundtrip else None),
-                    roundtrip_comments="\n".join(roundtrip.comments if roundtrip else ()),
+                    roundtrip_py=pretty(roundtrip_ruamel),
+                    roundtrip_comments="\n".join(roundtrip_comments),
+                    roundtrip_yaml=ruamel.buffer,
+                    error=ruamel.error,
                 )
 
         memory.timers()

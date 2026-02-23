@@ -5,8 +5,8 @@ from pathlib import Path
 from time import perf_counter_ns
 from typing import NamedTuple
 
-from tindalwic import RAM, File, Encoded, Comment
-from tindalwic.yaml import YAML
+from tindalwic import RAM, File, Encoded
+from tindalwic.yaml import YAML, LINES
 
 class Timer:
     def __init__(self, denominator: "Timer|None" = None):
@@ -50,8 +50,8 @@ class StealComments(YAML):
         super().__init__()
         self.comments = list[str]()
 
-    def _comment_lines(self, marked: bytes, prefix: bytes, comment: Comment) -> None:
-        for line in comment.lines():
+    def _comment_lines(self, marked: bytes, prefix: bytes, utf8: LINES) -> None:
+        for line in utf8:
             if isinstance(line, memoryview):
                 line = line.tobytes()
             self.comments.append(f"{marked.decode()}{prefix.decode()}{line.decode()}")

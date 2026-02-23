@@ -1,3 +1,4 @@
+from array import array
 from io import BytesIO
 from typing import Any, TypeVar, NamedTuple
 
@@ -59,8 +60,6 @@ class StealComments:
                 return {k: self.value(v) for k, v in any.items()}
             case ScalarString():
                 return str(any)
-            case BaseException():
-                return str(any)
             case _:
                 raise ValueError(f"unexpected type: {type(any)}")
 
@@ -70,6 +69,8 @@ class TimedRuamel:
         self.trans_timer = Timer()
         self.dump_timer = Timer(memory.encode_timer)
         self.load_timer = Timer(memory.decode_timer)
+        self.error: BaseException | None = None
+        self.histogram = array("I", (0 for _ in range(15)))
         self.buffer = b""
         self.ruamel = RuamelYAML(typ="rt")
         if b"comment" in self.dump(self.load(b"{}\n#comment")):
@@ -84,36 +85,62 @@ class TimedRuamel:
         return buffer.getvalue()
 
     def _load_file(self) -> CommentedMap:
-        with self.load_timer:
-            try:
+        try:
+            with self.load_timer:
                 result = self.load(self.buffer)
-            except BaseException as error:
-                return error  # type: ignore
+        except BaseException as error:
+            self.error = error
+            return CommentedMap()
         if not isinstance(result, CommentedMap):
             raise AssertionError(f"expected CommentedMap, got: {type(result)}")
         return result
 
-    def roundtrip(self, file: RuamelSeparated) -> RuamelSeparated | None:
+    def _once(self, file: RuamelSeparated) -> RuamelSeparated | None:
+        self.error = None
         with self.dump_timer:
             self.buffer = self.dump(file.ruamel)
         return self.separated(self._load_file())
 
+    def roundtrip(self, file: RuamelSeparated) -> RuamelSeparated | None:
+        result = self._once(file)
+        for loop in range(len(self.histogram)):
+            if self.error or not result:
+                return None
+            previous = self.buffer
+            result = self._once(result)
+            if self.error or not next:
+                return None
+            if self.buffer == previous:
+                self.histogram[loop] += 1
+                return result
+        raise RuntimeError("ruamel.yaml did not settle")
+
     def translate(self, file: FileSeparated) -> RuamelSeparated | None:
+        self.error = None
         with self.trans_timer:
+            # re-encode for timer on module class (not subclass)
             self.buffer = TindalwicYAML().encode(file.file).getvalue()
         assert self.buffer == file.yaml
         return self.separated(self._load_file())
 
-    def timers(self, empties:int, loops:int) -> None:
+    def timers(self, empties: int, loops: int) -> None:
         print("   ruamel.yaml RT")
-        if empties:
-            print(f"\t  skip = {empties} of {loops} or {round(empties*100.0/loops, 2)}%")
         print(f"\t  dump = {self.dump_timer.avg}  ({self.dump_timer.mul})")
         print(f"\t  load = {self.load_timer.avg}  ({self.load_timer.mul})")
         print(f"\t trans = {self.trans_timer.avg}")
+        if empties:
+            percent = round(empties * 100.0 / loops, 2)
+            print(f"\t  skip = {empties} of {loops} or {percent}%")
+        nonzero = len(self.histogram)
+        while nonzero > 0:
+            if self.histogram[nonzero - 1] != 0:
+                break
+            nonzero -= 1
+        print(f"\t round = {','.join(str(it) for it in self.histogram[:nonzero])}")
 
-    @staticmethod
-    def separated(file: CommentedMap) -> RuamelSeparated | None:
+    def separated(self, file: CommentedMap) -> RuamelSeparated | None:
+        if self.error:
+            return None
         steal = StealComments()
         python = steal.value(file)
         if steal.empties:

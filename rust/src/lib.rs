@@ -1,7 +1,7 @@
 #![warn(missing_docs)] //, unused
 #![allow(unused)]
 
-//! Text in Nested Dicts and Lists - with Important Comments
+//! Text in Nested Dictionaries and Lists - with Important Comments
 
 /// build a [Path] from steps
 #[macro_export]
@@ -20,7 +20,9 @@ macro_rules! path {
 #[cfg(test)]
 mod tests;
 
-use std::fmt;
+use std::fmt::{self, Display, Formatter, Write};
+use std::ops::Deref;
+use std::str::FromStr;
 
 /// an [Err] [Result] for path resolution
 #[derive(Clone, Debug)]
@@ -30,8 +32,8 @@ pub struct PathErr {
     fail: Option<&'static PathStep>,
 }
 
-impl fmt::Display for PathErr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for PathErr {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match &self.fail {
             None => {
                 write!(
@@ -204,8 +206,8 @@ impl Path {
     }
 }
 
-impl fmt::Display for Path {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for Path {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         for step in self.steps {
             match step {
                 PathStep::List(index) => write!(f, "[{}]", index)?,
@@ -218,87 +220,294 @@ impl fmt::Display for Path {
 
 // ====================================================================================
 
-fn lines<'a>(encoded: &'a str, dedent: usize) -> impl Iterator<Item = &'a str> {
-    // that return type is very tricky to satisfy: having two branches here (one
-    // optimized for absent indentation) causes E0308 incompatible types:
-    //   "distinct uses of `impl Trait` result in different opaque types"
-    // attempting to hide them behind closures does not help either:
-    //   "no two closures, even if identical, have the same type"
-    let d = if dedent == usize::MAX { 0 } else { dedent };
-    encoded
-        .split('\n')
-        .enumerate()
-        .map(move |(i, s)| if i == 0 || d == 0 { s } else { &s[d..] })
-}
-
-fn to_string<'a>(encoded: &'a str, dedent: usize) -> String {
-    if dedent == 0 || dedent == usize::MAX {
-        return String::from(encoded);
-    }
-    let mut string = String::new();
-    for line in lines(encoded, dedent) {
-        string.push_str(line);
-        string.push('\n');
-    }
-    if string.len() != 0 {
-        string.truncate(string.len() - 1);
-    }
-    string
-}
-
-fn parse<'a>(source: &'a str, indent: usize) -> (&'a str, usize) {
-    let bytes = source.as_bytes();
-    let mut newlines = 0usize;
-    let indent = indent + 1;
-    let mut cursor = 0usize;
-    'outer: while cursor < bytes.len() {
-        if bytes[cursor] != b'\n' {
-            cursor += 1;
-            continue;
-        }
-        if cursor + indent >= bytes.len() {
-            break;
-        }
-        for offset in 0..indent {
-            if bytes[cursor + 1 + offset] != b'\t' {
-                break 'outer;
-            }
-        }
-        cursor += 1 + indent;
-        newlines += 1;
-    }
-    (
-        &source[..cursor],
-        if newlines == 0 { usize::MAX } else { indent },
-    )
-}
-
-fn encode<'a>(
-    encoded: &'a str,
-    dedent: usize,
+#[derive(Clone, Debug)]
+struct Indented<'a, T> {
     indent: usize,
-    marker: &'static str,
-    into: &mut String,
-) {
-    into.extend(std::iter::repeat_n('\t', indent));
-    into.push_str(marker);
-    let indent = indent + 1;
-    if indent == dedent || dedent == usize::MAX {
-        into.push_str(encoded);
-        into.push('\n');
-    } else {
-        let mut lines = lines(encoded, dedent);
-        let Some(first) = lines.next() else {
-            into.push('\n');
-            return;
-        };
-        into.push_str(first);
-        into.push('\n');
-        for line in lines {
-            into.extend(std::iter::repeat_n('\t', indent));
-            into.push_str(&line[dedent..]);
-            into.push('\n');
+    value: &'a T,
+}
+
+impl<'a,T> Deref for Indented<'a,T> {
+    type Target = &'a T;
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+impl<'a,T> Indented<'a,T> {
+    fn write_indent(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        for _ in 0..self.indent {
+            f.write_char('\t')?;
         }
+        Ok(())
+    }
+    fn from(indent:usize, value:&'a T) -> Self {
+        Indented { value, indent }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Marked<'a, T> {
+    marker: &'a str,
+    indented: Indented<'a, T>,
+}
+
+impl<'a,T> Deref for Marked<'a,T> {
+    type Target = Indented<'a,T>;
+    fn deref(&self) -> &Self::Target {
+        &self.indented
+    }
+}
+
+impl<'a,T> Marked<'a,T> {
+    fn from(indent:usize, marker: &'a str, value:&'a T) -> Self {
+        Marked { indented: Indented::from(indent, value), marker }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Encoded<'a> {
+    utf8: &'a str,
+    dedent: usize,
+}
+
+impl<'a> Encoded<'a> {
+    pub fn one_liner(&self) -> bool {
+        if self.dedent == usize::MAX {
+            debug_assert!(!self.utf8.contains('\n'), "one_liner contains newline");
+            true
+        } else {
+            debug_assert!(self.utf8.contains('\n'), "missing newline in !one_liner");
+            false
+        }
+    }
+
+    fn parse(source: &'a str, indent: usize) -> Self {
+        let bytes = source.as_bytes();
+        let mut newlines = 0usize;
+        let indent = indent + 1;
+        let mut cursor = 0usize;
+        'outer: while cursor < bytes.len() {
+            if bytes[cursor] != b'\n' {
+                cursor += 1;
+                continue;
+            }
+            if cursor + indent >= bytes.len() {
+                break;
+            }
+            for offset in 0..indent {
+                if bytes[cursor + 1 + offset] != b'\t' {
+                    break 'outer;
+                }
+            }
+            cursor += 1 + indent;
+            newlines += 1;
+        }
+        Encoded {
+            utf8: &source[..cursor],
+            dedent: if newlines == 0 { usize::MAX } else { indent },
+        }
+    }
+
+    pub fn lines(&self) -> impl Iterator<Item = &'a str> {
+        // that return type is tricky to satisfy: having two branches here (one
+        // optimized for absent indentation) causes E0308 incompatible types:
+        //   "distinct uses of `impl Trait` result in different opaque types"
+        // attempting to hide them behind closures does not help either:
+        //   "no two closures, even if identical, have the same type"
+        let d = if self.one_liner() { 0 } else { self.dedent };
+        self.utf8
+            .split('\n')
+            .enumerate()
+            .map(move |(i, s)| if i == 0 || d == 0 { s } else { &s[d..] })
+    }
+
+
+}
+
+impl<'a> From<&'a str> for Encoded<'a> {
+    fn from(utf8: &'a str) -> Self {
+        Encoded {
+            utf8: utf8,
+            dedent: if utf8.contains('\n') { 0 } else { usize::MAX },
+        }
+    }
+}
+
+// impl<'a> Display for Encoded<'a> {
+//     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+//         Indented::from(0, self).fmt(f)
+//     }
+// }
+
+impl<'a> Display for Indented<'a, Encoded<'a>> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        if self.indent == self.dedent || self.one_liner() {
+            f.write_str(self.utf8)?;
+            f.write_char('\n')?;
+        } else {
+            let mut lines = self.lines();
+            if let Some(first) = lines.next() {
+                f.write_str(first)?;
+                f.write_char('\n')?;
+                for line in lines {
+                    self.write_indent(f)?;
+                    f.write_str(&line[self.dedent..])?;
+                    f.write_char('\n')?;
+                }
+            };
+        }
+        Ok(())
+    }
+}
+
+impl<'a> Comment<'a> {
+    /// instantiate into [Option::Some].
+    pub fn some(utf8: &'a str) -> Option<Self> {
+        Some(Comment::from(utf8))
+    }
+    fn parse(utf8: &'a str, indent: usize, marker: &'a str) -> Option<Comment<'a>> {
+        todo!()
+    }
+}
+
+impl<'a> Display for Comment<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Marked::from(0, "#", &self.encoded).fmt(f)
+    }
+}
+
+impl<'a> Display for Marked<'a, Option<Comment<'a>>> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        if let Some(comment) = &self.value {
+            self.write_indent(f)?;
+            f.write_str(self.marker)?;
+            Indented::from(self.indent + 1, &comment.encoded).fmt(f)?;
+        }
+        Ok(())
+    }
+}
+
+/// the three possible Value types
+#[derive(Clone, Debug)]
+pub enum Value<'a> {
+    /// a [Text] value holds UTF-8 content
+    Text(Text<'a>),
+    /// a [List] value is a linear array of values
+    List(List<'a>),
+    /// a [Dict] value is an associative array of Keyed values
+    Dict(Dict<'a>),
+}
+impl<'a> Display for Value<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Indented::from(0, self).fmt(f)
+    }
+}
+impl<'a> Display for Indented<'a, Value<'a>> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self.value {
+            Value::Text(text) => Indented::from(self.indent,text).fmt(f),
+            Value::List(list) => Indented::from(self.indent,list).fmt(f),
+            Value::Dict(dict) => Indented::from(self.indent,dict).fmt(f),
+        }
+    }
+}
+impl<'a> Display for Marked<'a, Value<'a>> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self.value {
+            Value::Text(text) => Marked::from(self.indent,self.marker,text).fmt(f),
+            Value::List(list) => Marked::from(self.indent,self.marker,list).fmt(f),
+            Value::Dict(dict) => Marked::from(self.indent,self.marker,dict).fmt(f),
+        }
+    }
+}
+
+impl<'a> Text<'a> {
+    fn one_liner_in_list(&self) -> bool {
+        if !self.encoded.one_liner() {
+            return false;
+        }
+        if self.encoded.utf8.is_empty() {
+            return true;
+        }
+        match self.encoded.utf8.as_bytes()[0] {
+            b'\t' | b'#' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'=' => false,
+            _ => true,
+        }
+    }
+    fn one_liner_in_dict(&self, key: &str) -> bool {
+        false
+    }
+}
+
+// impl<'a> Display for Text<'a> {
+//     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+//         Indented::from(0, self).fmt(f)
+//     }
+// }
+impl<'a> Display for Indented<'a, Text<'a>> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let more =Indented::from(self.indent+1, &self.encoded);
+        if !self.one_liner_in_list() {
+            self.write_indent(f)?;
+            f.write_str("<>\n")?;
+        }
+        more.write_indent(f)?;
+        more.fmt(f)?;
+        Marked::from(self.indent, "#",&self.epilog).fmt(f)
+    }
+}
+impl<'a> Display for Marked<'a, Text<'a>> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.write_indent(f)?;
+        if self.one_liner_in_dict(self.marker) {
+            f.write_str(self.marker)?;
+            f.write_char('=')?;
+            f.write_str(self.encoded.utf8)?;
+        } else {
+            f.write_char('<')?;
+            f.write_str(self.marker)?;
+            f.write_str(">\n")?;
+            let more =Indented::from(self.indent+1, &self.encoded);
+            more.write_indent(f)?;
+            more.fmt(f)?;
+        }
+        Marked::from(self.indent, "#",&self.epilog).fmt(f)
+    }
+}
+
+// impl<'a> Display for List<'a> {
+//     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+//         Indented::from(0, self).fmt(f)
+//     }
+// }
+impl<'a> Display for Indented<'a, Vec<Value<'a>>> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        for item in self.value {
+            Indented::from(self.indent, item).fmt(f)?;
+        }
+        Ok(())
+    }
+}
+impl<'a> Display for Indented<'a, List<'a>> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.write_indent(f)?;
+        f.write_str("[]\n")?;
+        let more = self.indent + 1;
+        Marked::from(more, "#",&self.prolog).fmt(f)?;
+        Indented::from(more, &self.vec).fmt(f)?;
+        Marked::from(self.indent, "#",&self.epilog).fmt(f)
+    }
+}
+impl<'a> Display for Marked<'a, List<'a>> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.write_indent(f)?;
+        f.write_char('[')?;
+        f.write_str(self.marker)?;
+        f.write_str("]\n")?;
+        let more = self.indent + 1;
+        Marked::from(more, "#",&self.prolog).fmt(f)?;
+        Indented::from(more, &self.vec).fmt(f)?;
+        Marked::from(self.indent, "#",&self.epilog).fmt(f)
     }
 }
 
@@ -316,6 +525,7 @@ pub struct Keyed<'a> {
     /// the value associated to the key
     pub value: Value<'a>,
 }
+
 impl<'a> Keyed<'a> {
     /// convert a key and a value into an entry (for a Dict).
     pub fn from(key: &'a str, value: Value<'a>) -> Self {
@@ -327,110 +537,53 @@ impl<'a> Keyed<'a> {
         }
     }
 }
-/// the three possible Value types
-#[derive(Clone, Debug)]
-pub enum Value<'a> {
-    /// a [Text] value holds UTF-8 content
-    Text(Text<'a>),
-    /// a [List] value is a linear array of values
-    List(List<'a>),
-    /// a [Dict] value is an associative array of Keyed values
-    Dict(Dict<'a>),
-}
-impl<'a> Value<'a> {
-    /// write the encoding of this Value into the given String.
-    fn encode(&self, indent: usize, keyed: Option<&Keyed<'a>>, into: &mut String) {
-        match self {
-            Value::Text(text) => text.encode(indent, keyed, into),
-            Value::List(list) => list.encode(indent, keyed, into),
-            Value::Dict(dict) => dict.encode(indent, keyed, into),
+
+// impl<'a> Display for Dict<'a> {
+//     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+//         Indented::from(0, self).fmt(f)
+//     }
+// }
+impl<'a> Display for Indented<'a, Vec<Keyed<'a>>> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        for item in self.value {
+            if item.gap {
+                // TODO be strict? self.write_indent(f)?;
+                f.write_char('\n')?;
+            }
+            Marked::from(self.indent, "//", &item.before).fmt(f)?;
+            Marked::from(self.indent,&item.key, &item.value).fmt(f)?;
         }
+        Ok(())
+    }
+}
+impl<'a> Display for Indented<'a, Dict<'a>> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.write_indent(f)?;
+        f.write_str("{}\n")?;
+        let more = self.indent+1;
+        Marked::from(more, "#",&self.prolog).fmt(f)?;
+        Indented::from(more, &self.vec).fmt(f)?;
+        Marked::from(self.indent, "#",&self.epilog).fmt(f)
+    }
+}
+impl<'a> Display for Marked<'a, Dict<'a>> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.write_indent(f)?;
+        f.write_char('{')?;
+        f.write_str(self.marker)?;
+        f.write_str("}\n")?;
+        let more = self.indent+1;
+        Marked::from(more, "#",&self.prolog).fmt(f)?;
+        Indented::from(more, &self.vec).fmt(f)?;
+        Marked::from(self.indent, "#",&self.epilog).fmt(f)
     }
 }
 
-impl<'a> Comment<'a> {
-    /// instantiate into [Option::Some].
-    pub fn some(utf8: &'a str) -> Option<Self> {
-        Some(Comment::from(utf8))
-    }
-}
-
-impl<'a> Text<'a> {
-    /// write the encoding of this Text into the given String.
-    pub(crate) fn encode(&self, indent: usize, keyed: Option<&Keyed<'a>>, into: &mut String) {
-        into.extend(std::iter::repeat_n('\t', indent));
-        into.push('<');
-        if let Some(keyed) = keyed {
-            into.push_str(keyed.key)
-        }
-        into.push_str(">\n");
-        let indent = indent + 1;
-        self.encode_utf8(indent, "", into);
-        if let Some(epilog) = &self.epilog {
-            epilog.encode_utf8(indent, "#", into);
-        }
-    }
-}
-
-impl<'a> List<'a> {
-    /// write the encoding of this List into the given String.
-    pub(crate) fn encode(&self, indent: usize, keyed: Option<&Keyed<'a>>, into: &mut String) {
-        into.extend(std::iter::repeat_n('\t', indent));
-        into.push('[');
-        if let Some(keyed) = keyed {
-            into.push_str(keyed.key)
-        }
-        into.push_str("]\n");
-        let indent = indent + 1;
-        if let Some(prolog) = &self.prolog {
-            prolog.encode_utf8(indent, "#", into);
-        }
-        for item in &self.vec {
-            item.encode(indent, None, into);
-        }
-        if let Some(epilog) = &self.epilog {
-            epilog.encode_utf8(indent, "#", into);
-        }
-    }
-}
-
-impl<'a> Dict<'a> {
-    /// write the encoding of this Dict into the given String.
-    pub(crate) fn encode(&self, indent: usize, keyed: Option<&Keyed<'a>>, into: &mut String) {
-        into.extend(std::iter::repeat_n('\t', indent));
-        into.push('{');
-        if let Some(keyed) = keyed {
-            into.push_str(keyed.key)
-        }
-        into.push_str("}\n");
-        let indent = indent + 1;
-        if let Some(prolog) = &self.prolog {
-            prolog.encode_utf8(indent, "#", into);
-        }
-        self.encode_keyed(indent, into);
-        if let Some(epilog) = &self.epilog {
-            epilog.encode_utf8(indent, "#", into);
-        }
-    }
-}
-
-impl<'a> File<'a> {
-    /// write the encoding of this File `into` the String (clearing it first).
-    pub fn encode(&self, into: &mut String) {
-        into.clear();
-        if let Some(hashbang) = &self.hashbang {
-            hashbang.encode_utf8(0, "#!", into);
-        }
-        if let Some(prolog) = &self.prolog {
-            prolog.encode_utf8(0, "#", into);
-        }
-        self.encode_keyed(0, into);
-    }
-    /// return the encoding of this File in a freshly allocated String.
-    pub fn tindalwic(&self) -> String {
-        let mut bytes = String::new();
-        self.encode(&mut bytes);
-        bytes
+impl<'a> Display for File<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Marked::from(0, "#!",&self.hashbang).fmt(f)?;
+        Marked::from(0, "#",&self.prolog).fmt(f)?;
+        Indented::from(0, &self.vec).fmt(f)
     }
 }
 
@@ -461,18 +614,16 @@ impl<'a> File<'a> {
 ///   .expect("should never error, according to:
 ///      https://docs.rs/markdown/latest/markdown/fn.to_html_with_options.html#errors");
 ///
-/// assert_eq!(html, "<p>with <del>strikethrough</del> extension</p>");
+/// assert_eq!(html, "<p>with <del>strikethrough</del> extension</p>\n");
 /// ```
 #[derive(Clone, Debug)]
 pub struct Comment<'a> {
-    encoded: &'a str,
-    dedent: usize,
+    encoded: Encoded<'a>,
 }
 impl<'a> From<&'a str> for Comment<'a> {
     fn from(utf8: &'a str) -> Self {
         Comment {
-            encoded: utf8,
-            dedent: if utf8.contains('\n') { 0 } else { usize::MAX },
+            encoded: Encoded::from(utf8),
         }
     }
 }
@@ -493,53 +644,33 @@ impl<'a> Comment<'a> {
     /// }
     /// ```
     pub fn lines(&self) -> impl Iterator<Item = &'a str> {
-        lines(self.encoded, self.dedent)
-    }
-    /// Gathers the [Self::lines] into a freshly allocated [String].
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let utf8 = "zero\none\ntwo";
-    /// let item = tindalwic::Comment::from(utf8);
-    /// assert_eq!(item.to_string(), utf8);
-    /// ```
-    pub fn to_string(&self) -> String {
-        to_string(self.encoded, self.dedent)
+        self.encoded.lines()
     }
     fn parse_utf8(source: &'a str, indent: usize) -> Self {
-        let (encoded, dedent) = parse(source, indent);
         Comment {
-            encoded: encoded,
-            dedent: dedent,
+            encoded: Encoded::parse(source, indent),
         }
-    }
-    /// write the encoding of this Comment into the given String.
-    fn encode_utf8(&self, indent: usize, marker: &'static str, into: &mut String) {
-        encode(self.encoded, self.dedent, indent, marker, into);
     }
 }
 
 /// the fields of a [Value::Text]
 #[derive(Clone, Debug)]
 pub struct Text<'a> {
-    encoded: &'a str,
-    dedent: usize,
+    encoded: Encoded<'a>,
     /// A Text can have a Comment after it.
     pub epilog: Option<Comment<'a>>,
 }
 impl<'a> Text<'a> {
     /// Sets the epilog Comment.
     pub fn with_epilog(mut self, epilog: &'a str) -> Self {
-        self.epilog = Some(Comment::from(epilog));
+        self.epilog = Comment::some(epilog);
         self
     }
 }
 impl<'a> From<&'a str> for Text<'a> {
     fn from(utf8: &'a str) -> Self {
         Text {
-            encoded: utf8,
-            dedent: if utf8.contains('\n') { 0 } else { usize::MAX },
+            encoded: Encoded::from(utf8),
             epilog: None,
         }
     }
@@ -561,38 +692,20 @@ impl<'a> Text<'a> {
     /// }
     /// ```
     pub fn lines(&self) -> impl Iterator<Item = &'a str> {
-        lines(self.encoded, self.dedent)
-    }
-    /// Gathers the [Self::lines] into a freshly allocated [String].
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let utf8 = "zero\none\ntwo";
-    /// let item = tindalwic::Text::from(utf8);
-    /// assert_eq!(item.to_string(), utf8);
-    /// ```
-    pub fn to_string(&self) -> String {
-        to_string(self.encoded, self.dedent)
+        self.encoded.lines()
     }
     fn parse_utf8(source: &'a str, indent: usize) -> Self {
-        let (encoded, dedent) = parse(source, indent);
         Text {
-            encoded: encoded,
-            dedent: dedent,
+            encoded: Encoded::parse(source, indent),
             epilog: None,
         }
-    }
-    /// write the encoding of this Text into the given String.
-    fn encode_utf8(&self, indent: usize, marker: &'static str, into: &mut String) {
-        encode(self.encoded, self.dedent, indent, marker, into);
     }
 }
 
 /// the fields of a [Value::List]
 #[derive(Clone, Debug)]
 pub struct List<'a> {
-    /// The contents of the List.
+    /// The contents of the Value::List.
     pub vec: Vec<Value<'a>>,
     /// A List can have an introductory Comment.
     pub prolog: Option<Comment<'a>>,
@@ -602,12 +715,12 @@ pub struct List<'a> {
 impl<'a> List<'a> {
     /// Sets the prolog Comment.
     pub fn with_prolog(mut self, prolog: &'a str) -> Self {
-        self.prolog = Some(Comment::from(prolog));
+        self.prolog = Comment::some(prolog);
         self
     }
     /// Sets the epilog Comment.
     pub fn with_epilog(mut self, epilog: &'a str) -> Self {
-        self.epilog = Some(Comment::from(epilog));
+        self.epilog = Comment::some(epilog);
         self
     }
 }
@@ -624,7 +737,7 @@ impl<'a> From<Vec<Value<'a>>> for List<'a> {
 /// the fields of a [Value::Dict]
 #[derive(Clone, Debug)]
 pub struct Dict<'a> {
-    /// The contents of the Dict.
+    /// The contents of the Value::Dict.
     pub vec: Vec<Keyed<'a>>,
     /// A Dict can have an introductory Comment.
     pub prolog: Option<Comment<'a>>,
@@ -634,12 +747,12 @@ pub struct Dict<'a> {
 impl<'a> Dict<'a> {
     /// Sets the prolog Comment.
     pub fn with_prolog(mut self, prolog: &'a str) -> Self {
-        self.prolog = Some(Comment::from(prolog));
+        self.prolog = Comment::some(prolog);
         self
     }
     /// Sets the epilog Comment.
     pub fn with_epilog(mut self, epilog: &'a str) -> Self {
-        self.epilog = Some(Comment::from(epilog));
+        self.epilog = Comment::some(epilog);
         self
     }
 }
@@ -673,25 +786,14 @@ impl<'a> Dict<'a> {
     pub fn push(&mut self, keyed: Keyed<'a>) {
         self.vec.push(keyed);
     }
-    fn encode_keyed(&self, indent: usize, into: &mut String) {
-        for keyed in &self.vec {
-            if keyed.gap {
-                into.push('\n');
-            }
-            if let Some(before) = &keyed.before {
-                before.encode_utf8(indent, "//", into);
-            }
-            keyed.value.encode(indent, Some(&keyed), into);
-        }
-    }
 }
 
 /// the outermost context.
 ///
-/// very similar to a [Dict], just with different comments.
+/// very similar to a [Value::Dict], just with different comments.
 #[derive(Clone, Debug)]
 pub struct File<'a> {
-    /// The contents of the File.
+    /// The contents of the Value::File.
     pub vec: Vec<Keyed<'a>>,
     /// A File can start with a Unix `#!` Comment.
     pub hashbang: Option<Comment<'a>>,
@@ -701,12 +803,12 @@ pub struct File<'a> {
 impl<'a> File<'a> {
     /// Sets the hashbang Comment.
     pub fn with_hashbang(mut self, hashbang: &'a str) -> Self {
-        self.hashbang = Some(Comment::from(hashbang));
+        self.hashbang = Comment::some(hashbang);
         self
     }
     /// Sets the prolog Comment.
     pub fn with_prolog(mut self, prolog: &'a str) -> Self {
-        self.prolog = Some(Comment::from(prolog));
+        self.prolog = Comment::some(prolog);
         self
     }
 }
@@ -739,16 +841,5 @@ impl<'a> File<'a> {
     /// append the given entry to the end of the vec.
     pub fn push(&mut self, keyed: Keyed<'a>) {
         self.vec.push(keyed);
-    }
-    fn encode_keyed(&self, indent: usize, into: &mut String) {
-        for keyed in &self.vec {
-            if keyed.gap {
-                into.push('\n');
-            }
-            if let Some(before) = &keyed.before {
-                before.encode_utf8(indent, "//", into);
-            }
-            keyed.value.encode(indent, Some(&keyed), into);
-        }
     }
 }

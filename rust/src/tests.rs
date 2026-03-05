@@ -13,7 +13,7 @@ fn resolve_list() {
     let list = Value::List(List::from(vec![inner]));
 
     let resolved = path!([0]).text(&list).unwrap();
-    assert_eq!(resolved.to_string(), "hello");
+    assert_eq!(Indented::from(0,resolved).to_string(), "\thello\n");
 }
 
 #[test]
@@ -72,12 +72,13 @@ fn encode_uncommented_file() {
     assert_eq!(
         File::from(vec![Keyed::from(
             "one",
-            Value::List(List::from(vec![Value::Text(Text::from(""))]))
+            Value::List(List::from(vec![Value::Text(Text::from("\n"))]))
         )])
-        .tindalwic(),
+        .to_string(),
         visible(
             "[one]
             ╶─▸<>
+            ╶─▸╶─▸
             ╶─▸╶─▸
             "
         )
@@ -91,19 +92,19 @@ fn encode_fully_commented_file() {
     file.push(Keyed {
         key: "one",
         gap: true,
-        before: Some(Comment::from(" about key one")),
-        value: Value::Text(Text::from("one").with_epilog(" about value one")),
+        before: Comment::some(" about key one"),
+        value: Value::Text(Text::from("1").with_epilog(" about value one")),
     });
     assert_eq!(
-        file.tindalwic(),
+        file.to_string(),
         visible(
             "#!/usr/bin/env -S app argument
             # this is the prolog for the file
 
             // about key one
             <one>
-            ╶─▸one
-            ╶─▸# about value one
+            ╶─▸1
+            # about value one
             "
         )
     )

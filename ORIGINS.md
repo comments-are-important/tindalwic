@@ -1,4 +1,4 @@
-# Text in Nested Dicts and Lists - with Important Comments
+# Text in Nested Dictionaries and Lists - with Important Comments
 
  + How did this start? Why does it even exist?
  + See the [README](README.md) for links to other documentation.

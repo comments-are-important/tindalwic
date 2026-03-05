@@ -1,4 +1,4 @@
-# Text in Nested Dicts and Lists - with Important Comments
+# Text in Nested Dictionaries and Lists - with Important Comments
 
  + This is meant to be an informal description of the format.
  + See the [README](README.md) for links to other documentation.

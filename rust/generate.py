@@ -106,7 +106,7 @@ def STRUCT(name: str, *comments: DOC, doc: str, **fields: str | DOC):
             builders.append(r"""
                 /// Sets the $comment Comment.
                 pub fn with_$comment(mut self, $comment: &'a str) -> Self {
-                    self.$comment = Some(Comment::from($comment));
+                    self.$comment = Comment::some($comment);
                     self
                 }""")
         out(r"""
@@ -132,18 +132,16 @@ def FROM(name: str, param: str, type: str, *comments: DOC, **fields: str | DOC):
 
 
 def UTF8(name: str, *comments: DOC, doc: str):
-    STRUCT(name, *comments, _encoded="&'a str", _dedent="usize", doc=doc)
+    STRUCT(name, *comments, _encoded="Encoded<'a>", doc=doc)
     FROM(
         name,
         "utf8",
         "&'a str",
         *comments,
-        encoded=r"utf8",
-        dedent=r"if utf8.contains('\n') { 0 } else { usize::MAX }",
+        encoded=r"Encoded::from(utf8)",
     )
     initialize = Indent(3)
-    initialize.append(r"encoded: encoded,")
-    initialize.append(r"dedent: dedent,")
+    initialize.append(r"encoded: Encoded::parse(source, indent),")
     for comment in comments:
         initialize.append(r"$string: None,", doc=comment)
     out(r"""
@@ -164,29 +162,12 @@ def UTF8(name: str, *comments: DOC, doc: str):
             /// }
             /// ```
             pub fn lines(&self) -> impl Iterator<Item = &'a str> {
-                lines(self.encoded, self.dedent)
-            }
-            /// Gathers the [Self::lines] into a freshly allocated [String].
-            ///
-            /// # Examples
-            ///
-            /// ```
-            /// let utf8 = "zero\none\ntwo";
-            /// let item = tindalwic::$name::from(utf8);
-            /// assert_eq!(item.to_string(), utf8);
-            /// ```
-            pub fn to_string(&self) -> String {
-                to_string(self.encoded, self.dedent)
+                self.encoded.lines()
             }
             fn parse_utf8(source: &'a str, indent: usize) -> Self {
-                let (encoded, dedent) = parse(source, indent);
                 $name {
                     $initialize
                 }
-            }
-            /// write the encoding of this $name into the given String.
-            fn encode_utf8(&self, indent: usize, marker: &'static str, into: &mut String) {
-                encode(self.encoded, self.dedent, indent, marker, into);
             }
         }
         """)
@@ -231,17 +212,6 @@ def DICT(name: str, comments: tuple[DOC, DOC], doc: str):
             pub fn push(&mut self, keyed: Keyed<'a>) {
                 self.vec.push(keyed);
             }
-            fn encode_keyed(&self, indent: usize, into: &mut String) {
-                for keyed in &self.vec {
-                    if keyed.gap {
-                        into.push('\n');
-                    }
-                    if let Some(before) = &keyed.before {
-                        before.encode_utf8(indent, "//", into);
-                    }
-                    keyed.value.encode(indent, Some(&keyed), into);
-                }
-            }
         }
         """)
 
@@ -274,7 +244,7 @@ UTF8(
         ///   .expect("should never error, according to:
         ///      https://docs.rs/markdown/latest/markdown/fn.to_html_with_options.html#errors");
         ///
-        /// assert_eq!(html, "<p>with <del>strikethrough</del> extension</p>");
+        /// assert_eq!(html, "<p>with <del>strikethrough</del> extension</p>\n");
         /// ```
         """,
 )

@@ -1,4 +1,4 @@
-# Text in Nested Dicts and Lists - with Important Comments
+# Text in Nested Dictionaries and Lists - with Important Comments
 
 + [**MANIFESTO.md**](MANIFESTO.md) = an informal English description of the format.
 + [**ORIGINS.md**](ORIGINS.md) = the story of the spark that led to this project.

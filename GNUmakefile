@@ -76,9 +76,22 @@ python/build: python/test
 
 rust/doc: must-run-inside
 	cd rust
-	cargo doc --document-private-items
+	cargo doc # --document-private-items
 	cd target/doc
 	uv run -- python -m http.server
 .PHONY: rust/doc
+
+rust/api: must-run-inside
+	cd rust
+	rustup toolchain install nightly
+	cargo install cargo-public-api
+	mkdir -p target
+	cargo public-api -sss >target/api.txt
+.PHONY: rust/api
+
+rust/fmt: must-run-inside
+	cd rust
+	rustfmt +nightly --config format_code_in_doc_comments=true src/lib.rs
+.PHONY: rust/fmt
 
 # =====================================================================================

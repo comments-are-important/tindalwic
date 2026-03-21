@@ -1,59 +1,33 @@
 #![no_std]
-#![deny(unused)] //missing_docs,
+#![warn(missing_docs,unused)]
 
 //! Text in Nested Dictionaries and Lists - with Important Comments
 
 extern crate alloc;
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::{
-    fmt::{self, Debug, Display, Formatter, Write},
-    ops::{Deref, DerefMut},
-};
+use core::fmt::{self, Debug, Display, Formatter, Write};
+use core::ops::{Deref, DerefMut};
 
-trait FormatterExt {
-    fn write_indent(&mut self, indent: usize) -> fmt::Result;
-}
-impl FormatterExt for Formatter<'_> {
-    fn write_indent(&mut self, indent: usize) -> fmt::Result {
-        for _ in 0..indent {
-            self.write_char('\t')?;
-        }
-        Ok(())
-    }
-}
-
+/// Hidden parts of [Comment] and [Text].
+///
+/// These are zero-copy slices from an external buffer of Tindalwic UTF-8. The iterator
+/// returned by [Encoded::lines()] is the most efficient way to strip the indentation
+/// from a multi-line slice.
 #[derive(Clone, Debug)]
-struct Indented<'a, T> {
-    indent: usize,
-    value: &'a T,
-}
-
-#[derive(Clone, Debug)]
-struct Marked<'a, T> {
-    indent: usize,
-    marker: &'a str,
-    value: &'a T,
-}
-
-#[allow(unused)]
-struct ParseErr {
-    position: usize,
-    message: &'static str,
-}
-/// like std::str::FromStr, but with a lifetime, and without a pluggable error
-trait Sliced<'a>: Sized {
-    #[allow(unused)]
-    fn sliced(from: &'a str, start: usize, indent: usize) -> Result<Self, ParseErr>;
-}
-
-#[derive(Clone, Debug)]
-pub struct Encoded<'a> {
+struct Encoded<'a> {
     utf8: &'a str,
-    dedent: usize,
+    dedent: usize, // usize::MAX => one_liner
 }
 impl<'a> Encoded<'a> {
-    pub fn one_liner(&self) -> bool {
+    /// Return a zero-copy instance using the provided literal (not indented) slice.
+    pub fn wrap(utf8: &'a str) -> Self {
+        Encoded {
+            utf8,
+            dedent: if utf8.contains('\n') { 0 } else { usize::MAX },
+        }
+    }
+    fn one_liner(&self) -> bool {
         if self.dedent == usize::MAX {
             debug_assert!(!self.utf8.contains('\n'), "one_liner contains newline");
             true
@@ -62,7 +36,8 @@ impl<'a> Encoded<'a> {
             false
         }
     }
-
+    /// Returned iterator produces a sub-slice for each line, stripped of indentation
+    /// and line separators, in order, from `self`. Always produces at least one line.
     pub fn lines(&self) -> impl Iterator<Item = &'a str> {
         // that return type is tricky to satisfy: having two branches here (one
         // optimized for absent indentation) causes E0308 incompatible types:
@@ -75,7 +50,7 @@ impl<'a> Encoded<'a> {
             .enumerate()
             .map(move |(i, s)| if i == 0 || d == 0 { s } else { &s[d..] })
     }
-
+    /// Allocates a [String], filled with the UTF-8 copied from `self`.
     pub fn lines_joined(&self) -> String {
         let mut result = String::with_capacity(self.utf8.len());
         for line in self.lines() {
@@ -86,66 +61,6 @@ impl<'a> Encoded<'a> {
             result.truncate(result.len() - 1);
         }
         result
-    }
-}
-impl<'a> From<&'a str> for Encoded<'a> {
-    fn from(utf8: &'a str) -> Self {
-        Encoded {
-            utf8,
-            dedent: if utf8.contains('\n') { 0 } else { usize::MAX },
-        }
-    }
-}
-impl<'a> Display for Indented<'a, Encoded<'a>> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        if self.indent == self.value.dedent || self.value.one_liner() {
-            f.write_str(self.value.utf8)?;
-            f.write_char('\n')?;
-        } else {
-            let mut lines = self.value.lines();
-            if let Some(first) = lines.next() {
-                f.write_str(first)?;
-                f.write_char('\n')?;
-                for line in lines {
-                    f.write_indent(self.indent)?;
-                    f.write_str(&line[self.value.dedent..])?;
-                    f.write_char('\n')?;
-                }
-            };
-        }
-        Ok(())
-    }
-}
-impl<'a> Sliced<'a> for Indented<'a, Encoded<'a>> {
-    fn sliced(from: &'a str, start: usize, indent: usize) -> Result<Self, ParseErr> {
-        let bytes = &from.as_bytes()[start..];
-        let mut newlines = 0usize;
-        let indent = indent + 1;
-        let mut cursor = 0usize;
-        'outer: while cursor < bytes.len() {
-            if bytes[cursor] != b'\n' {
-                cursor += 1;
-                continue;
-            }
-            if cursor + indent >= bytes.len() {
-                break;
-            }
-            for offset in 0..indent {
-                if bytes[cursor + 1 + offset] != b'\t' {
-                    break 'outer;
-                }
-            }
-            cursor += 1 + indent;
-            newlines += 1;
-        }
-        let _value = Encoded {
-            utf8: &from[..cursor],
-            dedent: if newlines == 0 { usize::MAX } else { indent },
-        };
-        /*Ok(Indented{
-            indent,
-        value,})*/
-        todo!()
     }
 }
 
@@ -159,24 +74,15 @@ impl<'a> Sliced<'a> for Indented<'a, Encoded<'a>> {
 ///  + `#` for all prolog and epilog comments,
 ///  + `//` before (and about) the keys in a dictionary.
 ///
-/// The content is UTF-8 Github Flavored Markdown and kept in the serialized form. The
-/// fields are private because the serialized form is awkward to work with. An app that
-/// ignores the Comments does not have to pay for decoding them: in most cases the
-/// Comment content as read is already perfect for writing.
+/// The content is UTF-8 Github Flavored Markdown and kept in the serialized form.
 ///
 /// A field within the Value or File will hold the Comment, there is no mechanism to
 /// navigate from a Comment to the thing it describes.
 ///
-/// The content ownership can be tricky. The caller always provides an immutable
-/// string slice to one of the constructors, and the Comment keeps a sub-slice. Zero
-/// UTF-8 bytes are moved. But the lifetimes become entangled: the compiler will
-/// insist that the caller not drop the source of the string slice without first/also
-/// dropping the Comment.
-///
 /// # Examples
 ///
 /// ```
-/// let comment = tindalwic::Comment::from("with ~strikethrough~ extension");
+/// let comment = tindalwic::Comment::wrap("with ~strikethrough~ extension");
 ///
 /// let html = markdown::to_html_with_options(&comment.lines_joined(), &markdown::Options::gfm())
 ///   .expect("should never error, according to:
@@ -186,31 +92,27 @@ impl<'a> Sliced<'a> for Indented<'a, Encoded<'a>> {
 /// ```
 #[derive(Clone, Debug)]
 pub struct Comment<'a> {
-    pub encoded: Encoded<'a>,
-}
-impl<'a> Deref for Comment<'a> {
-    type Target = Encoded<'a>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.encoded
-    }
-}
-impl<'a> DerefMut for Comment<'a> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.encoded
-    }
-}
-impl<'a> From<&'a str> for Comment<'a> {
-    fn from(utf8: &'a str) -> Self {
-        Comment {
-            encoded: Encoded::from(utf8),
-        }
-    }
+    encoded: Encoded<'a>,
 }
 impl<'a> Comment<'a> {
+    /// Return a zero-copy instance using the provided literal (not indented) slice.
+    pub fn wrap(utf8: &'a str) -> Self {
+        Comment {
+            encoded: Encoded::wrap(utf8),
+        }
+    }
     /// instantiate into [Option::Some].
     pub fn some(utf8: &'a str) -> Option<Self> {
-        Some(Comment::from(utf8))
+        Some(Comment::wrap(utf8))
+    }
+    /// Returned iterator produces a sub-slice for each line, stripped of indentation
+    /// and line separators, in order, from `self`. Always produces at least one line.
+    pub fn lines(&self) -> impl Iterator<Item = &'a str> {
+        self.encoded.lines()
+    }
+    /// Allocates a [String], filled with the UTF-8 copied from `self`.
+    pub fn lines_joined(&self) -> String {
+        self.encoded.lines_joined()
     }
 }
 /// Serialize using the "#" marker (ignoring any actual position).
@@ -220,7 +122,7 @@ impl<'a> Comment<'a> {
 /// ```
 /// fn check(gfm: &str) {
 ///     let expected = format!("#{}\n", gfm.replace("\n", "\n\t"));
-///     assert_eq!(tindalwic::Comment::from(gfm).to_string(), expected);
+///     assert_eq!(tindalwic::Comment::wrap(gfm).to_string(), expected);
 /// }
 /// check("one-liner");
 /// check("two\nlines");
@@ -233,49 +135,8 @@ impl<'a> Comment<'a> {
 /// );
 /// ```
 impl<'a> Display for Comment<'a> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        Display::fmt(
-            &Marked {
-                indent: 0,
-                marker: "#",
-                value: self,
-            },
-            f,
-        )
-    }
-}
-impl<'a> Display for Marked<'a, Comment<'a>> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_indent(self.indent)?;
-        f.write_str(self.marker)?;
-        Display::fmt(
-            &Indented {
-                indent: self.indent + 1,
-                value: &self.value.encoded,
-            },
-            f,
-        )
-    }
-}
-impl<'a> Display for Marked<'a, Option<Comment<'a>>> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        if let Some(comment) = &self.value {
-            Display::fmt(
-                &Marked {
-                    indent: self.indent,
-                    marker: self.marker,
-                    value: comment,
-                },
-                f,
-            )?;
-        }
-        Ok(())
-    }
-}
-impl<'a> Sliced<'a> for Comment<'a> {
-    #[allow(unused)]
-    fn sliced(from: &'a str, start: usize, indent: usize) -> Result<Self, ParseErr> {
-        todo!()
+    fn fmt(&self, out: &mut Formatter<'_>) -> fmt::Result {
+        Output { out, indent: 0 }.some_comment("#", self)
     }
 }
 
@@ -284,23 +145,23 @@ impl<'a> Sliced<'a> for Comment<'a> {
 /// the fields of a [Value::Text]
 #[derive(Clone, Debug)]
 pub struct Text<'a> {
-    pub encoded: Encoded<'a>,
+    encoded: Encoded<'a>,
     /// A Text can have a Comment after it.
     pub epilog: Option<Comment<'a>>,
 }
-impl<'a> Deref for Text<'a> {
-    type Target = Encoded<'a>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.encoded
-    }
-}
-impl<'a> DerefMut for Text<'a> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.encoded
+impl<'a> Display for Text<'a> {
+    fn fmt(&self, out: &mut Formatter<'_>) -> fmt::Result {
+        Output { out, indent: 0 }.text_in_list(self)
     }
 }
 impl<'a> Text<'a> {
+    /// Return a zero-copy instance using the provided literal (not indented) slice.
+    pub fn wrap(utf8: &'a str) -> Self {
+        Text {
+            encoded: Encoded::wrap(utf8),
+            epilog: None,
+        }
+    }
     fn one_liner_in_list(&self) -> bool {
         if !self.encoded.one_liner() {
             false
@@ -327,69 +188,14 @@ impl<'a> Text<'a> {
             )
         }
     }
-}
-impl<'a> Display for Text<'a> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        Display::fmt(
-            &Indented {
-                indent: 0,
-                value: self,
-            },
-            f,
-        )
+    /// Returned iterator produces a sub-slice for each line, stripped of indentation
+    /// and line separators, in order, from `self`. Always produces at least one line.
+    pub fn lines(&self) -> impl Iterator<Item = &'a str> {
+        self.encoded.lines()
     }
-}
-impl<'a> Display for Indented<'a, Text<'a>> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_indent(self.indent)?;
-        if self.value.one_liner_in_list() {
-            f.write_str(self.value.encoded.utf8)?;
-            f.write_char('\n')?;
-        } else {
-            f.write_str("<>\n")?;
-            let more = Indented {
-                indent: self.indent + 1,
-                value: &self.value.encoded,
-            };
-            Display::fmt(&more, f)?;
-        }
-        Display::fmt(
-            &Marked {
-                indent: self.indent,
-                marker: "#",
-                value: &self.value.epilog,
-            },
-            f,
-        )
-    }
-}
-impl<'a> Display for Marked<'a, Text<'a>> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_indent(self.indent)?;
-        if self.value.one_liner_in_dict(self.marker) {
-            f.write_str(self.marker)?;
-            f.write_char('=')?;
-            f.write_str(self.value.encoded.utf8)?;
-            f.write_char('\n')?;
-        } else {
-            f.write_char('<')?;
-            f.write_str(self.marker)?;
-            f.write_str(">\n")?;
-            let more = Indented {
-                indent: self.indent + 1,
-                value: &self.value.encoded,
-            };
-            f.write_indent(more.indent)?;
-            Display::fmt(&more, f)?;
-        }
-        Display::fmt(
-            &Marked {
-                indent: self.indent,
-                marker: "#",
-                value: &self.value.epilog,
-            },
-            f,
-        )
+    /// Allocates a [String], filled with the UTF-8 copied from `self`.
+    pub fn lines_joined(&self) -> String {
+        self.encoded.lines_joined()
     }
 }
 
@@ -418,90 +224,8 @@ impl<'a> DerefMut for List<'a> {
     }
 }
 impl<'a> Display for List<'a> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        Display::fmt(
-            &Indented {
-                indent: 0,
-                value: self,
-            },
-            f,
-        )
-    }
-}
-impl<'a> Display for Indented<'a, Vec<Value<'a>>> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        for item in self.value {
-            Display::fmt(
-                &Indented {
-                    indent: self.indent,
-                    value: item,
-                },
-                f,
-            )?;
-        }
-        Ok(())
-    }
-}
-impl<'a> Display for Indented<'a, List<'a>> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_indent(self.indent)?;
-        f.write_str("[]\n")?;
-        let more = self.indent + 1;
-        Display::fmt(
-            &Marked {
-                indent: more,
-                marker: "#",
-                value: &self.value.prolog,
-            },
-            f,
-        )?;
-        Display::fmt(
-            &Indented {
-                indent: more,
-                value: &self.value.vec,
-            },
-            f,
-        )?;
-        Display::fmt(
-            &Marked {
-                indent: self.indent,
-                marker: "#",
-                value: &self.value.epilog,
-            },
-            f,
-        )
-    }
-}
-impl<'a> Display for Marked<'a, List<'a>> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_indent(self.indent)?;
-        f.write_char('[')?;
-        f.write_str(self.marker)?;
-        f.write_str("]\n")?;
-        let more = self.indent + 1;
-        Display::fmt(
-            &Marked {
-                indent: more,
-                marker: "#",
-                value: &self.value.prolog,
-            },
-            f,
-        )?;
-        Display::fmt(
-            &Indented {
-                indent: more,
-                value: &self.value.vec,
-            },
-            f,
-        )?;
-        Display::fmt(
-            &Marked {
-                indent: self.indent,
-                marker: "#",
-                value: &self.value.epilog,
-            },
-            f,
-        )
+    fn fmt(&self, out: &mut Formatter<'_>) -> fmt::Result {
+        Output { out, indent: 0 }.list_in_list(self)
     }
 }
 
@@ -555,6 +279,11 @@ impl<'a> DerefMut for Dict<'a> {
         &mut self.vec
     }
 }
+impl<'a> Display for Dict<'a> {
+    fn fmt(&self, out: &mut Formatter<'_>) -> fmt::Result {
+        Output { out, indent: 0 }.dict_in_list(self)
+    }
+}
 impl<'a> Dict<'a> {
     /// returns the position of the entry with the given key.
     pub fn position(&self, key: &str) -> Option<usize> {
@@ -567,106 +296,6 @@ impl<'a> Dict<'a> {
     /// returns a mutable reference to the entry with the given key.
     pub fn find_mut(&mut self, key: &str) -> Option<&mut Keyed<'a>> {
         self.position(key).map(|i| &mut self.vec[i])
-    }
-}
-impl<'a> Display for Dict<'a> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        Display::fmt(
-            &Indented {
-                indent: 0,
-                value: self,
-            },
-            f,
-        )
-    }
-}
-impl<'a> Display for Indented<'a, Vec<Keyed<'a>>> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        for item in self.value {
-            if item.gap {
-                // TODO be strict? f.write_indent(self.indent)?;
-                f.write_char('\n')?;
-            }
-            Display::fmt(
-                &Marked {
-                    indent: self.indent,
-                    marker: "//",
-                    value: &item.before,
-                },
-                f,
-            )?;
-            Display::fmt(
-                &Marked {
-                    indent: self.indent,
-                    marker: item.key,
-                    value: &item.value,
-                },
-                f,
-            )?;
-        }
-        Ok(())
-    }
-}
-impl<'a> Display for Indented<'a, Dict<'a>> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_indent(self.indent)?;
-        f.write_str("{}\n")?;
-        let more = self.indent + 1;
-        Display::fmt(
-            &Marked {
-                indent: more,
-                marker: "#",
-                value: &self.value.prolog,
-            },
-            f,
-        )?;
-        Display::fmt(
-            &Indented {
-                indent: more,
-                value: &self.value.vec,
-            },
-            f,
-        )?;
-        Display::fmt(
-            &Marked {
-                indent: self.indent,
-                marker: "#",
-                value: &self.value.epilog,
-            },
-            f,
-        )
-    }
-}
-impl<'a> Display for Marked<'a, Dict<'a>> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_indent(self.indent)?;
-        f.write_char('{')?;
-        f.write_str(self.marker)?;
-        f.write_str("}\n")?;
-        let more = self.indent + 1;
-        Display::fmt(
-            &Marked {
-                indent: more,
-                marker: "#",
-                value: &self.value.prolog,
-            },
-            f,
-        )?;
-        Display::fmt(
-            &Indented {
-                indent: more,
-                value: &self.value.vec,
-            },
-            f,
-        )?;
-        Display::fmt(
-            &Marked {
-                indent: self.indent,
-                marker: "#",
-                value: &self.value.epilog,
-            },
-            f,
-        )
     }
 }
 
@@ -683,71 +312,8 @@ pub enum Value<'a> {
     Dict(Dict<'a>),
 }
 impl<'a> Display for Value<'a> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        Display::fmt(
-            &Indented {
-                indent: 0,
-                value: self,
-            },
-            f,
-        )
-    }
-}
-impl<'a> Display for Indented<'a, Value<'a>> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self.value {
-            Value::Text(text) => Display::fmt(
-                &Indented {
-                    indent: self.indent,
-                    value: text,
-                },
-                f,
-            ),
-            Value::List(list) => Display::fmt(
-                &Indented {
-                    indent: self.indent,
-                    value: list,
-                },
-                f,
-            ),
-            Value::Dict(dict) => Display::fmt(
-                &Indented {
-                    indent: self.indent,
-                    value: dict,
-                },
-                f,
-            ),
-        }
-    }
-}
-impl<'a> Display for Marked<'a, Value<'a>> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self.value {
-            Value::Text(text) => Display::fmt(
-                &Marked {
-                    indent: self.indent,
-                    marker: self.marker,
-                    value: text,
-                },
-                f,
-            ),
-            Value::List(list) => Display::fmt(
-                &Marked {
-                    indent: self.indent,
-                    marker: self.marker,
-                    value: list,
-                },
-                f,
-            ),
-            Value::Dict(dict) => Display::fmt(
-                &Marked {
-                    indent: self.indent,
-                    marker: self.marker,
-                    value: dict,
-                },
-                f,
-            ),
-        }
+    fn fmt(&self, out: &mut Formatter<'_>) -> fmt::Result {
+        Output { out, indent: 0 }.value_in_list(self)
     }
 }
 
@@ -777,6 +343,11 @@ impl<'a> DerefMut for File<'a> {
         &mut self.vec
     }
 }
+impl<'a> Display for File<'a> {
+    fn fmt(&self, out: &mut Formatter<'_>) -> fmt::Result {
+        Output { out, indent: 0 }.file(self)
+    }
+}
 impl<'a> File<'a> {
     /// returns the position of the entry with the given key.
     pub fn position(&self, key: &str) -> Option<usize> {
@@ -791,46 +362,19 @@ impl<'a> File<'a> {
         self.position(key).map(|i| &mut self.vec[i])
     }
 }
-impl<'a> Display for File<'a> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        Display::fmt(
-            &Marked {
-                indent: 0,
-                marker: "#!",
-                value: &self.hashbang,
-            },
-            f,
-        )?;
-        Display::fmt(
-            &Marked {
-                indent: 0,
-                marker: "#",
-                value: &self.prolog,
-            },
-            f,
-        )?;
-        Display::fmt(
-            &Indented {
-                indent: 0,
-                value: &self.vec,
-            },
-            f,
-        )
-    }
-}
 
 // ------------------------------------------------------------------------------------
 
+/// build a Tindalwic [File] or [Value] from JSON literals.
+///
+/// This macro does not provide any mechanism to set [Comment]s.
 #[macro_export]
 macro_rules! tindalwic {
     ( $name:ident ) => {
         $name
     };
     ( $text:literal ) => {
-        Value::Text(Text{
-            encoded: Encoded::from($text),
-            epilog: None,
-        })
+        Value::Text(Text::wrap($text))
     };
     ( [ $( $items:tt ),* ] ) => {
         Value::List(List{
@@ -855,6 +399,189 @@ macro_rules! tindalwic {
     };
 }
 
+// ====================================================================================
+
+struct Output<'a, 'f> {
+    out: &'a mut Formatter<'f>,
+    indent: usize,
+}
+impl<'a, 'f> Output<'a, 'f> {
+    fn indent(&mut self) -> fmt::Result {
+        for _ in 0..self.indent {
+            self.out.write_char('\t')?;
+        }
+        Ok(())
+    }
+    fn encoded(&mut self, encoded: &Encoded<'a>) -> fmt::Result {
+        if self.indent == encoded.dedent || encoded.one_liner() {
+            self.out.write_str(encoded.utf8)?;
+            self.out.write_char('\n')?;
+        } else {
+            let mut lines = encoded.lines();
+            if let Some(first) = lines.next() {
+                self.out.write_str(first)?;
+                self.out.write_char('\n')?;
+                for line in lines {
+                    self.indent()?;
+                    self.out.write_str(&line[encoded.dedent..])?;
+                    self.out.write_char('\n')?;
+                }
+            };
+        }
+        Ok(())
+    }
+    fn some_comment(&mut self, marker: &'a str, comment: &Comment<'a>) -> fmt::Result {
+        self.indent()?;
+        self.out.write_str(marker)?;
+        self.indent += 1;
+        self.encoded(&comment.encoded)?;
+        self.indent -= 1;
+        Ok(())
+    }
+    fn comment(&mut self, marker: &'a str, option: &Option<Comment<'a>>) -> fmt::Result {
+        if let Some(comment) = option {
+            self.some_comment(marker, comment)?;
+        }
+        Ok(())
+    }
+    fn text_in_list(&mut self, text: &Text<'a>) -> fmt::Result {
+        self.indent()?;
+        if text.one_liner_in_list() {
+            self.out.write_str(text.encoded.utf8)?;
+            self.out.write_char('\n')?;
+        } else {
+            self.out.write_str("<>\n")?;
+            self.indent += 1;
+            self.indent()?;
+            self.encoded(&text.encoded)?;
+            self.indent -= 1;
+        }
+        self.comment("#", &text.epilog)
+    }
+    fn text_in_dict(&mut self, key: &'a str, text: &Text<'a>) -> fmt::Result {
+        self.indent()?;
+        if text.one_liner_in_dict(key) {
+            self.out.write_str(key)?;
+            self.out.write_char('=')?;
+            self.out.write_str(text.encoded.utf8)?;
+            self.out.write_char('\n')?;
+        } else {
+            self.out.write_char('<')?;
+            self.out.write_str(key)?;
+            self.out.write_str(">\n")?;
+            self.indent += 1;
+            self.indent()?;
+            self.encoded(&text.encoded)?;
+            self.indent -= 1;
+        }
+        self.comment("#", &text.epilog)
+    }
+    fn list_in_list(&mut self, list: &List<'a>) -> fmt::Result {
+        self.indent()?;
+        self.out.write_str("[]\n")?;
+        self.indent += 1;
+        for value in &list.vec {
+            self.value_in_list(value)?;
+        }
+        self.indent -= 1;
+        self.comment("#", &list.epilog)
+    }
+    fn list_in_dict(&mut self, key: &'a str, list: &List<'a>) -> fmt::Result {
+        self.indent()?;
+        self.out.write_char('[')?;
+        self.out.write_str(key)?;
+        self.out.write_str("]\n")?;
+        self.indent += 1;
+        for value in &list.vec {
+            self.value_in_list(value)?;
+        }
+        self.indent -= 1;
+        self.comment("#", &list.epilog)
+    }
+    fn dict_in_list(&mut self, dict: &Dict<'a>) -> fmt::Result {
+        self.indent()?;
+        self.out.write_str("{}\n")?;
+        self.indent += 1;
+        for keyed in &dict.vec {
+            self.value_in_dict(keyed)?;
+        }
+        self.indent -= 1;
+        self.comment("#", &dict.epilog)
+    }
+    fn dict_in_dict(&mut self, key: &'a str, dict: &Dict<'a>) -> fmt::Result {
+        self.indent()?;
+        self.out.write_char('{')?;
+        self.out.write_str(key)?;
+        self.out.write_str("}\n")?;
+        self.indent += 1;
+        for keyed in &dict.vec {
+            self.value_in_dict(keyed)?;
+        }
+        self.indent -= 1;
+        self.comment("#", &dict.epilog)
+    }
+    fn value_in_list(&mut self, value: &Value<'a>) -> fmt::Result {
+        match value {
+            Value::Text(text) => self.text_in_list(text),
+            Value::List(list) => self.list_in_list(list),
+            Value::Dict(dict) => self.dict_in_list(dict),
+        }
+    }
+    fn value_in_dict(&mut self, keyed: &Keyed<'a>) -> fmt::Result {
+        if keyed.gap {
+            // TODO be strict? f.write_indent(self.indent)?;
+            self.out.write_char('\n')?;
+        }
+        self.comment("//", &keyed.before)?;
+        match &keyed.value {
+            Value::Text(text) => self.text_in_dict(keyed.key, text),
+            Value::List(list) => self.list_in_dict(keyed.key, list),
+            Value::Dict(dict) => self.dict_in_dict(keyed.key, dict),
+        }
+    }
+    fn file(&mut self, file: &File<'a>) -> fmt::Result {
+        self.comment("#!", &file.hashbang)?;
+        self.comment("#", &file.prolog)?;
+        for keyed in &file.vec {
+            self.value_in_dict(keyed)?;
+        }
+        Ok(())
+    }
+}
+
+struct Input<'a> {
+    src: &'a str,
+    next: usize,
+    indent:usize,
+}
+impl<'a> Input<'a> {
+    fn encoded(&mut self, from: &'a str, start: usize) -> Encoded {
+        let bytes = &from.as_bytes()[start..];
+        let mut newlines = 0usize;
+        let indent = self.indent + 1;
+        let mut cursor = 0usize;
+        'outer: while cursor < bytes.len() {
+            if bytes[cursor] != b'\n' {
+                cursor += 1;
+                continue;
+            }
+            if cursor + indent >= bytes.len() {
+                break;
+            }
+            for offset in 0..indent {
+                if bytes[cursor + 1 + offset] != b'\t' {
+                    break 'outer;
+                }
+            }
+            cursor += 1 + indent;
+            newlines += 1;
+        }
+        Encoded {
+            utf8: &from[..cursor],
+            dedent: if newlines == 0 { usize::MAX } else { indent },
+        }
+    }
+}
 // ====================================================================================
 
 /// an [Err] [Result] for path resolution

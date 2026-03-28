@@ -1,0 +1,17 @@
+[package]
+name = "tindalwic-macros"
+version = "0.1.0"
+edition = "2024"
+description = "macros for the tindalwic package"
+license = "MIT OR Apache-2.0"
+authors = ["Comments Are Important <comments.are.important@gmail.com>"]
+
+[lib]
+name = "tindalwic_macros"
+path = "src/lib.rs"
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1.0.106"
+quote = "1.0.45"
+syn = { version = "2.0.117", default-features = false, features = ["parsing", "printing", "proc-macro"] }

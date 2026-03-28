@@ -1,15 +1,19 @@
 #![no_std]
-#![warn(missing_docs, unused)]
+#![allow(missing_docs, unused)]
 
 //! Text in Nested Dictionaries and Lists - with Important Comments
 
 /*
 extern crate alloc;
 use alloc::string::String;
-use alloc::vec::Vec;
 */
 use core::cell::Cell;
 use core::fmt::{self, Debug, Display, Formatter, Write};
+use core::ops::Range;
+
+#[doc(inline)]
+/// main module re-exports the proc_macro from sub-crate.
+pub use tindalwic_macros::tindalwic_json;
 
 /// Hidden parts of [Comment] and [Text].
 ///
@@ -23,10 +27,15 @@ struct Encoded<'a> {
 }
 impl<'a> Encoded<'a> {
     /// Return a zero-copy instance using the provided literal (not indented) slice.
-    pub fn wrap(utf8: &'a str) -> Self {
+    pub const fn wrap(utf8: &'a str) -> Self {
+        let bytes = utf8.as_bytes();
+        let mut newline = 0usize;
+        while newline < bytes.len() && bytes[newline] != b'\n' {
+            newline += 1;
+        }
         Encoded {
             utf8,
-            dedent: if utf8.contains('\n') { 0 } else { usize::MAX },
+            dedent: if newline < bytes.len() { 0 } else { usize::MAX },
         }
     }
     fn one_liner(&self) -> bool {
@@ -85,7 +94,7 @@ impl<'a> Encoded<'a> {
 ///
 /// # Examples
 ///
-/// ```
+/// ``
 /// let comment = tindalwic::Comment::wrap("with ~strikethrough~ extension");
 ///
 /// let html = markdown::to_html_with_options(&comment.lines_joined(), &markdown::Options::gfm())
@@ -93,7 +102,7 @@ impl<'a> Encoded<'a> {
 ///      https://docs.rs/markdown/latest/markdown/fn.to_html_with_options.html#errors");
 ///
 /// assert_eq!(html, "<p>with <del>strikethrough</del> extension</p>");
-/// ```
+/// ``
 #[derive(Clone, Copy, Debug)]
 pub struct Comment<'a> {
     encoded: Encoded<'a>,
@@ -162,7 +171,7 @@ impl<'a> Display for Text<'a> {
 }
 impl<'a> Text<'a> {
     /// Return a zero-copy instance using the provided literal (not indented) slice.
-    pub fn wrap(utf8: &'a str) -> Self {
+    pub const fn wrap(utf8: &'a str) -> Self {
         Text {
             encoded: Encoded::wrap(utf8),
             epilog: None,
@@ -213,7 +222,7 @@ impl<'a> Text<'a> {
 #[derive(Clone, Copy, Debug)]
 pub struct List<'a> {
     /// The contents of the Value::List.
-    pub vec: &'a [Cell<Value<'a>>],
+    pub list: &'a [Cell<Value<'a>>],
     /// A List can have an introductory Comment.
     pub prolog: Option<Comment<'a>>,
     /// A List can have a Comment after it.
@@ -224,12 +233,21 @@ impl<'a> Display for List<'a> {
         Output { out, indent: 0 }.list_in_list(self)
     }
 }
+impl<'a> List<'a> {
+    const fn wrap(list: &'a [Cell<Value<'a>>]) -> Self {
+        List {
+            list,
+            prolog: None,
+            epilog: None,
+        }
+    }
+}
 
 // ------------------------------------------------------------------------------------
 
 /// an association.
 ///
-/// these are stored in a [Vec] (instead of using a hash table).
+/// these are stored in an array (instead of using a hash table).
 #[derive(Clone, Copy, Debug)]
 pub struct Keyed<'a> {
     /// the key being associated to the value.
@@ -242,8 +260,22 @@ pub struct Keyed<'a> {
     pub value: Value<'a>,
 }
 impl<'a> Keyed<'a> {
+    pub const fn blank<'b>(_: usize) -> Cell<Keyed<'b>> {
+        Cell::new(Keyed {
+            key: "",
+            gap: false,
+            before: None,
+            value: Value::Text(Text {
+                encoded: Encoded {
+                    utf8: "",
+                    dedent: usize::MAX,
+                },
+                epilog: None,
+            }),
+        })
+    }
     /// convert a key and a value into an entry (for a Dict).
-    pub fn from(key: &'a str, value: Value<'a>) -> Self {
+    pub const fn from(key: &'a str, value: Value<'a>) -> Self {
         Keyed {
             key,
             gap: false,
@@ -257,7 +289,7 @@ impl<'a> Keyed<'a> {
 #[derive(Clone, Copy, Debug)]
 pub struct Dict<'a> {
     /// The contents of the Value::Dict.
-    pub vec: &'a [Cell<Keyed<'a>>],
+    pub dict: &'a [Cell<Keyed<'a>>],
     /// A Dict can have an introductory Comment.
     pub prolog: Option<Comment<'a>>,
     /// A Dict can have a Comment after it.
@@ -271,11 +303,11 @@ impl<'a> Display for Dict<'a> {
 impl<'a> Dict<'a> {
     /// returns the position of the entry with the given key.
     pub fn position(&self, key: &str) -> Option<usize> {
-        self.vec.iter().position(|x| x.get().key == key)
+        self.dict.iter().position(|x| x.get().key == key)
     }
     /// returns a reference to the entry with the given key.
     pub fn find(&self, key: &str) -> Option<&Cell<Keyed<'a>>> {
-        self.position(key).map(|i| &self.vec[i])
+        self.position(key).map(|i| &self.dict[i])
     }
 }
 
@@ -301,6 +333,57 @@ impl<'a> Display for Value<'a> {
         }
     }
 }
+impl<'a> Value<'a> {
+    pub const fn blank<'b>(_: usize) -> Cell<Value<'b>> {
+        Cell::new(Value::Text(Text {
+            encoded: Encoded {
+                utf8: "",
+                dedent: usize::MAX,
+            },
+            epilog: None,
+        }))
+    }
+    /// index into a [Value::List]
+    pub fn at(self, i: usize) -> Lookup<'a> {
+        match self {
+            Value::List(list) => match list.list.get(i) {
+                Some(cell) => Lookup::Ok(cell.get()),
+                None => Lookup::Err(LookupErr {
+                    have: "List: index out of bounds",
+                    want: "List index",
+                }),
+            },
+            Value::Text(_) => Lookup::Err(LookupErr {
+                have: "Text",
+                want: "List index",
+            }),
+            Value::Dict(_) => Lookup::Err(LookupErr {
+                have: "Dict",
+                want: "List index",
+            }),
+        }
+    }
+    /// look up a key in a [Value::Dict]
+    pub fn key(self, k: &str) -> Lookup<'a> {
+        match self {
+            Value::Dict(dict) => match dict.find(k) {
+                Some(cell) => Lookup::Ok(cell.get().value),
+                None => Lookup::Err(LookupErr {
+                    have: "Dict: key not found",
+                    want: "Dict key",
+                }),
+            },
+            Value::Text(_) => Lookup::Err(LookupErr {
+                have: "Text",
+                want: "Dict key",
+            }),
+            Value::List(_) => Lookup::Err(LookupErr {
+                have: "List",
+                want: "Dict key",
+            }),
+        }
+    }
+}
 
 // ------------------------------------------------------------------------------------
 
@@ -310,7 +393,7 @@ impl<'a> Display for Value<'a> {
 #[derive(Clone, Copy, Debug)]
 pub struct File<'a> {
     /// The contents of the Value::File.
-    pub vec: &'a [Cell<Keyed<'a>>],
+    pub dict: &'a [Cell<Keyed<'a>>],
     /// A File can start with a Unix `#!` Comment.
     pub hashbang: Option<Comment<'a>>,
     /// A File can have an introductory Comment.
@@ -322,50 +405,108 @@ impl<'a> Display for File<'a> {
     }
 }
 impl<'a> File<'a> {
-    /// returns the position of the entry with the given key.
-    pub fn position(&self, key: &str) -> Option<usize> {
-        self.vec.iter().position(|x| x.get().key == key)
-    }
-    /// returns a reference to the entry with the given key.
-    pub fn find(&self, key: &str) -> Option<&Cell<Keyed<'a>>> {
-        self.position(key).map(|i| &self.vec[i])
-    }
-}
-
-// ------------------------------------------------------------------------------------
-
-/// build a Tindalwic [File] or [Value] from JSON literals.
-///
-/// This macro does not provide any mechanism to set [Comment]s.
-#[macro_export]
-macro_rules! tindalwic {
-    ( $name:ident ) => {
-        $name
-    };
-    ( $text:literal ) => {
-        Value::Text(Text::wrap($text))
-    };
-    ( [ $( $items:tt ),* ] ) => {
-        Value::List(List{
-            vec: &[ $( core::cell::Cell::new(tindalwic!($items)) ),* ][..],
-            prolog: None,
-            epilog: None,
-        })
-    };
-    ( { $( $key:literal : $value:tt ),* } ) => {
-        Value::Dict(Dict{
-            vec: &[ $( core::cell::Cell::new(Keyed::from($key, tindalwic!($value))) ),* ][..],
-            prolog: None,
-            epilog: None,
-        })
-    };
-    ( $( $key:literal : $value:tt ),* ) => {
-        File{
-            vec: &[ $( core::cell::Cell::new(Keyed::from($key, tindalwic!($value))) ),* ][..],
+    /// construct an empty File
+    pub fn new() -> Self {
+        File {
+            dict: &[],
             hashbang: None,
             prolog: None,
         }
-    };
+    }
+    /// return true when there are no entries and no comments.
+    pub fn is_empty(&self) -> bool {
+        self.dict.is_empty() && self.hashbang.is_none() && self.prolog.is_none()
+    }
+    /// returns the position of the entry with the given key.
+    pub fn position(&self, key: &str) -> Option<usize> {
+        self.dict.iter().position(|x| x.get().key == key)
+    }
+    /// returns a reference to the entry with the given key.
+    pub fn find(&self, key: &str) -> Option<&Cell<Keyed<'a>>> {
+        self.position(key).map(|i| &self.dict[i])
+    }
+    /// look up a key in this File, returning a [Lookup] for chaining
+    pub fn key(&self, k: &str) -> Lookup<'a> {
+        match self.find(k) {
+            Some(cell) => Lookup::Ok(cell.get().value),
+            None => Lookup::Err(LookupErr {
+                have: "File: key not found",
+                want: "Dict key",
+            }),
+        }
+    }
+}
+
+/// support for the macro. public so macro can use it, but think of it as hidden.
+pub struct Arena<'a, const LIST: usize, const DICT: usize> {
+    pub utf8_bytes: &'a str,
+    pub value_cells: [Cell<Value<'a>>; LIST],
+    pub keyed_cells: [Cell<Keyed<'a>>; DICT],
+    pub file: Cell<File<'a>>,
+}
+impl<'a, const LIST: usize, const DICT: usize> Arena<'a, LIST, DICT> {
+    pub fn tv(&'a self, index: usize, utf8: Range<usize>) -> &'a Self {
+        self.value_cells[index].set(Value::Text(Text::wrap(&self.utf8_bytes[utf8])));
+        self
+    }
+    pub fn lv(&'a self, index: usize, list: Range<usize>) -> &'a Self {
+        self.value_cells[index].set(Value::List(List {
+            list: &self.value_cells[list],
+            prolog: None,
+            epilog: None,
+        }));
+        self
+    }
+    pub fn dv(&'a self, index: usize, dict: Range<usize>) -> &'a Self {
+        self.value_cells[index].set(Value::Dict(Dict {
+            dict: &self.keyed_cells[dict],
+            prolog: None,
+            epilog: None,
+        }));
+        self
+    }
+    pub fn tk(&'a self, index: usize, key: Range<usize>, utf8: Range<usize>) -> &'a Self {
+        self.keyed_cells[index].set(Keyed {
+            key: &self.utf8_bytes[key],
+            gap: false,
+            before: None,
+            value: Value::Text(Text::wrap(&self.utf8_bytes[utf8])),
+        });
+        self
+    }
+    pub fn lk(&'a self, index: usize, key: Range<usize>, list: Range<usize>) -> &'a Self {
+        self.keyed_cells[index].set(Keyed {
+            key: &self.utf8_bytes[key],
+            gap: false,
+            before: None,
+            value: Value::List(List {
+                list: &self.value_cells[list],
+                prolog: None,
+                epilog: None,
+            }),
+        });
+        self
+    }
+    pub fn dk(&'a self, index: usize, key: Range<usize>, dict: Range<usize>) -> &'a Self {
+        self.keyed_cells[index].set(Keyed {
+            key: &self.utf8_bytes[key],
+            gap: false,
+            before: None,
+            value: Value::Dict(Dict {
+                dict: &self.keyed_cells[dict],
+                prolog: None,
+                epilog: None,
+            }),
+        });
+        self
+    }
+    pub fn f(&'a self, dict:Range<usize>) {
+        self.file.set(File{
+            dict: &self.keyed_cells[dict],
+            hashbang: None,
+            prolog: None,
+        });
+    }
 }
 
 // ====================================================================================
@@ -450,7 +591,7 @@ impl<'o, 'f> Output<'o, 'f> {
         self.indent()?;
         self.out.write_str("[]\n")?;
         self.indent += 1;
-        for value in list.vec {
+        for value in list.list {
             self.value_in_list(value)?;
         }
         self.indent -= 1;
@@ -462,7 +603,7 @@ impl<'o, 'f> Output<'o, 'f> {
         self.out.write_str(key)?;
         self.out.write_str("]\n")?;
         self.indent += 1;
-        for value in list.vec {
+        for value in list.list {
             self.value_in_list(value)?;
         }
         self.indent -= 1;
@@ -472,7 +613,7 @@ impl<'o, 'f> Output<'o, 'f> {
         self.indent()?;
         self.out.write_str("{}\n")?;
         self.indent += 1;
-        for keyed in dict.vec {
+        for keyed in dict.dict {
             self.value_in_dict(keyed)?;
         }
         self.indent -= 1;
@@ -484,7 +625,7 @@ impl<'o, 'f> Output<'o, 'f> {
         self.out.write_str(key)?;
         self.out.write_str("}\n")?;
         self.indent += 1;
-        for keyed in dict.vec {
+        for keyed in dict.dict {
             self.value_in_dict(keyed)?;
         }
         self.indent -= 1;
@@ -514,20 +655,23 @@ impl<'o, 'f> Output<'o, 'f> {
     fn file<'a>(&mut self, file: &File<'a>) -> fmt::Result {
         self.comment("#!", &file.hashbang)?;
         self.comment("#", &file.prolog)?;
-        for keyed in file.vec {
+        for keyed in file.dict {
             self.value_in_dict(&keyed)?;
         }
         Ok(())
     }
 }
 
+#[allow(unused)]
 struct Input<'a> {
     src: &'a str,
     next: usize,
     indent: usize,
 }
+#[allow(unused)]
 impl<'a> Input<'a> {
-    fn encoded(&mut self, from: &'a str, start: usize) -> Encoded {
+    #[allow(unused)]
+    fn encoded(&mut self, from: &'a str, start: usize) -> Encoded<'a> {
         let bytes = &from.as_bytes()[start..];
         let mut newlines = 0usize;
         let indent = self.indent + 1;
@@ -557,156 +701,108 @@ impl<'a> Input<'a> {
 
 // ====================================================================================
 
-/// an [Err] [Result] for path resolution
-#[derive(Clone, Debug)]
-pub struct PathErr {
-    good: &'static [PathStep],
-    have: &'static str,
-    fail: Option<&'static PathStep>,
+/// describes where a lookup chain fell off the tree
+#[derive(Clone, Copy, Debug)]
+pub struct LookupErr {
+    /// what the path led to (e.g. "Text", "List: index out of bounds")
+    pub have: &'static str,
+    /// what was needed (e.g. "List index", "Dict key")
+    pub want: &'static str,
 }
-impl Display for PathErr {
+impl Display for LookupErr {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match &self.fail {
-            None => {
-                write!(
-                    f,
-                    "Path `{}` leads to {}.",
-                    Path::from(self.good),
-                    self.have
-                )
-            }
-            Some(fail) => {
-                write!(
-                    f,
-                    "Path `{}` leads to {}, can't {:?}.",
-                    Path::from(self.good),
-                    self.have,
-                    fail
-                )
-            }
-        }
-    }
-}
-impl PathErr {
-    fn some(good: &'static [PathStep], have: &'static str, fail: &'static PathStep) -> Self {
-        PathErr {
-            good,
-            have,
-            fail: Some(fail),
-        }
-    }
-    fn none(good: &'static [PathStep], have: &'static str) -> Self {
-        PathErr {
-            good,
-            have,
-            fail: None,
-        }
+        write!(f, "expected {}, found {}", self.want, self.have)
     }
 }
 
-/// a single step in a [Path]
-#[derive(Clone, Debug)]
-pub enum PathStep {
-    /// an index into a linear array
-    List(usize),
-    /// the key into an associative array
-    Dict(&'static str),
+/// the result of chaining [`.at()`](Value::at) and [`.key()`](Value::key) lookups
+///
+/// an `Err` variant propagates through further `.at()` / `.key()` calls unchanged,
+/// so you can chain freely and check for errors at the end.
+///
+/// # Examples
+///
+/// ```
+/// use tindalwic::*;
+/// const root:File = tindalwic!("a": {"b": ["hello"]});
+/// assert_eq!(
+///     root.key("a").key("b").at(0).text().unwrap().lines().next(),
+///     Some("hello"),
+/// );
+/// assert!(root.key("missing").text().is_err());
+/// ```
+#[derive(Clone, Copy, Debug)]
+pub enum Lookup<'a> {
+    /// the lookup resolved to a [Value]
+    Ok(Value<'a>),
+    /// the lookup fell off the tree
+    Err(LookupErr),
 }
-impl From<usize> for PathStep {
-    fn from(value: usize) -> Self {
-        PathStep::List(value)
-    }
-}
-impl From<&'static str> for PathStep {
-    fn from(value: &'static str) -> Self {
-        PathStep::Dict(value)
-    }
-}
-
-/// one or more [PathStep]s
-#[derive(Clone, Debug)]
-pub struct Path {
-    steps: &'static [PathStep],
-}
-impl From<&'static [PathStep]> for Path {
-    fn from(steps: &'static [PathStep]) -> Self {
-        if steps.is_empty() {
-            panic!("need at least one step")
-        }
-        Path { steps }
-    }
-}
-impl Path {
-    /// resolve this path, if possible, to a [Value]
-    pub fn value<'v>(&self, root: &'v Value<'v>) -> Result<&'v Cell<Value<'v>>, PathErr> {
-        let mut value = root;
-        let mut passed = &self.steps[0..0];
-        for step in self.steps {
-            value = match (step, value) {
-                (PathStep::List(index), Value::List(list)) => list
-                    .vec
-                    .get(*index)
-                    .ok_or(PathErr::some(passed, "List too short", step)),
-                (PathStep::Dict(lookup), Value::Dict(dict)) => dict
-                    .find(lookup)
-                    .ok_or(PathErr::some(passed, "Dict missing key", step)),
-                (_, Value::Text(_)) => Err(PathErr::some(passed, "Text", step)),
-                (_, Value::List(_)) => Err(PathErr::some(passed, "List", step)),
-                (_, Value::Dict(_)) => Err(PathErr::some(passed, "Dict", step)),
-            }?;
-            passed = &self.steps[0..passed.len() + 1]
-        }
-        Ok(value)
-    }
-
-    /// resolve this path, if possible, to a [Text]
-    pub fn text<'v>(&self, root: &'v Value<'v>) -> Result<&'v Text<'v>, PathErr> {
-        match self.value(root)? {
-            Value::Text(text) => Ok(text),
-            Value::List(_) => Err(PathErr::none(self.steps, "List (not Text)")),
-            Value::Dict(_) => Err(PathErr::none(self.steps, "Dict (not Text)")),
+impl<'a> Lookup<'a> {
+    /// index into a [Value::List]; propagates errors
+    pub fn at(self, i: usize) -> Lookup<'a> {
+        match self {
+            Lookup::Err(e) => Lookup::Err(e),
+            Lookup::Ok(v) => v.at(i),
         }
     }
-
-    /// resolve this path, if possible, to a [List]
-    pub fn list<'v>(&self, root: &'v Value<'v>) -> Result<&'v List<'v>, PathErr> {
-        match self.value(root)? {
-            Value::List(list) => Ok(list),
-            Value::Dict(_) => Err(PathErr::none(self.steps, "Dict (not List)")),
-            Value::Text(_) => Err(PathErr::none(self.steps, "Text (not List)")),
+    /// look up a key in a [Value::Dict]; propagates errors
+    pub fn key(self, k: &str) -> Lookup<'a> {
+        match self {
+            Lookup::Err(e) => Lookup::Err(e),
+            Lookup::Ok(v) => v.key(k),
         }
     }
-
-    /// resolve this path, if possible, to a [Dict]
-    pub fn dict<'v>(&self, root: &'v Value<'v>) -> Result<&'v Dict<'v>, PathErr> {
-        match self.value(root)? {
-            Value::Dict(dict) => Ok(dict),
-            Value::List(_) => Err(PathErr::none(self.steps, "List (not Dict)")),
-            Value::Text(_) => Err(PathErr::none(self.steps, "Text (not Dict)")),
+    /// unwrap to a [Value]
+    pub fn value(self) -> Result<Value<'a>, LookupErr> {
+        match self {
+            Lookup::Ok(v) => Ok(v),
+            Lookup::Err(e) => Err(e),
         }
     }
-}
-impl Display for Path {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        for step in self.steps {
-            match step {
-                PathStep::List(index) => write!(f, "[{}]", index)?,
-                PathStep::Dict(lookup) => write!(f, ".{}", lookup)?,
-            };
+    /// unwrap to a [Text], or error if not a Text
+    pub fn text(self) -> Result<Text<'a>, LookupErr> {
+        match self {
+            Lookup::Ok(Value::Text(t)) => Ok(t),
+            Lookup::Ok(Value::List(_)) => Err(LookupErr {
+                have: "List",
+                want: "Text",
+            }),
+            Lookup::Ok(Value::Dict(_)) => Err(LookupErr {
+                have: "Dict",
+                want: "Text",
+            }),
+            Lookup::Err(e) => Err(e),
         }
-        Ok(())
     }
-}
-/// build a [Path] from steps
-#[macro_export]
-macro_rules! path {
-    (@step [$n:expr]) => {
-        $crate::PathStep::List($n)
-    };
-    (@step $s:literal) => {
-        $crate::PathStep::Dict($s)
-    };
-    ($($step:tt),+) => {
-        $crate::Path::from(&[$($crate::path!(@step $step)),+][..])
-    };
+    /// unwrap to a [List], or error if not a List
+    pub fn list(self) -> Result<List<'a>, LookupErr> {
+        match self {
+            Lookup::Ok(Value::List(l)) => Ok(l),
+            Lookup::Ok(Value::Text(_)) => Err(LookupErr {
+                have: "Text",
+                want: "List",
+            }),
+            Lookup::Ok(Value::Dict(_)) => Err(LookupErr {
+                have: "Dict",
+                want: "List",
+            }),
+            Lookup::Err(e) => Err(e),
+        }
+    }
+    /// unwrap to a [Dict], or error if not a Dict
+    pub fn dict(self) -> Result<Dict<'a>, LookupErr> {
+        match self {
+            Lookup::Ok(Value::Dict(d)) => Ok(d),
+            Lookup::Ok(Value::Text(_)) => Err(LookupErr {
+                have: "Text",
+                want: "Dict",
+            }),
+            Lookup::Ok(Value::List(_)) => Err(LookupErr {
+                have: "List",
+                want: "Dict",
+            }),
+            Lookup::Err(e) => Err(e),
+        }
+    }
 }

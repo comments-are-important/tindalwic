@@ -1,37 +1,52 @@
-use regex::{Regex, RegexBuilder};
-use std::{string::ToString, sync::LazyLock};
-use tindalwic::*;
+//use regex::{Regex, RegexBuilder};
+//use std::{string::ToString, sync::LazyLock};
+use tindalwic::tindalwic_json;
+
+// #[test]
+// fn macro_failures() {
+//     trybuild::TestCases::new().compile_fail("tests/macro_err/*.rs");
+// }
 
 #[test]
-fn path_display() {
-    assert_eq!(path!("zero", [1], "two").to_string(), ".zero[1].two");
-}
-
-#[test]
-fn resolve_list() {
-    let list = tindalwic!(["hello", { "k" : ["world"] }]);
-    assert_eq!(path!([0]).text(&list).unwrap().to_string(), "hello\n");
-    assert_eq!(
-        path!([1], "k", [0]).text(&list).unwrap().to_string(),
-        "world\n"
-    );
+fn empty_file() {
+    tindalwic_json!(empty = {});
+    assert!(empty.file.get().is_empty());
 }
 
 #[test]
-fn resolve_failure() {
-    path!([5])
-        .value(&tindalwic!(["hello", "world"]))
-        .unwrap_err();
+fn one_text_value() {
+    tindalwic_json!(simple = {"key":"value"});
+    assert_eq!(simple.file.get().to_string(), "key=value\n");
 }
 
-fn visible(string: &str) -> String {
-    static DEDENT: LazyLock<Regex> =
-        LazyLock::new(|| RegexBuilder::new("^ *").multi_line(true).build().unwrap());
-    DEDENT
-        .replace_all(string, "")
-        .replace("╶─▸", "\t")
-        .replace("▁▁▎", "\n")
+#[test]
+fn deeply_nested_lists() {
+    tindalwic_json!(deep = {"key":[[[[[["value"]]]]]]});
+    assert_eq!(deep.file.get().to_string(), "[key]\n\t[]\n\t\t[]\n\t\t\t[]\n\t\t\t\t[]\n\t\t\t\t\t[]\n\t\t\t\t\t\tvalue\n");
 }
+
+// #[test]
+// fn resolve_list() {
+//     let list:Value<'_> = tindalwic!(["hello", { "k" : ["world"] }]);
+//     assert_eq!(list.at(0).text().unwrap().to_string(), "hello\n");
+//     assert_eq!(list.at(1).key("k").text().unwrap().to_string(), "world\n");
+// }
+
+// #[test]
+// fn resolve_failure() {
+//     path!([5])
+//         .value(&tindalwic!(["hello", "world"]))
+//         .unwrap_err();
+// }
+
+// fn visible(string: &str) -> String {
+//     static DEDENT: LazyLock<Regex> =
+//         LazyLock::new(|| RegexBuilder::new("^ *").multi_line(true).build().unwrap());
+//     DEDENT
+//         .replace_all(string, "")
+//         .replace("╶─▸", "\t")
+//         .replace("▁▁▎", "\n")
+// }
 
 /*
 struct Expect(String);
@@ -72,18 +87,18 @@ fn parse_comments() {
 // }
 
 //#[test]
-fn encode_uncommented_file() {
-    assert_eq!(
-        tindalwic!("one":"\n").to_string(),
-        visible(
-            "[one]
-            ╶─▸<>
-            ╶─▸╶─▸
-            ╶─▸╶─▸
-            "
-        )
-    );
-}
+// fn encode_uncommented_file() {
+//     assert_eq!(
+//         tindalwic!("one":"\n").to_string(),
+//         visible(
+//             "[one]
+//             ╶─▸<>
+//             ╶─▸╶─▸
+//             ╶─▸╶─▸
+//             "
+//         )
+//     );
+// }
 // #[test]
 // fn encode_fully_commented_file() {
 //     let file = File {

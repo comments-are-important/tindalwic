@@ -1,11 +1,11 @@
 //use regex::{Regex, RegexBuilder};
 //use std::{string::ToString, sync::LazyLock};
-use tindalwic::tindalwic_json;
+use tindalwic::*;
 
-// #[test]
-// fn macro_failures() {
-//     trybuild::TestCases::new().compile_fail("tests/macro_err/*.rs");
-// }
+#[test]
+fn macro_failures() {
+    trybuild::TestCases::new().compile_fail("tests/macro_err/*.rs");
+}
 
 #[test]
 fn empty_file() {
@@ -20,9 +20,43 @@ fn one_text_value() {
 }
 
 #[test]
-fn deeply_nested_lists() {
-    tindalwic_json!(deep = {"key":[[[[[["value"]]]]]]});
-    assert_eq!(deep.file.get().to_string(), "[key]\n\t[]\n\t\t[]\n\t\t\t[]\n\t\t\t\t[]\n\t\t\t\t\t[]\n\t\t\t\t\t\tvalue\n");
+fn nested_lists() {
+    tindalwic_json!(nested = {"key":[[[[["value"]]]]]});
+    assert_eq!(
+        nested.file.get().to_string(),
+        "[key]\n\t[]\n\t\t[]\n\t\t\t[]\n\t\t\t\t[]\n\t\t\t\t\tvalue\n"
+    );
+}
+
+#[test]
+fn nested_dicts() {
+    tindalwic_json!(data = {"1":"one","2":"two","a":{"b":{"c":{"d":{"k":"v"}}}}});
+    //println!("{:?}",data.file.get());
+    assert_eq!(
+        data.file.get().to_string(),
+        "1=one\n2=two\n{a}\n\t{b}\n\t\t{c}\n\t\t\t{d}\n\t\t\t\tk=v\n"
+    );
+}
+
+#[test]
+fn change_in_list() {
+    tindalwic_json!(arena = {"a":{"b":["z"]}});
+    tindalwic_walk!(arena{"a"}["b"]<0> |c,_t|c = Value::Text(Text::wrap("c"))).unwrap();
+    assert_eq!(arena.file.get().to_string(), "{a}\n\t[b]\n\t\tc\n");
+}
+
+#[test]
+fn change_in_dict() {
+    tindalwic_json!(arena = {"a":[{"b":"z"}]});
+    tindalwic_walk!(arena["a"]{0}<"b"> |c,_t|c.value = Value::Text(Text::wrap("c"))).unwrap();
+    assert_eq!(arena.file.get().to_string(), "[a]\n\t{}\n\t\tb=c\n");
+}
+
+#[test]
+fn inject_comments() {
+    tindalwic_json!(data = {"k":"v"});
+    tindalwic_walk!(data<"k">|c,t|t.epilog = Comment::some("c");c.before=Comment::some("b")).unwrap();
+    assert_eq!(data.file.get().to_string(), "//b\nk=v\n#c\n");
 }
 
 // #[test]

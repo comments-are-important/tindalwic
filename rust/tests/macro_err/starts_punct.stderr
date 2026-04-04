@@ -1,4 +1,4 @@
-error: expected string literal, identifier, [...], or {...}
+error: expected identifier
  --> tests/macro_err/starts_punct.rs:3:21
   |
 3 |     tindalwic_json!(+ then more)

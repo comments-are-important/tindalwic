@@ -14,6 +14,9 @@ use core::ops::Range;
 #[doc(inline)]
 /// main module re-exports the proc_macro from sub-crate.
 pub use tindalwic_macros::tindalwic_json;
+#[doc(inline)]
+/// main module re-exports the proc_macro from sub-crate.
+pub use tindalwic_macros::tindalwic_walk;
 
 /// Hidden parts of [Comment] and [Text].
 ///
@@ -300,10 +303,13 @@ impl<'a> Display for Dict<'a> {
         Output { out, indent: 0 }.dict_in_list(self)
     }
 }
+fn position<'a>(dict: &'a [Cell<Keyed<'a>>], key: &str) -> Option<usize> {
+    dict.iter().position(|x| x.get().key == key)
+}
 impl<'a> Dict<'a> {
     /// returns the position of the entry with the given key.
     pub fn position(&self, key: &str) -> Option<usize> {
-        self.dict.iter().position(|x| x.get().key == key)
+        position(self.dict, key)
     }
     /// returns a reference to the entry with the given key.
     pub fn find(&self, key: &str) -> Option<&Cell<Keyed<'a>>> {
@@ -343,46 +349,6 @@ impl<'a> Value<'a> {
             epilog: None,
         }))
     }
-    /// index into a [Value::List]
-    pub fn at(self, i: usize) -> Lookup<'a> {
-        match self {
-            Value::List(list) => match list.list.get(i) {
-                Some(cell) => Lookup::Ok(cell.get()),
-                None => Lookup::Err(LookupErr {
-                    have: "List: index out of bounds",
-                    want: "List index",
-                }),
-            },
-            Value::Text(_) => Lookup::Err(LookupErr {
-                have: "Text",
-                want: "List index",
-            }),
-            Value::Dict(_) => Lookup::Err(LookupErr {
-                have: "Dict",
-                want: "List index",
-            }),
-        }
-    }
-    /// look up a key in a [Value::Dict]
-    pub fn key(self, k: &str) -> Lookup<'a> {
-        match self {
-            Value::Dict(dict) => match dict.find(k) {
-                Some(cell) => Lookup::Ok(cell.get().value),
-                None => Lookup::Err(LookupErr {
-                    have: "Dict: key not found",
-                    want: "Dict key",
-                }),
-            },
-            Value::Text(_) => Lookup::Err(LookupErr {
-                have: "Text",
-                want: "Dict key",
-            }),
-            Value::List(_) => Lookup::Err(LookupErr {
-                have: "List",
-                want: "Dict key",
-            }),
-        }
-    }
 }
 
 // ------------------------------------------------------------------------------------
@@ -419,23 +385,19 @@ impl<'a> File<'a> {
     }
     /// returns the position of the entry with the given key.
     pub fn position(&self, key: &str) -> Option<usize> {
-        self.dict.iter().position(|x| x.get().key == key)
+        position(self.dict, key)
     }
     /// returns a reference to the entry with the given key.
     pub fn find(&self, key: &str) -> Option<&Cell<Keyed<'a>>> {
         self.position(key).map(|i| &self.dict[i])
     }
-    /// look up a key in this File, returning a [Lookup] for chaining
-    pub fn key(&self, k: &str) -> Lookup<'a> {
-        match self.find(k) {
-            Some(cell) => Lookup::Ok(cell.get().value),
-            None => Lookup::Err(LookupErr {
-                have: "File: key not found",
-                want: "Dict key",
-            }),
-        }
-    }
 }
+
+pub enum Step<'a> {
+    List(usize),
+    Dict(&'a str),
+}
+
 
 /// support for the macro. public so macro can use it, but think of it as hidden.
 pub struct Arena<'a, const LIST: usize, const DICT: usize> {
@@ -700,109 +662,3 @@ impl<'a> Input<'a> {
 }
 
 // ====================================================================================
-
-/// describes where a lookup chain fell off the tree
-#[derive(Clone, Copy, Debug)]
-pub struct LookupErr {
-    /// what the path led to (e.g. "Text", "List: index out of bounds")
-    pub have: &'static str,
-    /// what was needed (e.g. "List index", "Dict key")
-    pub want: &'static str,
-}
-impl Display for LookupErr {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "expected {}, found {}", self.want, self.have)
-    }
-}
-
-/// the result of chaining [`.at()`](Value::at) and [`.key()`](Value::key) lookups
-///
-/// an `Err` variant propagates through further `.at()` / `.key()` calls unchanged,
-/// so you can chain freely and check for errors at the end.
-///
-/// # Examples
-///
-/// ```
-/// use tindalwic::*;
-/// const root:File = tindalwic!("a": {"b": ["hello"]});
-/// assert_eq!(
-///     root.key("a").key("b").at(0).text().unwrap().lines().next(),
-///     Some("hello"),
-/// );
-/// assert!(root.key("missing").text().is_err());
-/// ```
-#[derive(Clone, Copy, Debug)]
-pub enum Lookup<'a> {
-    /// the lookup resolved to a [Value]
-    Ok(Value<'a>),
-    /// the lookup fell off the tree
-    Err(LookupErr),
-}
-impl<'a> Lookup<'a> {
-    /// index into a [Value::List]; propagates errors
-    pub fn at(self, i: usize) -> Lookup<'a> {
-        match self {
-            Lookup::Err(e) => Lookup::Err(e),
-            Lookup::Ok(v) => v.at(i),
-        }
-    }
-    /// look up a key in a [Value::Dict]; propagates errors
-    pub fn key(self, k: &str) -> Lookup<'a> {
-        match self {
-            Lookup::Err(e) => Lookup::Err(e),
-            Lookup::Ok(v) => v.key(k),
-        }
-    }
-    /// unwrap to a [Value]
-    pub fn value(self) -> Result<Value<'a>, LookupErr> {
-        match self {
-            Lookup::Ok(v) => Ok(v),
-            Lookup::Err(e) => Err(e),
-        }
-    }
-    /// unwrap to a [Text], or error if not a Text
-    pub fn text(self) -> Result<Text<'a>, LookupErr> {
-        match self {
-            Lookup::Ok(Value::Text(t)) => Ok(t),
-            Lookup::Ok(Value::List(_)) => Err(LookupErr {
-                have: "List",
-                want: "Text",
-            }),
-            Lookup::Ok(Value::Dict(_)) => Err(LookupErr {
-                have: "Dict",
-                want: "Text",
-            }),
-            Lookup::Err(e) => Err(e),
-        }
-    }
-    /// unwrap to a [List], or error if not a List
-    pub fn list(self) -> Result<List<'a>, LookupErr> {
-        match self {
-            Lookup::Ok(Value::List(l)) => Ok(l),
-            Lookup::Ok(Value::Text(_)) => Err(LookupErr {
-                have: "Text",
-                want: "List",
-            }),
-            Lookup::Ok(Value::Dict(_)) => Err(LookupErr {
-                have: "Dict",
-                want: "List",
-            }),
-            Lookup::Err(e) => Err(e),
-        }
-    }
-    /// unwrap to a [Dict], or error if not a Dict
-    pub fn dict(self) -> Result<Dict<'a>, LookupErr> {
-        match self {
-            Lookup::Ok(Value::Dict(d)) => Ok(d),
-            Lookup::Ok(Value::Text(_)) => Err(LookupErr {
-                have: "Text",
-                want: "Dict",
-            }),
-            Lookup::Ok(Value::List(_)) => Err(LookupErr {
-                have: "List",
-                want: "Dict",
-            }),
-            Lookup::Err(e) => Err(e),
-        }
-    }
-}

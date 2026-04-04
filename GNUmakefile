@@ -83,10 +83,14 @@ rust/doc: must-run-inside
 
 rust/api: must-run-inside
 	cd rust
-	rustup toolchain install nightly
-	cargo install cargo-public-api
+	: rustup toolchain install nightly
+	: cargo install cargo-public-api
 	mkdir -p target
-	cargo public-api -sss >target/api.txt
+	cargo public-api -sss \
+	  | grep -v '^impl' \
+	  | sed -E -e 's=^pub (enum|fn|const fn|mod|struct|use) (.*)=|\2|\1|=' \
+	  | sed -E -e 's=^pub (.*)=|\1|property|=' \
+	  | LC_ALL=C sort >target/api.txt
 .PHONY: rust/api
 
 rust/fmt: must-run-inside

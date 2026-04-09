@@ -1,5 +1,5 @@
 error: expected identifier
- --> tests/macro_err/starts_punct.rs:3:21
+ --> tests/macro_err/starts_punct.rs:3:11
   |
-3 |     tindalwic_json!(+ then more)
-  |                     ^
+3 |     json!(+ then more)
+  |           ^

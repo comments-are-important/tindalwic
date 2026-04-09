@@ -10,6 +10,7 @@
         "memchr",
         "memrchr",
         "pstats",
+        "punct",
         "pycache",
         "PYTHONPYCACHEPREFIX",
         "rfind",
@@ -22,5 +23,6 @@
         "typer",
         "vadimcn",
         "venv"
-    ]
+    ],
+    "editor.hover.delay": 3000,
 }

@@ -10,13 +10,14 @@ use alloc::string::String;
 use core::cell::Cell;
 use core::fmt::{self, Debug, Display, Formatter, Write};
 use core::ops::Range;
+use core::sync::atomic;
 
 #[doc(inline)]
 /// main module re-exports the proc_macro from sub-crate.
-pub use tindalwic_macros::tindalwic_json;
+pub use tindalwic_macros::json;
 #[doc(inline)]
 /// main module re-exports the proc_macro from sub-crate.
-pub use tindalwic_macros::tindalwic_walk;
+pub use tindalwic_macros::walk;
 
 /// Hidden parts of [Comment] and [Text].
 ///
@@ -312,7 +313,7 @@ impl<'a> Dict<'a> {
         position(self.dict, key)
     }
     /// returns a reference to the entry with the given key.
-    pub fn find(&self, key: &str) -> Option<&Cell<Keyed<'a>>> {
+    pub fn find(&self, key: &str) -> Option<&'a Cell<Keyed<'a>>> {
         self.position(key).map(|i| &self.dict[i])
     }
 }
@@ -388,16 +389,10 @@ impl<'a> File<'a> {
         position(self.dict, key)
     }
     /// returns a reference to the entry with the given key.
-    pub fn find(&self, key: &str) -> Option<&Cell<Keyed<'a>>> {
+    pub fn find(&self, key: &str) -> Option<&'a Cell<Keyed<'a>>> {
         self.position(key).map(|i| &self.dict[i])
     }
 }
-
-pub enum Step<'a> {
-    List(usize),
-    Dict(&'a str),
-}
-
 
 /// support for the macro. public so macro can use it, but think of it as hidden.
 pub struct Arena<'a, const LIST: usize, const DICT: usize> {
@@ -462,12 +457,142 @@ impl<'a, const LIST: usize, const DICT: usize> Arena<'a, LIST, DICT> {
         });
         self
     }
-    pub fn f(&'a self, dict:Range<usize>) {
-        self.file.set(File{
+    pub fn f(&'a self, dict: Range<usize>) {
+        self.file.set(File {
             dict: &self.keyed_cells[dict],
             hashbang: None,
             prolog: None,
         });
+    }
+}
+
+#[derive(Debug)]
+pub enum Branch<'a> {
+    List(usize),
+    Dict(&'a str),
+}
+#[derive(Debug)]
+pub struct Error<'a> {
+    failed: &'a [Branch<'a>],
+    message: &'static str,
+}
+impl<'a> Error<'a> {
+    fn new(failed: &'a [Branch], message: &'static str) -> Self {
+        Error { failed, message }
+    }
+}
+impl<'a> Branch<'a> {
+    pub fn value(path: &'a [Branch], file: &File<'a>) -> Result<&'a Cell<Value<'a>>, Error<'a>> {
+        if path.is_empty() {
+            return Err(Error::new(path, "empty path can't be resolved"));
+        }
+        let mut value: Value<'a> = Value::Dict(Dict {
+            dict: file.dict,
+            prolog: None,
+            epilog: None,
+        });
+        let mut result: Option<&Cell<Value<'a>>> = None;
+        for (step, branch) in path.iter().enumerate() {
+            match &value {
+                Value::Text(text) => {
+                    return Err(Error::new(&path[..step], "path ended by a text value"));
+                }
+                Value::List(list) => match branch {
+                    Branch::List(at) => {
+                        result = list.list.get(*at);
+                        match result {
+                            None => return Err(Error::new(&path[..step], "index out of bounds")),
+                            Some(found) => {
+                                value = found.get();
+                            }
+                        }
+                    }
+                    Branch::Dict(_) => {
+                        return Err(Error::new(
+                            &path[..step],
+                            "path expected dict but found list",
+                        ));
+                    }
+                },
+                Value::Dict(dict) => match branch {
+                    Branch::Dict(key) => {
+                        result = None;
+                        match dict.find(key) {
+                            None => return Err(Error::new(&path[..step], "key not found")),
+                            Some(found) => {
+                                value = found.get().value;
+                            }
+                        };
+                    }
+                    Branch::List(_) => {
+                        return Err(Error::new(
+                            &path[..step],
+                            "path expected list but found dict",
+                        ));
+                    }
+                },
+            }
+        }
+        result.ok_or(Error::new(
+            path,
+            "path did not end at a value inside a list",
+        ))
+    }
+    pub fn keyed(path: &'a [Branch], file: &File<'a>) -> Result<&'a Cell<Keyed<'a>>, Error<'a>> {
+        if path.is_empty() {
+            return Err(Error::new(path, "empty path can't be resolved"));
+        }
+        let mut value: Value<'a> = Value::Dict(Dict {
+            dict: file.dict,
+            prolog: None,
+            epilog: None,
+        });
+        let mut result: Option<&Cell<Keyed<'a>>> = None;
+        for (step, branch) in path.iter().enumerate() {
+            match &value {
+                Value::Text(text) => {
+                    return Err(Error::new(&path[..step], "path ended by a text value"));
+                }
+                Value::List(list) => match branch {
+                    Branch::List(at) => {
+                        result = None;
+                        match list.list.get(*at) {
+                            None => return Err(Error::new(&path[..step], "index out of bounds")),
+                            Some(found) => {
+                                value = found.get();
+                            }
+                        }
+                    }
+                    Branch::Dict(_) => {
+                        return Err(Error::new(
+                            &path[..step],
+                            "path expected dict but found list",
+                        ));
+                    }
+                },
+                Value::Dict(dict) => match branch {
+                    Branch::Dict(key) => {
+                        result = dict.find(key);
+                        match result {
+                            None => return Err(Error::new(&path[..step], "key not found")),
+                            Some(found) => {
+                                value = found.get().value;
+                            }
+                        };
+                    }
+                    Branch::List(_) => {
+                        return Err(Error::new(
+                            &path[..step],
+                            "path expected list but found dict",
+                        ));
+                    }
+                },
+            }
+        }
+        result.ok_or(Error::new(
+            path,
+            "path did not end at a value inside a list",
+        ))
     }
 }
 

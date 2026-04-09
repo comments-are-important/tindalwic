@@ -2,86 +2,126 @@
 
 //! see the documentation in the `tindalwic` crate.
 
+use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::iter::once;
+
 use proc_macro::TokenStream as RawStream;
-use proc_macro2::{Span, TokenStream};
-use quote::{ToTokens, quote};
+use proc_macro2::{Span, TokenStream, TokenTree};
+use quote::{ToTokens, TokenStreamExt, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::*;
 
 // ====================================================================================
 
-enum StepKind {
+#[derive(Clone, Copy, PartialEq)]
+enum Kind {
     List,
     Dict,
     Text,
 }
-
 struct Step {
-    kind: StepKind,
     tokens: TokenStream,
+    lands: Kind,
+    string: String,
 }
-impl Parse for Step {
-    fn parse(input: ParseStream) -> Result<Self> {
-        if input.peek(Token![<]) {
-            input.parse::<Token![<]>()?;
-            let mut tokens = TokenStream::new();
-            while !input.peek(Token![>]) {
-                let tt: proc_macro2::TokenTree = input.parse()?;
-                tokens.extend(core::iter::once(tt));
-            }
-            input.parse::<Token![>]>()?;
-            Ok(Step { kind: StepKind::Text, tokens })
-        } else if input.peek(token::Bracket) {
-            let content;
-            bracketed!(content in input);
-            let tokens: TokenStream = content.parse()?;
-            Ok(Step { kind: StepKind::List, tokens })
-        } else if input.peek(token::Brace) {
-            let content;
-            braced!(content in input);
-            let tokens: TokenStream = content.parse()?;
-            Ok(Step { kind: StepKind::Dict, tokens })
-        } else {
-            Err(input.error("each step must be enclosed in <>, [] or {}"))
+impl Kind {
+    fn step(&self, tokens: TokenStream) -> Step {
+        let mut iter = tokens.clone().into_iter();
+        let single = if let Some(TokenTree::Literal(_)) = iter.next() {
+            iter.next().is_none()
+        } else { false };
+        let string = match self {
+            Kind::Text => format!("<{tokens}>"),
+            Kind::List => format!("[{tokens}]"),
+            Kind::Dict => format!("{{{tokens}}}"),
+        };
+        Step {
+            tokens,
+            lands: self.clone(),
+            string,
         }
     }
 }
-
-struct Walk {
-    name: Ident,
-    steps: Vec<Step>,
-    cell_ident: Ident,
-    value_ident: Ident,
-    body: TokenStream,
-}
-impl Parse for Walk {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let name: Ident = input.parse()?;
-        let mut steps = Vec::new();
-        while input.peek(Token![<]) || input.peek(token::Bracket) || input.peek(token::Brace) {
-            steps.push(input.parse::<Step>()?);
+impl Step {
+    fn parse_path(input: ParseStream) -> Result<Vec<Self>> {
+        let mut steps: Vec<Step> = Vec::new();
+        while !input.is_empty() {
+            let start = input.span();
+            let kind: Kind;
+            let mut tokens: TokenStream;
+            if input.peek(token::Bracket) {
+                kind = Kind::List;
+                let content;
+                bracketed!(content in input);
+                tokens = content.parse()?;
+            } else if input.peek(token::Brace) {
+                kind = Kind::Dict;
+                let content;
+                braced!(content in input);
+                tokens = content.parse()?;
+            } else if input.peek(Token![<]) {
+                kind = Kind::Text;
+                input.parse::<Token![<]>()?;
+                tokens = TokenStream::new();
+                let mut depth: usize = if input.peek(Token![>]) { 0 } else { 1 };
+                while depth != 0 {
+                    tokens.append(TokenTree::parse(input)?);
+                    if input.peek(Token![<]) {
+                        depth += 1;
+                    } else if input.peek(Token![>]) {
+                        depth -= 1;
+                    }
+                }
+                input.parse::<Token![>]>()?;
+            } else {
+                break;
+            }
+            if tokens.is_empty() {
+                return Err(Error::new(start, "missing index expression for this step"));
+            }
+            steps.push(kind.step(tokens));
+            if kind == Kind::Text {
+                break;
+            }
         }
         if steps.is_empty() {
             return Err(input.error("requires at least one step"));
         }
-        if let StepKind::Text = steps.last().unwrap().kind {
-            // ok
-        } else {
-            // Text can only be last, but List/Dict can be last too
-        }
-        for step in &steps[..steps.len() - 1] {
-            if let StepKind::Text = step.kind {
-                return Err(input.error("<> step can only appear last"));
-            }
-        }
-        input.parse::<Token![|]>()?;
-        let cell_ident: Ident = input.parse()?;
-        input.parse::<Token![,]>()?;
-        let value_ident: Ident = input.parse()?;
-        input.parse::<Token![|]>()?;
-        let body: TokenStream = input.parse()?;
-        Ok(Walk { name, steps, cell_ident, value_ident, body })
+        Ok(steps)
+    }
+}
+
+struct Body {
+    cell_ident: Ident,
+    value_ident: Ident,
+    body: TokenStream,
+}
+struct Walk {
+    name: Ident,
+    steps: Vec<Step>,
+    body: Option<Body>,
+}
+impl Parse for Walk {
+    fn parse(input: ParseStream) -> Result<Self> {
+        Ok(Walk {
+            name: input.parse()?,
+            steps: Step::parse_path(input)?,
+            body: if input.is_empty() {
+                None
+            } else {
+                input.parse::<Token![|]>()?;
+                let cell_ident: Ident = input.parse()?;
+                input.parse::<Token![,]>()?;
+                let value_ident: Ident = input.parse()?;
+                input.parse::<Token![|]>()?;
+                Some(Body {
+                    cell_ident,
+                    value_ident,
+                    body: input.parse()?,
+                })
+            },
+        })
     }
 }
 
@@ -90,39 +130,49 @@ fn path_string(steps: &[Step], up_to: usize) -> String {
     let mut s = String::new();
     for step in &steps[..=up_to] {
         let t = step.tokens.to_string();
-        match step.kind {
-            StepKind::List => { s.push('['); s.push_str(&t); s.push(']'); }
-            StepKind::Dict => { s.push('{'); s.push_str(&t); s.push('}'); }
-            StepKind::Text => { s.push('<'); s.push_str(&t); s.push('>'); }
+        match step.lands {
+            Kind::List => {
+                s.push('[');
+                s.push_str(&t);
+                s.push(']');
+            }
+            Kind::Dict => {
+                s.push('{');
+                s.push_str(&t);
+                s.push('}');
+            }
+            Kind::Text => {
+                s.push('<');
+                s.push_str(&t);
+                s.push('>');
+            }
         }
     }
     s
 }
 
 #[proc_macro]
-pub fn tindalwic_walk(input: RawStream) -> RawStream {
-    let Walk { name, steps, cell_ident, value_ident, body } = parse_macro_input!(input as Walk);
-
-    // Build the nested if-let chain from inside out (last step first).
-    // At every step we know:
-    //   - what we're currently inside (dict at depth 0, then determined by previous step's kind)
-    //   - what we expect to find (this step's kind)
+pub fn walk(input: RawStream) -> RawStream {
+    let Walk { name, steps, body } = parse_macro_input!(input as Walk);
 
     let last = steps.len() - 1;
+    let it = Ident::new("__it", Span::mixed_site());
+    let at = Ident::new("__at", Span::mixed_site());
+    let value_ident = body.as_ref().map_or(&it, |b| &b.value_ident);
 
     // Start with the innermost (last step) happy path.
-    let value_arm = match steps[last].kind {
-        StepKind::Text => quote! { ::tindalwic::Value::Text(#value_ident) },
-        StepKind::List => quote! { ::tindalwic::Value::List(#value_ident) },
-        StepKind::Dict => quote! { ::tindalwic::Value::Dict(#value_ident) },
+    let value_arm = match steps[last].lands {
+        Kind::Text => quote! { ::tindalwic::Value::Text(#value_ident) },
+        Kind::List => quote! { ::tindalwic::Value::List(#value_ident) },
+        Kind::Dict => quote! { ::tindalwic::Value::Dict(#value_ident) },
     };
-    let type_name = match steps[last].kind {
-        StepKind::Text => "text",
-        StepKind::List => "list",
-        StepKind::Dict => "dict",
+    let type_name = match steps[last].lands {
+        Kind::Text => "text",
+        Kind::List => "list",
+        Kind::Dict => "dict",
     };
 
-    // The innermost code: match the value variant, bind both idents, run body.
+    // The innermost code: match the value variant, bind both identifiers, run body.
     let path_so_far = path_string(&steps, last);
     let not_type_err = format!("{path_so_far} is not {type_name}");
 
@@ -131,44 +181,81 @@ pub fn tindalwic_walk(input: RawStream) -> RawStream {
     let in_dict = if last == 0 {
         true
     } else {
-        matches!(steps[last - 1].kind, StepKind::Dict)
+        matches!(steps[last - 1].lands, Kind::Dict)
     };
 
-    let it = Ident::new("__it", Span::mixed_site());
     let last_tokens = &steps[last].tokens;
     let mut inner = if in_dict {
         // dict lookup
         let not_found_err = format!("{path_so_far} not found");
-        quote! {
-            if let Some(#it) = #it.find(#last_tokens) {
-                let mut #cell_ident = #it.get();
-                if let #value_arm = &mut #cell_ident.value {
-                    #body;
-                    #it.set(#cell_ident);
-                    Ok(())
+        match &body.as_ref() {
+            None => quote! {
+                let #at = #last_tokens;
+                if let Some(#it) = #it.find(#at) {
+                    if let #it = #it.value {
+                        Ok(#it)
+                    } else {
+                        Err(#not_type_err)
+                    }
                 } else {
-                    Err(#not_type_err)
+                    Err(#not_found_err)
                 }
-            } else {
-                Err(#not_found_err)
-            }
+            },
+            Some(Body {
+                cell_ident,
+                value_ident,
+                body,
+            }) => quote! {
+                let #at = #last_tokens;
+                if let Some(#it) = #it.find(#at) {
+                    let mut #cell_ident = #it.get();
+                    if let #value_arm = &mut #cell_ident.value {
+                        #body;
+                        #it.set(#cell_ident);
+                        Ok(())
+                    } else {
+                        Err(#not_type_err)
+                    }
+                } else {
+                    Err(#not_found_err)
+                }
+            },
         }
     } else {
         // list index
         let not_found_err = format!("{path_so_far} index out of bounds");
-        quote! {
-            if let Some(#it) = #it.list.get(#last_tokens) {
-                let mut #cell_ident = #it.get();
-                if let #value_arm = &mut #cell_ident {
-                    #body;
-                    #it.set(#cell_ident);
-                    Ok(())
+        match &body.as_ref() {
+            None => quote! {
+                let #at = #last_tokens;
+                if let Some(#it) = #it.list.get(#at) {
+                    if let #value_arm = #it.get() {
+                        Ok(#it)
+                    } else {
+                        Err(#not_type_err)
+                    }
                 } else {
-                    Err(#not_type_err)
+                    Err(#not_found_err)
                 }
-            } else {
-                Err(#not_found_err)
-            }
+            },
+            Some(Body {
+                cell_ident,
+                value_ident,
+                body,
+            }) => quote! {
+                let #at = #last_tokens;
+                if let Some(#it) = #it.list.get(#at) {
+                    let mut #cell_ident = #it.get();
+                    if let #value_arm = &mut #cell_ident {
+                        #body;
+                        #it.set(#cell_ident);
+                        Ok(())
+                    } else {
+                        Err(#not_type_err)
+                    }
+                } else {
+                    Err(#not_found_err)
+                }
+            },
         }
     };
 
@@ -177,28 +264,29 @@ pub fn tindalwic_walk(input: RawStream) -> RawStream {
         let step_tokens = &steps[i].tokens;
         let path_here = path_string(&steps, i);
 
-        let expected_arm = match steps[i].kind {
-            StepKind::List => quote! { ::tindalwic::Value::List(#it) },
-            StepKind::Dict => quote! { ::tindalwic::Value::Dict(#it) },
-            StepKind::Text => unreachable!(), // validated during parse
+        let expected_arm = match steps[i].lands {
+            Kind::List => quote! { ::tindalwic::Value::List(#it) },
+            Kind::Dict => quote! { ::tindalwic::Value::Dict(#it) },
+            Kind::Text => unreachable!(), // validated during parse
         };
-        let type_name_here = match steps[i].kind {
-            StepKind::List => "list",
-            StepKind::Dict => "dict",
-            StepKind::Text => unreachable!(),
+        let type_name_here = match steps[i].lands {
+            Kind::List => "list",
+            Kind::Dict => "dict",
+            Kind::Text => unreachable!(),
         };
         let not_type_err_here = format!("{path_here} is not {type_name_here}");
 
         let in_dict_here = if i == 0 {
             true
         } else {
-            matches!(steps[i - 1].kind, StepKind::Dict)
+            matches!(steps[i - 1].lands, Kind::Dict)
         };
 
         inner = if in_dict_here {
             let not_found_err_here = format!("{path_here} not found");
             quote! {
-                if let Some(#it) = #it.find(#step_tokens) {
+                let #at = #step_tokens;
+                if let Some(#it) = #it.find(#at) {
                     if let #expected_arm = #it.get().value {
                         #inner
                     } else {
@@ -211,7 +299,8 @@ pub fn tindalwic_walk(input: RawStream) -> RawStream {
         } else {
             let not_found_err_here = format!("{path_here} index out of bounds");
             quote! {
-                if let Some(#it) = #it.list.get(#step_tokens) {
+                let #at = #step_tokens;
+                if let Some(#it) = #it.list.get(#at) {
                     if let #expected_arm = #it.get() {
                         #inner
                     } else {
@@ -224,21 +313,19 @@ pub fn tindalwic_walk(input: RawStream) -> RawStream {
         };
     }
 
-    // Wrap in a closure so `#it` starts as the file.
-    let expanded = quote! {
-        (|| -> Result<(), &'static str> {
+    quote! {
+        {
             let #it = #name.file.get();
             #inner
-        })()
-    };
-
-    expanded.into()
+        }
+    }
+    .into()
 }
 
 // ====================================================================================
 
 #[proc_macro]
-pub fn tindalwic_json(input: RawStream) -> RawStream {
+pub fn json(input: RawStream) -> RawStream {
     let File { name, mut file } = parse_macro_input!(input as File);
     let Arena { utf8, list, keys } = Arena::new(&mut file);
     let size = file.len();

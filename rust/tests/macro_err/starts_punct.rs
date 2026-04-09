@@ -1,4 +1,4 @@
-use tindalwic::tindalwic_json;
+use tindalwic::json;
 fn main() {
-    tindalwic_json!(+ then more)
+    json!(+ then more)
 }

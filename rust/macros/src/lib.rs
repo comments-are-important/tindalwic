@@ -18,52 +18,58 @@ use syn::*;
 enum Kind {
     List,
     Dict,
-    Text,
 }
 struct Step {
+    kind: Kind,
     tokens: TokenStream,
-    lands: Kind,
-    string: String,
 }
-impl Kind {
-    fn step(&self, tokens: TokenStream) -> Step {
-        let mut iter = tokens.clone().into_iter();
-        let single = if let Some(TokenTree::Literal(_)) = iter.next() {
-            iter.next().is_none()
-        } else { false };
-        let string = match self {
-            Kind::Text => format!("<{tokens}>"),
-            Kind::List => format!("[{tokens}]"),
-            Kind::Dict => format!("{{{tokens}}}"),
+impl ToTokens for Step {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let it = &self.tokens;
+        match self.kind {
+            Kind::List => tokens.extend(quote! { ::tindalwic::Branch::List(#it) }),
+            Kind::Dict => tokens.extend(quote! { ::tindalwic::Branch::Dict(#it) }),
         };
-        Step {
-            tokens,
-            lands: self.clone(),
-            string,
-        }
     }
 }
-impl Step {
-    fn parse_path(input: ParseStream) -> Result<Vec<Self>> {
-        let mut steps: Vec<Step> = Vec::new();
+
+struct Walk {
+    file: TokenStream,
+    path: Vec<Step>,
+    lands: Option<Kind>, // None means Text
+}
+impl Parse for Walk {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let mut file = TokenStream::new();
+        while !input.is_empty() && !input.peek(Token![,]) {
+            file.append(TokenTree::parse(input)?);
+        }
+        input.parse::<Token![,]>()?;
+        let mut path: Vec<Step> = Vec::new();
+        let mut kind = Kind::Dict;
         while !input.is_empty() {
             let start = input.span();
-            let kind: Kind;
-            let mut tokens: TokenStream;
             if input.peek(token::Bracket) {
-                kind = Kind::List;
                 let content;
                 bracketed!(content in input);
-                tokens = content.parse()?;
+                let tokens = TokenStream::parse(&content)?;
+                if tokens.is_empty() {
+                    return Err(Error::new(start, "missing expr inside []"));
+                }
+                path.push(Step { tokens, kind });
+                kind = Kind::List;
             } else if input.peek(token::Brace) {
-                kind = Kind::Dict;
                 let content;
                 braced!(content in input);
-                tokens = content.parse()?;
+                let tokens = TokenStream::parse(&content)?;
+                if tokens.is_empty() {
+                    return Err(Error::new(start, "missing expr inside {}"));
+                }
+                path.push(Step { tokens, kind });
+                kind = Kind::Dict;
             } else if input.peek(Token![<]) {
-                kind = Kind::Text;
                 input.parse::<Token![<]>()?;
-                tokens = TokenStream::new();
+                let mut tokens = TokenStream::new();
                 let mut depth: usize = if input.peek(Token![>]) { 0 } else { 1 };
                 while depth != 0 {
                     tokens.append(TokenTree::parse(input)?);
@@ -74,252 +80,53 @@ impl Step {
                     }
                 }
                 input.parse::<Token![>]>()?;
+                if tokens.is_empty() {
+                    return Err(Error::new(start, "missing expr inside <>"));
+                }
+                path.push(Step { tokens, kind });
+                return Ok(Walk {
+                    file,
+                    path,
+                    lands: None,
+                });
             } else {
                 break;
             }
-            if tokens.is_empty() {
-                return Err(Error::new(start, "missing index expression for this step"));
-            }
-            steps.push(kind.step(tokens));
-            if kind == Kind::Text {
-                break;
-            }
         }
-        if steps.is_empty() {
-            return Err(input.error("requires at least one step"));
-        }
-        Ok(steps)
+        if path.is_empty() {
+        return Err(input.error("requires at least one step"));
     }
-}
-
-struct Body {
-    cell_ident: Ident,
-    value_ident: Ident,
-    body: TokenStream,
-}
-struct Walk {
-    name: Ident,
-    steps: Vec<Step>,
-    body: Option<Body>,
-}
-impl Parse for Walk {
-    fn parse(input: ParseStream) -> Result<Self> {
         Ok(Walk {
-            name: input.parse()?,
-            steps: Step::parse_path(input)?,
-            body: if input.is_empty() {
-                None
-            } else {
-                input.parse::<Token![|]>()?;
-                let cell_ident: Ident = input.parse()?;
-                input.parse::<Token![,]>()?;
-                let value_ident: Ident = input.parse()?;
-                input.parse::<Token![|]>()?;
-                Some(Body {
-                    cell_ident,
-                    value_ident,
-                    body: input.parse()?,
-                })
-            },
+            file,
+            path,
+            lands: Some(kind),
         })
     }
 }
 
-/// Build a path string like `[a]{0}<b>` for error messages.
-fn path_string(steps: &[Step], up_to: usize) -> String {
-    let mut s = String::new();
-    for step in &steps[..=up_to] {
-        let t = step.tokens.to_string();
-        match step.lands {
-            Kind::List => {
-                s.push('[');
-                s.push_str(&t);
-                s.push(']');
-            }
-            Kind::Dict => {
-                s.push('{');
-                s.push_str(&t);
-                s.push('}');
-            }
-            Kind::Text => {
-                s.push('<');
-                s.push_str(&t);
-                s.push('>');
-            }
-        }
-    }
-    s
-}
-
 #[proc_macro]
 pub fn walk(input: RawStream) -> RawStream {
-    let Walk { name, steps, body } = parse_macro_input!(input as Walk);
-
-    let last = steps.len() - 1;
-    let it = Ident::new("__it", Span::mixed_site());
-    let at = Ident::new("__at", Span::mixed_site());
-    let value_ident = body.as_ref().map_or(&it, |b| &b.value_ident);
-
-    // Start with the innermost (last step) happy path.
-    let value_arm = match steps[last].lands {
-        Kind::Text => quote! { ::tindalwic::Value::Text(#value_ident) },
-        Kind::List => quote! { ::tindalwic::Value::List(#value_ident) },
-        Kind::Dict => quote! { ::tindalwic::Value::Dict(#value_ident) },
-    };
-    let type_name = match steps[last].lands {
-        Kind::Text => "text",
-        Kind::List => "list",
-        Kind::Dict => "dict",
-    };
-
-    // The innermost code: match the value variant, bind both identifiers, run body.
-    let path_so_far = path_string(&steps, last);
-    let not_type_err = format!("{path_so_far} is not {type_name}");
-
-    // What is the "current container" at the last step?
-    // depth 0 = dict (file root), after that determined by previous step's kind.
-    let in_dict = if last == 0 {
-        true
-    } else {
-        matches!(steps[last - 1].lands, Kind::Dict)
-    };
-
-    let last_tokens = &steps[last].tokens;
-    let mut inner = if in_dict {
-        // dict lookup
-        let not_found_err = format!("{path_so_far} not found");
-        match &body.as_ref() {
-            None => quote! {
-                let #at = #last_tokens;
-                if let Some(#it) = #it.find(#at) {
-                    if let #it = #it.value {
-                        Ok(#it)
-                    } else {
-                        Err(#not_type_err)
-                    }
-                } else {
-                    Err(#not_found_err)
-                }
+    let Walk { file, path, lands } = parse_macro_input!(input as Walk);
+    match path.last().unwrap().kind {
+        Kind::List =>
+            match lands {
+                None =>
+                    quote! { ::tindalwic::Branch::text_value(&[#(#path),*], &#file)},
+                Some(Kind::List) =>
+                    quote! { ::tindalwic::Branch::list_value(&[#(#path),*], &#file)},
+                Some(Kind::Dict) =>
+                    quote! { ::tindalwic::Branch::dict_value(&[#(#path),*], &#file)},
             },
-            Some(Body {
-                cell_ident,
-                value_ident,
-                body,
-            }) => quote! {
-                let #at = #last_tokens;
-                if let Some(#it) = #it.find(#at) {
-                    let mut #cell_ident = #it.get();
-                    if let #value_arm = &mut #cell_ident.value {
-                        #body;
-                        #it.set(#cell_ident);
-                        Ok(())
-                    } else {
-                        Err(#not_type_err)
-                    }
-                } else {
-                    Err(#not_found_err)
-                }
+        Kind::Dict =>
+            match lands {
+                None =>
+                    quote! { ::tindalwic::Branch::text_keyed(&[#(#path),*], &#file)},
+                Some(Kind::List) =>
+                    quote! { ::tindalwic::Branch::list_keyed(&[#(#path),*], &#file)},
+                Some(Kind::Dict) =>
+                    quote! { ::tindalwic::Branch::dict_keyed(&[#(#path),*], &#file)},
             },
-        }
-    } else {
-        // list index
-        let not_found_err = format!("{path_so_far} index out of bounds");
-        match &body.as_ref() {
-            None => quote! {
-                let #at = #last_tokens;
-                if let Some(#it) = #it.list.get(#at) {
-                    if let #value_arm = #it.get() {
-                        Ok(#it)
-                    } else {
-                        Err(#not_type_err)
-                    }
-                } else {
-                    Err(#not_found_err)
-                }
-            },
-            Some(Body {
-                cell_ident,
-                value_ident,
-                body,
-            }) => quote! {
-                let #at = #last_tokens;
-                if let Some(#it) = #it.list.get(#at) {
-                    let mut #cell_ident = #it.get();
-                    if let #value_arm = &mut #cell_ident {
-                        #body;
-                        #it.set(#cell_ident);
-                        Ok(())
-                    } else {
-                        Err(#not_type_err)
-                    }
-                } else {
-                    Err(#not_found_err)
-                }
-            },
-        }
-    };
-
-    // Now wrap each preceding step from inside out.
-    for i in (0..last).rev() {
-        let step_tokens = &steps[i].tokens;
-        let path_here = path_string(&steps, i);
-
-        let expected_arm = match steps[i].lands {
-            Kind::List => quote! { ::tindalwic::Value::List(#it) },
-            Kind::Dict => quote! { ::tindalwic::Value::Dict(#it) },
-            Kind::Text => unreachable!(), // validated during parse
-        };
-        let type_name_here = match steps[i].lands {
-            Kind::List => "list",
-            Kind::Dict => "dict",
-            Kind::Text => unreachable!(),
-        };
-        let not_type_err_here = format!("{path_here} is not {type_name_here}");
-
-        let in_dict_here = if i == 0 {
-            true
-        } else {
-            matches!(steps[i - 1].lands, Kind::Dict)
-        };
-
-        inner = if in_dict_here {
-            let not_found_err_here = format!("{path_here} not found");
-            quote! {
-                let #at = #step_tokens;
-                if let Some(#it) = #it.find(#at) {
-                    if let #expected_arm = #it.get().value {
-                        #inner
-                    } else {
-                        Err(#not_type_err_here)
-                    }
-                } else {
-                    Err(#not_found_err_here)
-                }
-            }
-        } else {
-            let not_found_err_here = format!("{path_here} index out of bounds");
-            quote! {
-                let #at = #step_tokens;
-                if let Some(#it) = #it.list.get(#at) {
-                    if let #expected_arm = #it.get() {
-                        #inner
-                    } else {
-                        Err(#not_type_err_here)
-                    }
-                } else {
-                    Err(#not_found_err_here)
-                }
-            }
-        };
-    }
-
-    quote! {
-        {
-            let #it = #name.file.get();
-            #inner
-        }
-    }
-    .into()
+    }.into()
 }
 
 // ====================================================================================

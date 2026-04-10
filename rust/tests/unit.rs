@@ -26,30 +26,25 @@ fn nested_lists() {
         nested.file.get().to_string(),
         "[key]\n\t[]\n\t\t[]\n\t\t\t[]\n\t\t\t\t[]\n\t\t\t\t\tvalue\n"
     );
-    let path = [Branch::Dict("key"),Branch::List(0),Branch::List(0),Branch::List(0),Branch::List(0),Branch::List(0)];
-    let cell = Branch::value(&path, &nested.file.get());
-    assert_eq!(cell.unwrap().get().to_string(), "value\n");
+    let (text, _cell) = walk!(nested.file.get(), ["key"][0][0][0][0]<0>).unwrap();
+    assert_eq!(text.lines().collect::<Vec<_>>().join("\n"), "value");
 }
 
 #[test]
 fn nested_dicts() {
     json!(data = {"1":"one","2":"two","a":{"b":{"c":{"d":{"k":"v"}}}}});
-    //println!("{:?}",data.file.get());
     assert_eq!(
         data.file.get().to_string(),
         "1=one\n2=two\n{a}\n\t{b}\n\t\t{c}\n\t\t\t{d}\n\t\t\t\tk=v\n"
     );
-    let path = [Branch::Dict("a"),Branch::Dict("b"),Branch::Dict("c"),Branch::Dict("d"),Branch::Dict("k")];
-    let cell = Branch::keyed(&path, &data.file.get());
-    assert_eq!(cell.unwrap().get().value.to_string(), "v\n");
+    let (text, _cell) = walk!(data.file.get(), {"a"}{"b"}{"c"}{"d"}<"k">).unwrap();
+    assert_eq!(Vec::from_iter(text.lines()), vec!["v"]);
 }
 
 #[test]
 fn change_in_list() {
     json!(arena = {"a":{"b":["z"]}});
-    // walk!(arena{"a"}["b"]<0> |c,_t|c = Value::Text(Text::wrap("c"))).unwrap();
-    let path = [Branch::Dict("a"),Branch::Dict("b"),Branch::List(0)];
-    let cell = Branch::value(&path, &arena.file.get()).unwrap();
+    let (_text, cell) = walk!(arena.file.get(), {"a"}["b"]<0>).unwrap();
     cell.set(Value::Text(Text::wrap("c")));
     assert_eq!(arena.file.get().to_string(), "{a}\n\t[b]\n\t\tc\n");
 }
@@ -57,9 +52,7 @@ fn change_in_list() {
 #[test]
 fn change_in_dict() {
     json!(arena = {"a":[{"b":"z"}]});
-    // walk!(arena["a"]{0}<"b"> |c,_t|c.value = Value::Text(Text::wrap("c"))).unwrap();
-    let path = [Branch::Dict("a"),Branch::List(0),Branch::Dict("b")];
-    let cell = Branch::keyed(&path, &arena.file.get()).unwrap();
+    let (_text,cell) = walk!(arena.file.get(), ["a"]{0}<"b">).unwrap();
     let mut keyed = cell.get();
     keyed.value = Value::Text(Text::wrap("c"));
     cell.set(keyed);
@@ -69,9 +62,7 @@ fn change_in_dict() {
 #[test]
 fn inject_comments() {
     json!(data = {"k":"v"});
-    // walk!(data<"k">|c,t|t.epilog = Comment::some("c");c.before=Comment::some("b")).unwrap();
-    let path = [Branch::Dict("k")];
-    let cell = Branch::keyed(&path, &data.file.get()).unwrap();
+    let (_text,cell) = walk!(data.file.get(), <"k">).unwrap();
     let mut keyed = cell.get();
     keyed.before = Comment::some("b");
     if let Value::Text(ref mut text) = keyed.value {

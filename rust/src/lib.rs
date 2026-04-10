@@ -477,122 +477,147 @@ pub struct Error<'a> {
     message: &'static str,
 }
 impl<'a> Error<'a> {
-    fn new(failed: &'a [Branch], message: &'static str) -> Self {
-        Error { failed, message }
+    #[inline]
+    fn err<T>(failed: &'a [Branch], message: &'static str) -> Result<T, Self> {
+        Err(Error { failed, message })
     }
 }
 impl<'a> Branch<'a> {
+    pub fn text_value(path: &'a [Branch], file: &File<'a>) -> Result<(Text<'a>, &'a Cell<Value<'a>>), Error<'a>> {
+        let cell = Branch::value(path,file)?;
+        let Value::Text(text) = cell.get() else {
+            return Error::err(path, "path does not end at text");
+        };
+        Ok((text, cell))
+    }
+    pub fn list_value(path: &'a [Branch], file: &File<'a>) -> Result<(List<'a>, &'a Cell<Value<'a>>), Error<'a>> {
+        let cell = Branch::value(path,file)?;
+        let Value::List(list) = cell.get() else {
+            return Error::err(path, "path does not end at text");
+        };
+        Ok((list, cell))
+    }
+    pub fn dict_value(path: &'a [Branch], file: &File<'a>) -> Result<(Dict<'a>, &'a Cell<Value<'a>>), Error<'a>> {
+        let cell = Branch::value(path,file)?;
+        let Value::Dict(dict) = cell.get() else {
+            return Error::err(path, "path does not end at text");
+        };
+        Ok((dict, cell))
+    }
     pub fn value(path: &'a [Branch], file: &File<'a>) -> Result<&'a Cell<Value<'a>>, Error<'a>> {
         if path.is_empty() {
-            return Err(Error::new(path, "empty path can't be resolved"));
+            return Error::err(path, "empty path can't be resolved");
         }
-        let mut value: Value<'a> = Value::Dict(Dict {
+        let mut container: Value<'a> = Value::Dict(Dict {
             dict: file.dict,
             prolog: None,
             epilog: None,
         });
-        let mut result: Option<&Cell<Value<'a>>> = None;
         for (step, branch) in path.iter().enumerate() {
-            match &value {
+            match &container {
                 Value::Text(text) => {
-                    return Err(Error::new(&path[..step], "path ended by a text value"));
+                    return Error::err(&path[..=step], "path ended by a text value");
                 }
                 Value::List(list) => match branch {
                     Branch::List(at) => {
-                        result = list.list.get(*at);
-                        match result {
-                            None => return Err(Error::new(&path[..step], "index out of bounds")),
+                        match list.list.get(*at) {
+                            None => return Error::err(&path[..=step], "index out of bounds"),
                             Some(found) => {
-                                value = found.get();
+                                if step + 1 == path.len() {
+                                    return Ok(found);
+                                }
+                                container = found.get();
                             }
                         }
                     }
                     Branch::Dict(_) => {
-                        return Err(Error::new(
-                            &path[..step],
-                            "path expected dict but found list",
-                        ));
+                        return Error::err(&path[..=step], "path expected dict but found list");
                     }
                 },
                 Value::Dict(dict) => match branch {
                     Branch::Dict(key) => {
-                        result = None;
                         match dict.find(key) {
-                            None => return Err(Error::new(&path[..step], "key not found")),
+                            None => return Error::err(&path[..=step], "key not found"),
                             Some(found) => {
-                                value = found.get().value;
+                                container = found.get().value;
                             }
                         };
                     }
                     Branch::List(_) => {
-                        return Err(Error::new(
-                            &path[..step],
-                            "path expected list but found dict",
-                        ));
+                        return Error::err(&path[..=step], "path expected list but found dict");
                     }
                 },
             }
         }
-        result.ok_or(Error::new(
-            path,
-            "path did not end at a value inside a list",
-        ))
+        Error::err(path, "path did not end at a value inside a list")
+    }
+    pub fn text_keyed(path: &'a [Branch], file: &File<'a>) -> Result<(Text<'a>, &'a Cell<Keyed<'a>>), Error<'a>> {
+        let cell = Branch::keyed(path,file)?;
+        let Value::Text(text) = cell.get().value else {
+            return Error::err(path, "path does not end at text");
+        };
+        Ok((text, cell))
+    }
+    pub fn list_keyed(path: &'a [Branch], file: &File<'a>) -> Result<(List<'a>, &'a Cell<Keyed<'a>>), Error<'a>> {
+        let cell = Branch::keyed(path,file)?;
+        let Value::List(list) = cell.get().value else {
+            return Error::err(path, "path does not end at text");
+        };
+        Ok((list, cell))
+    }
+    pub fn dict_keyed(path: &'a [Branch], file: &File<'a>) -> Result<(Dict<'a>, &'a Cell<Keyed<'a>>), Error<'a>> {
+        let cell = Branch::keyed(path,file)?;
+        let Value::Dict(dict) = cell.get().value else {
+            return Error::err(path, "path does not end at text");
+        };
+        Ok((dict, cell))
     }
     pub fn keyed(path: &'a [Branch], file: &File<'a>) -> Result<&'a Cell<Keyed<'a>>, Error<'a>> {
         if path.is_empty() {
-            return Err(Error::new(path, "empty path can't be resolved"));
+            return Error::err(path, "empty path can't be resolved");
         }
-        let mut value: Value<'a> = Value::Dict(Dict {
+        let mut container: Value<'a> = Value::Dict(Dict {
             dict: file.dict,
             prolog: None,
             epilog: None,
         });
-        let mut result: Option<&Cell<Keyed<'a>>> = None;
         for (step, branch) in path.iter().enumerate() {
-            match &value {
+            match &container {
                 Value::Text(text) => {
-                    return Err(Error::new(&path[..step], "path ended by a text value"));
+                    return Error::err(&path[..=step], "path ended by a text value");
                 }
                 Value::List(list) => match branch {
                     Branch::List(at) => {
-                        result = None;
                         match list.list.get(*at) {
-                            None => return Err(Error::new(&path[..step], "index out of bounds")),
+                            None => return Error::err(&path[..=step], "index out of bounds"),
                             Some(found) => {
-                                value = found.get();
+                                container = found.get();
                             }
                         }
                     }
                     Branch::Dict(_) => {
-                        return Err(Error::new(
-                            &path[..step],
-                            "path expected dict but found list",
-                        ));
+                        return Error::err(&path[..=step], "path expected dict but found list");
                     }
                 },
                 Value::Dict(dict) => match branch {
                     Branch::Dict(key) => {
-                        result = dict.find(key);
-                        match result {
-                            None => return Err(Error::new(&path[..step], "key not found")),
+                        match dict.find(key) {
+                            None => return Error::err(&path[..=step], "key not found"),
                             Some(found) => {
-                                value = found.get().value;
+                                if step + 1 == path.len() {
+                                    return Ok(found);
+                                }
+                                container = found.get().value;
                             }
                         };
                     }
                     Branch::List(_) => {
-                        return Err(Error::new(
-                            &path[..step],
-                            "path expected list but found dict",
-                        ));
+                        return Error::err(&path[..=step], "path expected list but found dict");
                     }
                 },
             }
         }
-        result.ok_or(Error::new(
-            path,
-            "path did not end at a value inside a list",
-        ))
+        Error::err(path, "path did not end at a value inside a list")
     }
 }
 

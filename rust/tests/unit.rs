@@ -2,74 +2,92 @@
 //use std::{string::ToString, sync::LazyLock};
 use tindalwic::*;
 
+fn joined(text: Text<'_>) -> String {
+    text.lines().collect::<Vec<_>>().join("\n")
+}
+
 #[test]
 fn macro_failures() {
     trybuild::TestCases::new().compile_fail("tests/macro_err/*.rs");
 }
 
 #[test]
-fn empty_file() {
-    json!(empty = {});
-    assert!(empty.file.get().is_empty());
+fn json_text() {
+    json!(arena = "hi");
+    assert!(arena.list().is_none());
+    assert!(arena.dict().is_none());
+    assert_eq!(joined(arena.text().unwrap()), "hi");
 }
 
 #[test]
-fn one_text_value() {
-    json!(simple = {"key":"value"});
-    assert_eq!(simple.file.get().to_string(), "key=value\n");
+fn empty_file() {
+    json!(arena = {});
+    assert!(arena.text().is_none());
+    assert!(arena.list().is_none());
+    let dict = arena.dict().unwrap();
+    assert!(File::new(dict.dict).is_empty());
+}
+
+#[test]
+fn two_lines() {
+    json!(arena = {"key":"one\ntwo"});
+    let dict = arena.dict().unwrap();
+    assert_eq!(dict.to_string(), "{}\n\t<key>\n\t\tone\n\t\ttwo\n");
 }
 
 #[test]
 fn nested_lists() {
-    json!(nested = {"key":[[[[["value"]]]]]});
-    assert_eq!(
-        nested.file.get().to_string(),
-        "[key]\n\t[]\n\t\t[]\n\t\t\t[]\n\t\t\t\t[]\n\t\t\t\t\tvalue\n"
-    );
-    let (text, _cell) = walk!(nested.file.get(), ["key"][0][0][0][0]<0>).unwrap();
-    assert_eq!(text.lines().collect::<Vec<_>>().join("\n"), "value");
+    json!(arena = [[[["value"]]]]);
+    let list = arena.list().unwrap();
+    assert_eq!(list.to_string(), "[]\n\t[]\n\t\t[]\n\t\t\t[]\n\t\t\t\tvalue\n");
+    let (text, _cell) = walk!([list][0][0][0]<0>).unwrap();
+    assert_eq!(joined(text), "value");
 }
 
 #[test]
 fn nested_dicts() {
-    json!(data = {"1":"one","2":"two","a":{"b":{"c":{"d":{"k":"v"}}}}});
+    json!(arena = {"1":"one","2":"two","a":{"b":{"c":{"d":{"k":"v"}}}}});
+    let file = File::new(arena.dict().unwrap().dict);
     assert_eq!(
-        data.file.get().to_string(),
+        file.to_string(),
         "1=one\n2=two\n{a}\n\t{b}\n\t\t{c}\n\t\t\t{d}\n\t\t\t\tk=v\n"
     );
-    let (text, _cell) = walk!(data.file.get(), {"a"}{"b"}{"c"}{"d"}<"k">).unwrap();
+    let (text, _cell) = walk!({file}{"a"}{"b"}{"c"}{"d"}<"k">).unwrap();
     assert_eq!(Vec::from_iter(text.lines()), vec!["v"]);
 }
 
 #[test]
 fn change_in_list() {
     json!(arena = {"a":{"b":["z"]}});
-    let (_text, cell) = walk!(arena.file.get(), {"a"}["b"]<0>).unwrap();
+    let file = File::new(arena.dict().unwrap().dict);
+    let (_text, cell) = walk!({file}{"a"}["b"]<0>).unwrap();
     cell.set(Value::Text(Text::wrap("c")));
-    assert_eq!(arena.file.get().to_string(), "{a}\n\t[b]\n\t\tc\n");
+    assert_eq!(file.to_string(), "{a}\n\t[b]\n\t\tc\n");
 }
 
 #[test]
 fn change_in_dict() {
     json!(arena = {"a":[{"b":"z"}]});
-    let (_text,cell) = walk!(arena.file.get(), ["a"]{0}<"b">).unwrap();
+    let file = File::new(arena.dict().unwrap().dict);
+    let (_text, cell) = walk!({file}["a"]{0}<"b">).unwrap();
     let mut keyed = cell.get();
     keyed.value = Value::Text(Text::wrap("c"));
     cell.set(keyed);
-    assert_eq!(arena.file.get().to_string(), "[a]\n\t{}\n\t\tb=c\n");
+    assert_eq!(file.to_string(), "[a]\n\t{}\n\t\tb=c\n");
 }
 
 #[test]
 fn inject_comments() {
-    json!(data = {"k":"v"});
-    let (_text,cell) = walk!(data.file.get(), <"k">).unwrap();
+    json!(arena = {"k":"v"});
+    let file = File::new(arena.dict().unwrap().dict);
+    let (_text, cell) = walk!({file}<"k">).unwrap();
     let mut keyed = cell.get();
     keyed.before = Comment::some("b");
     if let Value::Text(ref mut text) = keyed.value {
         text.epilog = Comment::some("c");
     }
     cell.set(keyed);
-    assert_eq!(data.file.get().to_string(), "//b\nk=v\n#c\n");
+    assert_eq!(file.to_string(), "//b\nk=v\n#c\n");
 }
 
 // #[test]

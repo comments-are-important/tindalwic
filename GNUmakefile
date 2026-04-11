@@ -81,10 +81,14 @@ rust/doc: must-run-inside
 	uv run -- python -m http.server
 .PHONY: rust/doc
 
-rust/api: must-run-inside
+rust/nightly: must-run-inside
 	cd rust
-	: rustup toolchain install nightly
-	: cargo install cargo-public-api
+	rustup toolchain list | grep -q nightly || rustup toolchain install nightly
+.PHONY: rust/nightly
+
+rust/api: rust/nightly
+	cd rust
+	cargo install --list | grep -q cargo-public-api || cargo install cargo-public-api
 	mkdir -p target
 	cargo public-api -sss \
 	  | grep -v '^impl' \
@@ -93,7 +97,13 @@ rust/api: must-run-inside
 	  | LC_ALL=C sort >target/api.txt
 .PHONY: rust/api
 
-rust/fmt: must-run-inside
+rust/llvm-lines: must-run-inside
+	cd rust
+	cargo install --list | grep -q cargo-llvm-lines || cargo install cargo-llvm-lines
+	cargo llvm-lines
+.PHONY: rust/llvm-lines
+
+rust/fmt: rust/nightly
 	cd rust
 	rustfmt +nightly --config format_code_in_doc_comments=true src/lib.rs
 .PHONY: rust/fmt

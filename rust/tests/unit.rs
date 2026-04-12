@@ -39,18 +39,21 @@ fn two_lines() {
 fn nested_lists() {
     json!(arena = [[[["value"]]]]);
     let list = arena.list().unwrap();
-    assert_eq!(list.to_string(), "[]\n\t[]\n\t\t[]\n\t\t\t[]\n\t\t\t\tvalue\n");
+    assert_eq!(
+        list.to_string(),
+        "[]\n\t[]\n\t\t[]\n\t\t\t[]\n\t\t\t\tvalue\n"
+    );
     let (text, _cell) = walk!([list][0][0][0]<0>).unwrap();
     assert_eq!(joined(text), "value");
 }
 
 #[test]
 fn nested_dicts() {
-    json!(arena = {"1":"one","2":"two","a":{"b":{"c":{"d":{"k":"v"}}}}});
+    json!(arena = {"1":"one","2":["two"],"a":{"b":{"c":{"d":{"k":"v"}}}}});
     let file = File::new(arena.dict().unwrap().dict);
     assert_eq!(
         file.to_string(),
-        "1=one\n2=two\n{a}\n\t{b}\n\t\t{c}\n\t\t\t{d}\n\t\t\t\tk=v\n"
+        "1=one\n[2]\n\ttwo\n{a}\n\t{b}\n\t\t{c}\n\t\t\t{d}\n\t\t\t\tk=v\n"
     );
     let (text, _cell) = walk!({file}{"a"}{"b"}{"c"}{"d"}<"k">).unwrap();
     assert_eq!(Vec::from_iter(text.lines()), vec!["v"]);
@@ -90,55 +93,28 @@ fn inject_comments() {
     assert_eq!(file.to_string(), "//b\nk=v\n#c\n");
 }
 
-// #[test]
-// fn resolve_list() {
-//     let list:Value<'_> = tindalwic!(["hello", { "k" : ["world"] }]);
-//     assert_eq!(list.at(0).text().unwrap().to_string(), "hello\n");
-//     assert_eq!(list.at(1).key("k").text().unwrap().to_string(), "world\n");
-// }
-
-// #[test]
-// fn resolve_failure() {
-//     path!([5])
-//         .value(&tindalwic!(["hello", "world"]))
-//         .unwrap_err();
-// }
-
-// fn visible(string: &str) -> String {
-//     static DEDENT: LazyLock<Regex> =
-//         LazyLock::new(|| RegexBuilder::new("^ *").multi_line(true).build().unwrap());
-//     DEDENT
-//         .replace_all(string, "")
-//         .replace("╶─▸", "\t")
-//         .replace("▁▁▎", "\n")
-// }
-
-/*
-struct Expect(String);
-impl Expect {
-    fn from(&self, indent: usize, parse: &'static str) -> &Self {
-        let parse = visible(parse);
-        let encoded = Encoded::parse(&parse, indent);
-        let vec: Vec<&str> = Comment { encoded }.lines().collect();
-        assert_eq!(vec.join("\n"), self.0);
-        self
-    }
-}
-
 #[test]
-fn parse_comments() {
-    Expect(visible("c")).from(0, "c");
-
-    Expect(visible("a▁▁▎b"))
-        .from(0, "a▁▁▎╶─▸b▁▁▎...")
-        .from(1, "a▁▁▎╶─▸╶─▸b▁▁▎╶─▸...")
-        .from(2, "a▁▁▎╶─▸╶─▸╶─▸b▁▁▎╶─▸╶─▸...");
-
-    Expect(visible("a▁▁▎╶─▸b"))
-        .from(0, "a▁▁▎╶─▸╶─▸b▁▁▎...")
-        .from(1, "a▁▁▎╶─▸╶─▸╶─▸b▁▁▎╶─▸...");
+fn parse_manually() {
+    let mut arena = Arena {
+        utf8_bytes: "1=one\n[2]\n\ttwo\n{a}\n\t{b}\n\t\t{c}\n\t\t\t{d}\n\t\t\t\tk=v\n",
+        value_cells: &Value::array::<2>(),
+        keyed_cells: &Keyed::array::<7>(),
+        value_next: 0,
+        keyed_next: 0,
+    };
+    arena
+        .tv(11..14)
+        .tk(41..42, 43..44)
+        .dk(34..35, 0..1)
+        .dk(27..28, 1..2)
+        .dk(21..22, 2..3)
+        .tk(0..1, 2..5)
+        .lk(7..8, 0..1)
+        .dk(16..17, 3..4)
+        .dv(4..7);
+    let file = File::new(arena.dict().unwrap().dict);
+    assert_eq!(file.to_string(), arena.utf8_bytes);
 }
-*/
 
 // #[test]
 // fn zzz() {
@@ -149,76 +125,4 @@ fn parse_comments() {
 //     result.epilog = Some("changed".into());
 //     //assert_eq!(text.epilog.unwrap().gfm.to_string(), "hi");
 //     hi.clear();
-// }
-
-//#[test]
-// fn encode_uncommented_file() {
-//     assert_eq!(
-//         tindalwic!("one":"\n").to_string(),
-//         visible(
-//             "[one]
-//             ╶─▸<>
-//             ╶─▸╶─▸
-//             ╶─▸╶─▸
-//             "
-//         )
-//     );
-// }
-// #[test]
-// fn encode_fully_commented_file() {
-//     let file = File {
-//         hashbang: Some("/usr/bin/env -S app argument".into()),
-//         prolog: Some(" this is the prolog for the file".into()),
-//         vec: vec![
-//             Keyed {
-//                 gap: true,
-//                 before: Some(" about key one".into()),
-//                 key: "one",
-//                 value: tindalwic!(<> "1" ; # epilog=" about value one"),
-//             },
-//             Keyed {
-//                 gap: true,
-//                 before: Some(" about key two".into()),
-//                 key: "two",
-//                 value: tindalwic!([]
-//                     # " about list two";
-//                     <> "2"
-//                     //epilog=" after list two",
-//                 ),
-//             },
-//             Keyed {
-//                 gap: true,
-//                 before: Some(" about key three".into()),
-//                 key: "three",
-//                 value: Value::Dict(Dict {
-//                     prolog: Some(" about dict three".into()),
-//                     vec: vec![],
-//                     epilog: Some(" after dict three".into()),
-//                 }),
-//             },
-//         ],
-//     };
-//     assert_eq!(
-//         file.to_string(),
-//         visible(
-//             "#!/usr/bin/env -S app argument
-//             # this is the prolog for the file
-
-//             // about key one
-//             one=1
-//             # about value one
-
-//             // about key two
-//             [two]
-//             ╶─▸# about list two
-//             ╶─▸2
-//             # after list two
-
-//             // about key three
-//             {three}
-//             ╶─▸# about dict three
-//             # after dict three
-//             "
-//         )
-//     )
 // }

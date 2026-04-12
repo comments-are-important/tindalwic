@@ -241,7 +241,7 @@ impl<'a> Display for List<'a> {
     }
 }
 impl<'a> List<'a> {
-    const fn wrap(list: &'a [Cell<Value<'a>>]) -> Self {
+    pub const fn wrap(list: &'a [Cell<Value<'a>>]) -> Self {
         List {
             list,
             prolog: None,
@@ -270,7 +270,7 @@ pub struct Keyed<'a> {
     pub value: Value<'a>,
 }
 impl<'a> Keyed<'a> {
-    pub const fn blank<'b>(_: usize) -> Cell<Keyed<'b>> {
+    pub fn blank<'b>(_: usize) -> Cell<Keyed<'b>> {
         Cell::new(Keyed {
             key: "",
             gap: false,
@@ -283,6 +283,9 @@ impl<'a> Keyed<'a> {
                 epilog: None,
             }),
         })
+    }
+    pub fn array<const N: usize>() -> [Cell<Keyed<'a>>; N] {
+        ::core::array::from_fn::<_,N,_>(Keyed::blank)
     }
     /// convert a key and a value into an entry (for a Dict).
     pub const fn from(key: &'a str, value: Value<'a>) -> Self {
@@ -374,7 +377,7 @@ impl<'a> Display for Value<'a> {
     }
 }
 impl<'a> Value<'a> {
-    pub const fn blank<'b>(_: usize) -> Cell<Value<'b>> {
+    pub fn blank<'b>(_: usize) -> Cell<Value<'b>> {
         Cell::new(Value::Text(Text {
             encoded: Encoded {
                 utf8: "",
@@ -382,6 +385,9 @@ impl<'a> Value<'a> {
             },
             epilog: None,
         }))
+    }
+    pub fn array<const N: usize>() -> [Cell<Value<'a>>; N] {
+        ::core::array::from_fn::<_,N,_>(Value::blank)
     }
     pub fn text_value(
         &self,
@@ -525,6 +531,9 @@ impl<'a> Value<'a> {
         }
         Error::err(path, "path did not end at a value inside a list")
     }
+    pub fn to_value(self) -> Self {
+        self
+    }
 }
 
 // ------------------------------------------------------------------------------------
@@ -572,49 +581,50 @@ impl<'a> File<'a> {
 }
 
 /// support for the macro. public so macro can use it, but think of it as hidden.
-pub struct Storage<'a, const LIST: usize, const DICT: usize> {
-    pub utf8_bytes: &'a str,
-    pub value_cells: [Cell<Value<'a>>; LIST],
-    pub keyed_cells: [Cell<Keyed<'a>>; DICT],
-}
-/// support for the macro. public so macro can use it, but think of it as hidden.
 pub struct Arena<'a> {
     pub utf8_bytes: &'a str,
     pub value_cells: &'a [Cell<Value<'a>>],
     pub keyed_cells: &'a [Cell<Keyed<'a>>],
+    pub value_next: usize,
+    pub keyed_next: usize,
 }
 impl<'a> Arena<'a> {
-    pub fn tv(&'a self, index: usize, utf8: Range<usize>) -> &'a Self {
-        self.value_cells[index].set(Value::Text(Text::wrap(&self.utf8_bytes[utf8])));
+    pub fn tv(&mut self, utf8: Range<usize>) -> &mut Self {
+        self.value_cells[self.value_next]
+            .set(Value::Text(Text::wrap(&self.utf8_bytes[utf8])));
+        self.value_next += 1;
         self
     }
-    pub fn lv(&'a self, index: usize, list: Range<usize>) -> &'a Self {
-        self.value_cells[index].set(Value::List(List {
+    pub fn lv(&mut self, list: Range<usize>) -> &mut Self {
+        self.value_cells[self.value_next].set(Value::List(List {
             list: &self.value_cells[list],
             prolog: None,
             epilog: None,
         }));
+        self.value_next += 1;
         self
     }
-    pub fn dv(&'a self, index: usize, dict: Range<usize>) -> &'a Self {
-        self.value_cells[index].set(Value::Dict(Dict {
+    pub fn dv(&mut self, dict: Range<usize>) -> &mut Self {
+        self.value_cells[self.value_next].set(Value::Dict(Dict {
             dict: &self.keyed_cells[dict],
             prolog: None,
             epilog: None,
         }));
+        self.value_next += 1;
         self
     }
-    pub fn tk(&'a self, index: usize, key: Range<usize>, utf8: Range<usize>) -> &'a Self {
-        self.keyed_cells[index].set(Keyed {
+    pub fn tk(&mut self, key: Range<usize>, utf8: Range<usize>) -> &mut Self {
+        self.keyed_cells[self.keyed_next].set(Keyed {
             key: &self.utf8_bytes[key],
             gap: false,
             before: None,
             value: Value::Text(Text::wrap(&self.utf8_bytes[utf8])),
         });
+        self.keyed_next += 1;
         self
     }
-    pub fn lk(&'a self, index: usize, key: Range<usize>, list: Range<usize>) -> &'a Self {
-        self.keyed_cells[index].set(Keyed {
+    pub fn lk(&mut self, key: Range<usize>, list: Range<usize>) -> &mut Self {
+        self.keyed_cells[self.keyed_next].set(Keyed {
             key: &self.utf8_bytes[key],
             gap: false,
             before: None,
@@ -624,10 +634,11 @@ impl<'a> Arena<'a> {
                 epilog: None,
             }),
         });
+        self.keyed_next += 1;
         self
     }
-    pub fn dk(&'a self, index: usize, key: Range<usize>, dict: Range<usize>) -> &'a Self {
-        self.keyed_cells[index].set(Keyed {
+    pub fn dk(&mut self, key: Range<usize>, dict: Range<usize>) -> &mut Self {
+        self.keyed_cells[self.keyed_next].set(Keyed {
             key: &self.utf8_bytes[key],
             gap: false,
             before: None,
@@ -637,27 +648,28 @@ impl<'a> Arena<'a> {
                 epilog: None,
             }),
         });
+        self.keyed_next += 1;
         self
     }
-    pub fn root(&'a self) -> &'a Cell<Value<'a>> {
-        &self.value_cells[0]
+    pub fn end(&self) -> &'a Cell<Value<'a>> {
+        &self.value_cells[self.value_next - 1]
     }
-    pub fn text(&'a self) -> Option<Text<'a>> {
-        if let Value::Text(text) = self.root().get() {
+    pub fn text(&self) -> Option<Text<'a>> {
+        if let Value::Text(text) = self.end().get() {
             Some(text)
         } else {
             None
         }
     }
-    pub fn list(&'a self) -> Option<List<'a>> {
-        if let Value::List(list) = self.root().get() {
+    pub fn list(&self) -> Option<List<'a>> {
+        if let Value::List(list) = self.end().get() {
             Some(list)
         } else {
             None
         }
     }
-    pub fn dict(&'a self) -> Option<Dict<'a>> {
-        if let Value::Dict(dict) = self.root().get() {
+    pub fn dict(&self) -> Option<Dict<'a>> {
+        if let Value::Dict(dict) = self.end().get() {
             Some(dict)
         } else {
             None

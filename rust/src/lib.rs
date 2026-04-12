@@ -175,11 +175,11 @@ impl<'a> Display for Text<'a> {
 }
 impl<'a> Text<'a> {
     /// Return a zero-copy instance using the provided literal (not indented) slice.
-    pub const fn wrap(utf8: &'a str) -> Self {
-        Text {
+    pub const fn wrap(utf8: &'a str) -> Value<'a> {
+        Value::Text(Text {
             encoded: Encoded::wrap(utf8),
             epilog: None,
-        }
+        })
     }
     fn one_liner_in_list(&self) -> bool {
         if !self.encoded.one_liner() {
@@ -241,12 +241,12 @@ impl<'a> Display for List<'a> {
     }
 }
 impl<'a> List<'a> {
-    pub const fn wrap(list: &'a [Cell<Value<'a>>]) -> Self {
-        List {
+    pub const fn wrap(list: &'a [Cell<Value<'a>>]) -> Value<'a> {
+        Value::List(List {
             list,
             prolog: None,
             epilog: None,
-        }
+        })
     }
     pub fn to_value(&self) -> Value<'a> {
         Value::List(self.clone())
@@ -285,7 +285,7 @@ impl<'a> Keyed<'a> {
         })
     }
     pub fn array<const N: usize>() -> [Cell<Keyed<'a>>; N] {
-        ::core::array::from_fn::<_,N,_>(Keyed::blank)
+        ::core::array::from_fn::<_, N, _>(Keyed::blank)
     }
     /// convert a key and a value into an entry (for a Dict).
     pub const fn from(key: &'a str, value: Value<'a>) -> Self {
@@ -317,12 +317,12 @@ fn position<'a>(dict: &'a [Cell<Keyed<'a>>], key: &str) -> Option<usize> {
     dict.iter().position(|x| x.get().key == key)
 }
 impl<'a> Dict<'a> {
-    pub fn wrap(dict: &'a [Cell<Keyed<'a>>]) -> Self {
-        Dict {
+    pub fn wrap(dict: &'a [Cell<Keyed<'a>>]) -> Value<'a> {
+        Value::Dict(Dict {
             dict,
             prolog: None,
             epilog: None,
-        }
+        })
     }
     /// returns the position of the entry with the given key.
     pub fn position(&self, key: &str) -> Option<usize> {
@@ -387,7 +387,7 @@ impl<'a> Value<'a> {
         }))
     }
     pub fn array<const N: usize>() -> [Cell<Value<'a>>; N] {
-        ::core::array::from_fn::<_,N,_>(Value::blank)
+        ::core::array::from_fn::<_, N, _>(Value::blank)
     }
     pub fn text_value(
         &self,
@@ -576,7 +576,7 @@ impl<'a> File<'a> {
         self.position(key).map(|i| &self.dict[i])
     }
     pub fn to_value(&self) -> Value<'a> {
-        Value::Dict(Dict::wrap(self.dict))
+        Dict::wrap(self.dict)
     }
 }
 
@@ -589,70 +589,42 @@ pub struct Arena<'a> {
     pub keyed_next: usize,
 }
 impl<'a> Arena<'a> {
-    pub fn tv(&mut self, utf8: Range<usize>) -> &mut Self {
-        self.value_cells[self.value_next]
-            .set(Value::Text(Text::wrap(&self.utf8_bytes[utf8])));
+    pub fn vv(&mut self, value: Value<'a>) -> &mut Self {
+        self.value_cells[self.value_next].set(value);
         self.value_next += 1;
         self
+    }
+    pub fn tv(&mut self, utf8: Range<usize>) -> &mut Self {
+        self.vv(Text::wrap(&self.utf8_bytes[utf8]))
     }
     pub fn lv(&mut self, list: Range<usize>) -> &mut Self {
-        self.value_cells[self.value_next].set(Value::List(List {
-            list: &self.value_cells[list],
-            prolog: None,
-            epilog: None,
-        }));
-        self.value_next += 1;
-        self
+        self.vv(List::wrap(&self.value_cells[list]))
     }
     pub fn dv(&mut self, dict: Range<usize>) -> &mut Self {
-        self.value_cells[self.value_next].set(Value::Dict(Dict {
-            dict: &self.keyed_cells[dict],
-            prolog: None,
-            epilog: None,
-        }));
-        self.value_next += 1;
+        self.vv(Dict::wrap(&self.keyed_cells[dict]))
+    }
+    pub fn vk(&mut self, key: &'a str, value: Value<'a>) -> &mut Self {
+        self.keyed_cells[self.keyed_next].set(Keyed::from(key, value));
+        self.keyed_next += 1;
         self
+    }
+    pub fn uk(&mut self, key: Range<usize>, value: Value<'a>) -> &mut Self {
+        self.vk(&self.utf8_bytes[key], value)
     }
     pub fn tk(&mut self, key: Range<usize>, utf8: Range<usize>) -> &mut Self {
-        self.keyed_cells[self.keyed_next].set(Keyed {
-            key: &self.utf8_bytes[key],
-            gap: false,
-            before: None,
-            value: Value::Text(Text::wrap(&self.utf8_bytes[utf8])),
-        });
-        self.keyed_next += 1;
-        self
+        self.uk(key, Text::wrap(&self.utf8_bytes[utf8]))
     }
     pub fn lk(&mut self, key: Range<usize>, list: Range<usize>) -> &mut Self {
-        self.keyed_cells[self.keyed_next].set(Keyed {
-            key: &self.utf8_bytes[key],
-            gap: false,
-            before: None,
-            value: Value::List(List {
-                list: &self.value_cells[list],
-                prolog: None,
-                epilog: None,
-            }),
-        });
-        self.keyed_next += 1;
-        self
+        self.vk(&self.utf8_bytes[key], List::wrap(&self.value_cells[list]))
     }
     pub fn dk(&mut self, key: Range<usize>, dict: Range<usize>) -> &mut Self {
-        self.keyed_cells[self.keyed_next].set(Keyed {
-            key: &self.utf8_bytes[key],
-            gap: false,
-            before: None,
-            value: Value::Dict(Dict {
-                dict: &self.keyed_cells[dict],
-                prolog: None,
-                epilog: None,
-            }),
-        });
-        self.keyed_next += 1;
-        self
+        self.vk(&self.utf8_bytes[key], Dict::wrap(&self.keyed_cells[dict]))
     }
     pub fn end(&self) -> &'a Cell<Value<'a>> {
         &self.value_cells[self.value_next - 1]
+    }
+    pub fn value(&self) -> Value<'a> {
+        self.end().get()
     }
     pub fn text(&self) -> Option<Text<'a>> {
         if let Value::Text(text) = self.end().get() {

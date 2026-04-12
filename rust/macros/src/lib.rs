@@ -205,6 +205,9 @@ impl ToTokens for Indexed {
                 let range = Range::dict(dict);
                 tokens.extend(quote!(.dv(#range)));
             }
+            Value::Expr(expr) => {
+                tokens.extend(quote!(.vv((#expr).to_value())));
+            }
         }
     }
 }
@@ -248,15 +251,18 @@ impl ToTokens for Keyed {
                 let range = Range::dict(dict);
                 tokens.extend(quote!(.dk(#key,#range)));
             }
+            Value::Expr(expr) => {
+                tokens.extend(quote!(.uk(#key,(#expr).to_value())));
+            }
         }
     }
 }
 
 enum Value {
-    //Name(Ident), // can't do that with current arena
     Text(UTF8),
     List(Punctuated<Indexed, Token![,]>),
     Dict(Punctuated<Keyed, Token![,]>),
+    Expr(TokenStream),
 }
 impl Parse for Value {
     fn parse(input: ParseStream) -> Result<Self> {
@@ -266,8 +272,12 @@ impl Parse for Value {
             Ok(Value::List(Indexed::parse_list(input)?))
         } else if input.peek(token::Brace) {
             Ok(Value::Dict(Keyed::parse_dict(input)?))
+        } else if input.peek(token::Paren) {
+            let content;
+            parenthesized!(content in input);
+            Ok(Value::Expr(content.parse()?))
         } else {
-            Err(input.error("expected string literal, [...], or {...}"))
+            Err(input.error("expected string literal, [...], {...}, or (value)"))
         }
     }
 }
@@ -309,6 +319,7 @@ impl Arena {
             Value::Text(text) => self.text(text),
             Value::List(list) => self.list(list),
             Value::Dict(dict) => self.dict(dict),
+            Value::Expr(_expr) => {}
         }
     }
     fn text(&mut self, text: &mut UTF8) {
@@ -372,6 +383,9 @@ pub fn json(input: RawStream) -> RawStream {
         Value::Dict(root) => {
             let range = Range::dict(root);
             quote!(let mut #name = #arena; #name #make .dv(#range);)
+        }
+        Value::Expr(expr) => {
+            quote!(let mut #name = #arena; #name #make .vv((#expr).to_value());)
         }
     }
     .into()

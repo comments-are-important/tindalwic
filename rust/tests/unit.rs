@@ -64,7 +64,7 @@ fn change_in_list() {
     json!(arena = {"a":{"b":["z"]}});
     let file = File::new(arena.dict().unwrap().dict);
     let (_text, cell) = walk!({file}{"a"}["b"]<0>).unwrap();
-    cell.set(Value::Text(Text::wrap("c")));
+    cell.set(Text::wrap("c"));
     assert_eq!(file.to_string(), "{a}\n\t[b]\n\t\tc\n");
 }
 
@@ -74,7 +74,7 @@ fn change_in_dict() {
     let file = File::new(arena.dict().unwrap().dict);
     let (_text, cell) = walk!({file}["a"]{0}<"b">).unwrap();
     let mut keyed = cell.get();
-    keyed.value = Value::Text(Text::wrap("c"));
+    keyed.value = Text::wrap("c");
     cell.set(keyed);
     assert_eq!(file.to_string(), "[a]\n\t{}\n\t\tb=c\n");
 }
@@ -94,7 +94,21 @@ fn inject_comments() {
 }
 
 #[test]
-fn parse_manually() {
+fn change_structure() {
+    json!(arena = {"k":["v"]});
+    let dict = arena.dict().unwrap();
+    let (list, cell) = walk!({dict}["k"]).unwrap();
+    json!(patch = {"p":(list)});
+    let mut keyed = cell.get();
+    keyed.value = patch.value();
+    cell.set(keyed);
+    assert_eq!(dict.to_string(), "{}\n\t{k}\n\t\t[p]\n\t\t\tv\n")
+}
+
+#[test]
+fn prototype_input() {
+    // proof that Arena might be used for Input.
+    // no idea yet how to pick the const sizes for the arrays.
     let mut arena = Arena {
         utf8_bytes: "1=one\n[2]\n\ttwo\n{a}\n\t{b}\n\t\t{c}\n\t\t\t{d}\n\t\t\t\tk=v\n",
         value_cells: &Value::array::<2>(),
@@ -116,7 +130,7 @@ fn parse_manually() {
     assert_eq!(file.to_string(), arena.utf8_bytes);
 }
 
-// #[test]
+// move to tests/macro_err/badlife.rs
 // fn zzz() {
 //     let mut hi = String::from("hi");
 //     let mut root = tindalwic!([hi[..]]);

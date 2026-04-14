@@ -9,7 +9,7 @@ use alloc::string::String;
 */
 use core::cell::Cell;
 use core::fmt::{self, Debug, Display, Formatter, Write};
-use core::ops::Range;
+use core::ops::{Deref, DerefMut, Range};
 use core::sync::atomic;
 
 #[doc(inline)]
@@ -41,6 +41,11 @@ impl<'a> Encoded<'a> {
             utf8,
             dedent: if newline < bytes.len() { 0 } else { usize::MAX },
         }
+    }
+    pub fn assign(&mut self, utf8: &'a str) {
+        let wrap = Encoded::wrap(utf8);
+        self.utf8 = wrap.utf8;
+        self.dedent = wrap.dedent;
     }
     fn one_liner(&self) -> bool {
         if self.dedent == usize::MAX {
@@ -81,6 +86,66 @@ impl<'a> Encoded<'a> {
     */
 }
 
+macro_rules! cell_helpers {
+    ($Name:ident, $NameInList:ident, $NameInDict:ident) => {
+        pub struct $NameInList<'a> {
+            pub value: $Name<'a>,
+            pub cell: &'a Cell<Value<'a>>,
+        }
+        impl<'a> Deref for $NameInList<'a> {
+            type Target = $Name<'a>;
+            fn deref(&self) -> &Self::Target {
+                &self.value
+            }
+        }
+        impl<'a> DerefMut for $NameInList<'a> {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.value
+            }
+        }
+        impl<'a> $NameInList<'a> {
+            pub fn from(cell: &'a Cell<Value<'a>>) -> Option<Self> {
+                if let Value::$Name(value) = cell.get() {
+                    Some($NameInList { value, cell })
+                } else {
+                    None
+                }
+            }
+            pub fn persist(&self) {
+                self.cell.set(Value::$Name(self.value))
+            }
+        }
+        pub struct $NameInDict<'a> {
+            pub value: $Name<'a>,
+            pub cell: &'a Cell<Keyed<'a>>,
+        }
+        impl<'a> Deref for $NameInDict<'a> {
+            type Target = $Name<'a>;
+            fn deref(&self) -> &Self::Target {
+                &self.value
+            }
+        }
+        impl<'a> DerefMut for $NameInDict<'a> {
+            fn deref_mut(&mut self) -> &mut Self::Target {
+                &mut self.value
+            }
+        }
+        impl<'a> $NameInDict<'a> {
+            pub fn from(cell: &'a Cell<Keyed<'a>>) -> Option<Self> {
+                let keyed = cell.get();
+                if let Value::$Name(value) = keyed.value {
+                    Some($NameInDict { value, cell })
+                } else {
+                    None
+                }
+            }
+            // pub fn persist(&self) {
+            //     self.cell.set(Value::$Name(self.value))
+            // }
+        }
+    };
+}
+
 // ====================================================================================
 
 /// Metadata about a Value or a File.
@@ -117,6 +182,9 @@ impl<'a> Comment<'a> {
         Comment {
             encoded: Encoded::wrap(utf8),
         }
+    }
+    pub fn assign(&mut self, utf8: &'a str) {
+        self.encoded.assign(utf8);
     }
     /// instantiate into [Option::Some].
     pub fn some(utf8: &'a str) -> Option<Self> {
@@ -161,6 +229,7 @@ impl<'a> Display for Comment<'a> {
 
 // ------------------------------------------------------------------------------------
 
+cell_helpers! {Text,TextInList,TextInDict}
 /// the fields of a [Value::Text]
 #[derive(Clone, Copy, Debug)]
 pub struct Text<'a> {
@@ -180,6 +249,9 @@ impl<'a> Text<'a> {
             encoded: Encoded::wrap(utf8),
             epilog: None,
         })
+    }
+    pub fn assign(&mut self, utf8: &'a str) {
+        self.encoded.assign(utf8);
     }
     fn one_liner_in_list(&self) -> bool {
         if !self.encoded.one_liner() {
@@ -225,6 +297,7 @@ impl<'a> Text<'a> {
 
 // ------------------------------------------------------------------------------------
 
+cell_helpers! {List,ListInList,ListInDict}
 /// the fields of a [Value::List]
 #[derive(Clone, Copy, Debug)]
 pub struct List<'a> {
@@ -298,6 +371,7 @@ impl<'a> Keyed<'a> {
     }
 }
 
+cell_helpers! {Dict,DictInList,DictInDict}
 /// the fields of a [Value::Dict]
 #[derive(Clone, Copy, Debug)]
 pub struct Dict<'a> {
@@ -339,23 +413,6 @@ impl<'a> Dict<'a> {
 
 // ------------------------------------------------------------------------------------
 
-#[derive(Debug)]
-pub enum Branch<'a> {
-    List(usize),
-    Dict(&'a str),
-}
-#[derive(Debug)]
-pub struct Error<'a> {
-    failed: &'a [Branch<'a>],
-    message: &'static str,
-}
-impl<'a> Error<'a> {
-    #[inline]
-    fn err<T>(failed: &'a [Branch], message: &'static str) -> Result<T, Self> {
-        Err(Error { failed, message })
-    }
-}
-
 /// the three possible Value types
 #[derive(Clone, Copy, Debug)]
 pub enum Value<'a> {
@@ -388,148 +445,6 @@ impl<'a> Value<'a> {
     }
     pub fn array<const N: usize>() -> [Cell<Value<'a>>; N] {
         ::core::array::from_fn::<_, N, _>(Value::blank)
-    }
-    pub fn text_value(
-        &self,
-        path: &'a [Branch],
-    ) -> Result<(Text<'a>, &'a Cell<Value<'a>>), Error<'a>> {
-        let cell = self.value(path)?;
-        let Value::Text(text) = cell.get() else {
-            return Error::err(path, "path does not end at text");
-        };
-        Ok((text, cell))
-    }
-    pub fn list_value(
-        &self,
-        path: &'a [Branch],
-    ) -> Result<(List<'a>, &'a Cell<Value<'a>>), Error<'a>> {
-        let cell = self.value(path)?;
-        let Value::List(list) = cell.get() else {
-            return Error::err(path, "path does not end at text");
-        };
-        Ok((list, cell))
-    }
-    pub fn dict_value(
-        &self,
-        path: &'a [Branch],
-    ) -> Result<(Dict<'a>, &'a Cell<Value<'a>>), Error<'a>> {
-        let cell = self.value(path)?;
-        let Value::Dict(dict) = cell.get() else {
-            return Error::err(path, "path does not end at text");
-        };
-        Ok((dict, cell))
-    }
-    fn value(&self, path: &'a [Branch]) -> Result<&'a Cell<Value<'a>>, Error<'a>> {
-        if path.is_empty() {
-            return Error::err(path, "empty path can't be resolved");
-        }
-        let mut container = self.clone();
-        for (step, branch) in path.iter().enumerate() {
-            match &container {
-                Value::Text(text) => {
-                    return Error::err(&path[..=step], "path ended by a text value");
-                }
-                Value::List(list) => match branch {
-                    Branch::List(at) => match list.list.get(*at) {
-                        None => return Error::err(&path[..=step], "index out of bounds"),
-                        Some(found) => {
-                            if step + 1 == path.len() {
-                                return Ok(found);
-                            }
-                            container = found.get();
-                        }
-                    },
-                    Branch::Dict(_) => {
-                        return Error::err(&path[..=step], "path expected dict but found list");
-                    }
-                },
-                Value::Dict(dict) => match branch {
-                    Branch::Dict(key) => {
-                        match dict.find(key) {
-                            None => return Error::err(&path[..=step], "key not found"),
-                            Some(found) => {
-                                container = found.get().value;
-                            }
-                        };
-                    }
-                    Branch::List(_) => {
-                        return Error::err(&path[..=step], "path expected list but found dict");
-                    }
-                },
-            }
-        }
-        Error::err(path, "path did not end at a value inside a list")
-    }
-    pub fn text_keyed(
-        &self,
-        path: &'a [Branch],
-    ) -> Result<(Text<'a>, &'a Cell<Keyed<'a>>), Error<'a>> {
-        let cell = self.keyed(path)?;
-        let Value::Text(text) = cell.get().value else {
-            return Error::err(path, "path does not end at text");
-        };
-        Ok((text, cell))
-    }
-    pub fn list_keyed(
-        &self,
-        path: &'a [Branch],
-    ) -> Result<(List<'a>, &'a Cell<Keyed<'a>>), Error<'a>> {
-        let cell = self.keyed(path)?;
-        let Value::List(list) = cell.get().value else {
-            return Error::err(path, "path does not end at text");
-        };
-        Ok((list, cell))
-    }
-    pub fn dict_keyed(
-        &self,
-        path: &'a [Branch],
-    ) -> Result<(Dict<'a>, &'a Cell<Keyed<'a>>), Error<'a>> {
-        let cell = self.keyed(path)?;
-        let Value::Dict(dict) = cell.get().value else {
-            return Error::err(path, "path does not end at text");
-        };
-        Ok((dict, cell))
-    }
-    fn keyed(&self, path: &'a [Branch]) -> Result<&'a Cell<Keyed<'a>>, Error<'a>> {
-        if path.is_empty() {
-            return Error::err(path, "empty path can't be resolved");
-        }
-        let mut container = self.clone();
-        for (step, branch) in path.iter().enumerate() {
-            match &container {
-                Value::Text(text) => {
-                    return Error::err(&path[..=step], "path ended by a text value");
-                }
-                Value::List(list) => match branch {
-                    Branch::List(at) => match list.list.get(*at) {
-                        None => return Error::err(&path[..=step], "index out of bounds"),
-                        Some(found) => {
-                            container = found.get();
-                        }
-                    },
-                    Branch::Dict(_) => {
-                        return Error::err(&path[..=step], "path expected dict but found list");
-                    }
-                },
-                Value::Dict(dict) => match branch {
-                    Branch::Dict(key) => {
-                        match dict.find(key) {
-                            None => return Error::err(&path[..=step], "key not found"),
-                            Some(found) => {
-                                if step + 1 == path.len() {
-                                    return Ok(found);
-                                }
-                                container = found.get().value;
-                            }
-                        };
-                    }
-                    Branch::List(_) => {
-                        return Error::err(&path[..=step], "path expected list but found dict");
-                    }
-                },
-            }
-        }
-        Error::err(path, "path did not end at a value inside a list")
     }
     pub fn to_value(self) -> Self {
         self
@@ -580,9 +495,10 @@ impl<'a> File<'a> {
     }
 }
 
+// ====================================================================================
+
 /// support for the macro. public so macro can use it, but think of it as hidden.
 pub struct Arena<'a> {
-    pub utf8_bytes: &'a str,
     pub value_cells: &'a [Cell<Value<'a>>],
     pub keyed_cells: &'a [Cell<Keyed<'a>>],
     pub value_next: usize,
@@ -594,8 +510,8 @@ impl<'a> Arena<'a> {
         self.value_next += 1;
         self
     }
-    pub fn tv(&mut self, utf8: Range<usize>) -> &mut Self {
-        self.vv(Text::wrap(&self.utf8_bytes[utf8]))
+    pub fn tv(&mut self, utf8: &'a str) -> &mut Self {
+        self.vv(Text::wrap(utf8))
     }
     pub fn lv(&mut self, list: Range<usize>) -> &mut Self {
         self.vv(List::wrap(&self.value_cells[list]))
@@ -608,17 +524,14 @@ impl<'a> Arena<'a> {
         self.keyed_next += 1;
         self
     }
-    pub fn uk(&mut self, key: Range<usize>, value: Value<'a>) -> &mut Self {
-        self.vk(&self.utf8_bytes[key], value)
+    pub fn tk(&mut self, key: &'a str, utf8: &'a str) -> &mut Self {
+        self.vk(key, Text::wrap(utf8))
     }
-    pub fn tk(&mut self, key: Range<usize>, utf8: Range<usize>) -> &mut Self {
-        self.uk(key, Text::wrap(&self.utf8_bytes[utf8]))
+    pub fn lk(&mut self, key: &'a str, list: Range<usize>) -> &mut Self {
+        self.vk(key, List::wrap(&self.value_cells[list]))
     }
-    pub fn lk(&mut self, key: Range<usize>, list: Range<usize>) -> &mut Self {
-        self.vk(&self.utf8_bytes[key], List::wrap(&self.value_cells[list]))
-    }
-    pub fn dk(&mut self, key: Range<usize>, dict: Range<usize>) -> &mut Self {
-        self.vk(&self.utf8_bytes[key], Dict::wrap(&self.keyed_cells[dict]))
+    pub fn dk(&mut self, key: &'a str, dict: Range<usize>) -> &mut Self {
+        self.vk(key, Dict::wrap(&self.keyed_cells[dict]))
     }
     pub fn end(&self) -> &'a Cell<Value<'a>> {
         &self.value_cells[self.value_next - 1]
@@ -646,6 +559,130 @@ impl<'a> Arena<'a> {
         } else {
             None
         }
+    }
+}
+
+#[derive(Debug)]
+pub enum Branch<'a> {
+    List(usize),
+    Dict(&'a str),
+}
+#[derive(Debug)]
+pub struct Error<'a> {
+    failed: &'a [Branch<'a>],
+    message: &'static str,
+}
+#[derive(Debug)]
+pub struct Path<'a> {
+    pub branches: &'a [Branch<'a>],
+}
+impl<'a> Path<'a> {
+    pub fn new(branches: &'a [Branch<'a>]) -> Self {
+        Path { branches }
+    }
+    pub fn error_full(&'a self, message: &'static str) -> Error<'a> {
+        Error { failed: &self.branches[..], message }
+    }
+    pub fn error(&'a self, bad:usize, message: &'static str) -> Error<'a> {
+        Error { failed: &self.branches[..=bad], message }
+    }
+    pub fn text_value(&'a self, from: Value<'a>) -> Result<TextInList<'a>, Error<'a>> {
+        TextInList::from(self.value(from)?).ok_or(self.error_full("path does not end at text"))
+    }
+    pub fn list_value(&'a self, from: Value<'a>)-> Result<ListInList<'a>, Error<'a>> {
+        ListInList::from(self.value(from)?).ok_or(self.error_full("path does not end at list"))
+    }
+    pub fn dict_value(&'a self, from: Value<'a>)-> Result<DictInList<'a>, Error<'a>> {
+        DictInList::from(self.value(from)?).ok_or(self.error_full("path does not end at dict"))
+    }
+    fn value(&'a self, mut from: Value<'a>) -> Result<&'a Cell<Value<'a>>, Error<'a>> {
+        if self.branches.is_empty() {
+            return Err(self.error_full("empty path can't be resolved"));
+        }
+        for (step, branch) in self.branches.iter().enumerate() {
+            match &from {
+                Value::Text(text) => {
+                    return Err(self.error(step, "path ended prematurely by a text value"));
+                }
+                Value::List(list) => match branch {
+                    Branch::List(at) => match list.list.get(*at) {
+                        None => return Err(self.error(step, "index out of bounds")),
+                        Some(found) => {
+                            if step + 1 == self.branches.len() {
+                                return Ok(found);
+                            }
+                            from = found.get();
+                        }
+                    },
+                    Branch::Dict(_) => {
+                        return Err(self.error(step, "path expected dict but found list"));
+                    }
+                },
+                Value::Dict(dict) => match branch {
+                    Branch::Dict(key) => {
+                        match dict.find(key) {
+                            None => return Err(self.error(step, "key not found")),
+                            Some(found) => {
+                                from = found.get().value;
+                            }
+                        };
+                    }
+                    Branch::List(_) => {
+                        return Err(self.error(step, "path expected list but found dict"));
+                    }
+                },
+            }
+        }
+        Err(self.error_full("path did not end at a value inside a list"))
+    }
+    pub fn text_keyed(&'a self, from: Value<'a>) -> Result<TextInDict<'a>, Error<'a>> {
+        TextInDict::from(self.keyed(from)?).ok_or(self.error_full("path does not end at text"))
+    }
+    pub fn list_keyed(&'a self, from: Value<'a>)-> Result<ListInDict<'a>, Error<'a>> {
+        ListInDict::from(self.keyed(from)?).ok_or(self.error_full("path does not end at list"))
+    }
+    pub fn dict_keyed(&'a self, from: Value<'a>)-> Result<DictInDict<'a>, Error<'a>> {
+        DictInDict::from(self.keyed(from)?).ok_or(self.error_full("path does not end at dict"))
+    }
+    fn keyed(&'a self, mut from: Value<'a>) -> Result<&'a Cell<Keyed<'a>>, Error<'a>> {
+        if self.branches.is_empty() {
+            return Err(self.error_full("empty path can't be resolved"));
+        }
+        for (step, branch) in self.branches.iter().enumerate() {
+            match &from {
+                Value::Text(text) => {
+                    return Err(self.error(step, "path ended prematurely by a text value"));
+                }
+                Value::List(list) => match branch {
+                    Branch::List(at) => match list.list.get(*at) {
+                        None => return Err(self.error(step, "index out of bounds")),
+                        Some(found) => {
+                            from = found.get();
+                        }
+                    },
+                    Branch::Dict(_) => {
+                        return Err(self.error(step, "path expected dict but found list"));
+                    }
+                },
+                Value::Dict(dict) => match branch {
+                    Branch::Dict(key) => {
+                        match dict.find(key) {
+                            None => return Err(self.error(step, "key not found")),
+                            Some(found) => {
+                                if step + 1 == self.branches.len() {
+                                    return Ok(found);
+                                }
+                                from = found.get().value;
+                            }
+                        };
+                    }
+                    Branch::List(_) => {
+                        return Err(self.error(step, "path expected list but found dict"));
+                    }
+                },
+            }
+        }
+        Err(self.error_full("path did not end at a value inside a dict"))
     }
 }
 

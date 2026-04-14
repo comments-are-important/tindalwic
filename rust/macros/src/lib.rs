@@ -4,7 +4,7 @@
 //! [the main tindalwic crate](https://docs.rs/tindalwic).
 
 use proc_macro::TokenStream as RawStream;
-use proc_macro2::{TokenStream, TokenTree};
+use proc_macro2::{Span, TokenStream, TokenTree};
 use quote::{ToTokens, TokenStreamExt, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
@@ -28,52 +28,59 @@ impl ToTokens for Branch {
 }
 
 struct Walk {
+    name: Ident,
     root: TokenStream,
     path: Vec<Branch>,
-    lands: Option<bool>, // None means Text
+    lands: Option<bool>, // None means
+    after: TokenStream,
 }
 impl Parse for Walk {
     fn parse(input: ParseStream) -> Result<Self> {
+        input.parse::<Token![let]>()?;
+        let name = Ident::parse(input)?;
+        input.parse::<Token![=]>()?;
         let root;
         let mut keyed;
+        let mut start = input.span();
         if input.peek(token::Bracket) {
             let content;
             bracketed!(content in input);
-            root = TokenStream::parse(&content)?;
-            if root.is_empty() {
-                return Err(input.error("missing root inside []"));
+            if content.is_empty() {
+                return Err(Error::new(start, "missing root inside []"));
             }
+            root = TokenStream::parse(&content)?;
             keyed = false;
         } else if input.peek(token::Brace) {
             let content;
             braced!(content in input);
-            root = TokenStream::parse(&content)?;
-            if root.is_empty() {
-                return Err(input.error("missing root inside {}"));
+            if content.is_empty() {
+                return Err(Error::new(start, "missing root inside {}"));
             }
+            root = TokenStream::parse(&content)?;
             keyed = true;
         } else {
             return Err(input.error("must start with [root] or {root}"));
         }
         let mut path = Vec::new();
+        let mut text = false;
         while !input.is_empty() {
-            let start = input.span();
+            start = input.span();
             if input.peek(token::Bracket) {
                 let content;
                 bracketed!(content in input);
-                let expr = TokenStream::parse(&content)?;
-                if expr.is_empty() {
+                if content.is_empty() {
                     return Err(Error::new(start, "missing expr inside []"));
                 }
+                let expr = TokenStream::parse(&content)?;
                 path.push(Branch { expr, keyed });
                 keyed = false;
             } else if input.peek(token::Brace) {
                 let content;
                 braced!(content in input);
-                let expr = TokenStream::parse(&content)?;
-                if expr.is_empty() {
+                if content.is_empty() {
                     return Err(Error::new(start, "missing expr inside {}"));
                 }
+                let expr = TokenStream::parse(&content)?;
                 path.push(Branch { expr, keyed });
                 keyed = true;
             } else if input.peek(Token![<]) {
@@ -81,6 +88,9 @@ impl Parse for Walk {
                 let mut expr = TokenStream::new();
                 let mut depth: usize = if input.peek(Token![>]) { 0 } else { 1 };
                 while depth != 0 {
+                    if input.is_empty() {
+                        return Err(Error::new(start, "unbalanced <> brackets"));
+                    }
                     expr.append(TokenTree::parse(input)?);
                     if input.peek(Token![<]) {
                         depth += 1;
@@ -93,8 +103,8 @@ impl Parse for Walk {
                     return Err(Error::new(start, "missing expr inside <>"));
                 }
                 path.push(Branch { expr, keyed });
-                let lands = None;
-                return Ok(Walk { root, path, lands });
+                text = true;
+                break;
             } else {
                 break;
             }
@@ -102,28 +112,54 @@ impl Parse for Walk {
         if path.is_empty() {
             return Err(input.error("requires at least one step"));
         }
-        let lands = Some(keyed);
-        Ok(Walk { root, path, lands })
+        let lands = if text { None } else { Some(keyed) };
+        let mut after = TokenStream::new();
+        while !input.is_empty() && !input.peek(Token![;]) {
+            after.append(TokenTree::parse(input)?);
+        }
+        input.parse::<Token![;]>()?;
+        Ok(Walk {
+            name,
+            root,
+            path,
+            lands,
+            after,
+        })
+    }
+}
+impl ToTokens for Walk {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let name = &self.name;
+        let array = Ident::new(&format!("__{name}_array"), Span::mixed_site());
+        let walk = Ident::new(&format!("__{name}_path"), Span::mixed_site());
+        let branches = &self.path;
+        let mut method = String::from(match self.lands {
+            None => "text",
+            Some(false) => "list",
+            Some(true) => "dict",
+        });
+        method.push('_');
+        method.push_str(if branches.last().unwrap().keyed {
+            "keyed"
+        } else {
+            "value"
+        });
+        let method = Ident::new(&method, Span::call_site());
+        let root = &self.root;
+        let after = &self.after;
+        tokens.extend(quote! {
+            let #array = [#(#branches),*];
+            let #walk = ::tindalwic::Path { branches: &#array };
+            #[allow(unused_mut)]
+            let mut #name = #walk.#method((#root).to_value()) #after;
+        })
     }
 }
 
 #[proc_macro]
 pub fn walk(input: RawStream) -> RawStream {
-    let Walk { root, path, lands } = parse_macro_input!(input as Walk);
-    if path.last().unwrap().keyed {
-        match lands {
-            None => quote!((#root).to_value().text_keyed(&[#(#path),*])),
-            Some(false) => quote!((#root).to_value().list_keyed(&[#(#path),*])),
-            Some(true) => quote!((#root).to_value().dict_keyed(&[#(#path),*])),
-        }
-    } else {
-        match lands {
-            None => quote!((#root).to_value().text_value(&[#(#path),*])),
-            Some(false) => quote!((#root).to_value().list_value(&[#(#path),*])),
-            Some(true) => quote!((#root).to_value().dict_value(&[#(#path),*])),
-        }
-    }
-    .into()
+    let walk = parse_macro_input!(input as Walk);
+    quote!(#walk).into()
 }
 
 // ====================================================================================
@@ -131,12 +167,6 @@ pub fn walk(input: RawStream) -> RawStream {
 struct Range {
     start: usize,
     end: usize,
-}
-impl ToTokens for Range {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let Range { start, end } = self;
-        tokens.extend(quote!(#start..#end));
-    }
 }
 impl Range {
     fn new(start: usize, end: usize) -> Self {
@@ -157,17 +187,10 @@ impl Range {
         }
     }
 }
-
-struct UTF8 {
-    token: LitStr,
-    range: Range,
-}
-impl Parse for UTF8 {
-    fn parse(input: ParseStream) -> Result<Self> {
-        Ok(UTF8 {
-            token: input.parse()?,
-            range: Range::new(0, 0),
-        })
+impl ToTokens for Range {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let Range { start, end } = self;
+        tokens.extend(quote!(#start..#end));
     }
 }
 
@@ -183,19 +206,11 @@ impl Parse for Indexed {
         })
     }
 }
-impl Indexed {
-    fn parse_list(input: ParseStream) -> Result<Punctuated<Indexed, Token![,]>> {
-        let content;
-        bracketed!(content in input);
-        Ok(content.parse_terminated(Indexed::parse, Token![,])?)
-    }
-}
 impl ToTokens for Indexed {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         match &self.value {
             Value::Text(text) => {
-                let range = &text.range;
-                tokens.extend(quote!(.tv(#range)));
+                tokens.extend(quote!(.tv(#text)));
             }
             Value::List(list) => {
                 let range = Range::list(list);
@@ -213,13 +228,22 @@ impl ToTokens for Indexed {
 }
 
 struct Keyed {
-    key: UTF8,
+    key: TokenStream,
     value: Value,
     index: usize,
 }
 impl Parse for Keyed {
     fn parse(input: ParseStream) -> Result<Self> {
-        let key: UTF8 = input.parse()?;
+        let mut key = TokenStream::new();
+        while !input.peek(Token![:]) {
+            if input.is_empty() {
+                return Err(input.error("missing expr for the key"));
+            }
+            key.append(TokenTree::parse(input)?);
+        }
+        if key.is_empty() {
+            return Err(input.error("missing expr for the key"));
+        }
         input.parse::<Token![:]>()?;
         Ok(Keyed {
             key,
@@ -228,20 +252,12 @@ impl Parse for Keyed {
         })
     }
 }
-impl Keyed {
-    fn parse_dict(input: ParseStream) -> Result<Punctuated<Keyed, Token![,]>> {
-        let content;
-        braced!(content in input);
-        Ok(content.parse_terminated(Keyed::parse, Token![,])?)
-    }
-}
 impl ToTokens for Keyed {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let key = &self.key.range;
+        let key = &self.key;
         match &self.value {
             Value::Text(text) => {
-                let range = &text.range;
-                tokens.extend(quote!(.tk(#key,#range)));
+                tokens.extend(quote!(.tk(#key,#text)));
             }
             Value::List(list) => {
                 let range = Range::list(list);
@@ -252,141 +268,153 @@ impl ToTokens for Keyed {
                 tokens.extend(quote!(.dk(#key,#range)));
             }
             Value::Expr(expr) => {
-                tokens.extend(quote!(.uk(#key,(#expr).to_value())));
+                tokens.extend(quote!(.vk(#key,(#expr).to_value())));
             }
         }
     }
 }
 
 enum Value {
-    Text(UTF8),
+    Text(TokenStream),
     List(Punctuated<Indexed, Token![,]>),
     Dict(Punctuated<Keyed, Token![,]>),
     Expr(TokenStream),
 }
 impl Parse for Value {
     fn parse(input: ParseStream) -> Result<Self> {
-        if input.peek(LitStr) {
-            Ok(Value::Text(UTF8::parse(input)?))
-        } else if input.peek(token::Bracket) {
-            Ok(Value::List(Indexed::parse_list(input)?))
+        if input.peek(token::Bracket) {
+            let content;
+            bracketed!(content in input);
+            Ok(Value::List(
+                content.parse_terminated(Indexed::parse, Token![,])?,
+            ))
         } else if input.peek(token::Brace) {
-            Ok(Value::Dict(Keyed::parse_dict(input)?))
+            let content;
+            braced!(content in input);
+            Ok(Value::Dict(
+                content.parse_terminated(Keyed::parse, Token![,])?,
+            ))
         } else if input.peek(token::Paren) {
+            let start = input.span();
             let content;
             parenthesized!(content in input);
+            if content.is_empty() {
+                return Err(Error::new(start, "missing expr inside ()"));
+            }
             Ok(Value::Expr(content.parse()?))
         } else {
-            Err(input.error("expected string literal, [...], {...}, or (value)"))
+            let mut text = TokenStream::new();
+            while !input.is_empty() && !input.peek(Token![,]) && !input.peek(Token![;]) {
+                text.append(TokenTree::parse(input)?);
+            }
+            if text.is_empty() {
+                return Err(input.error("missing expr for a value"));
+            }
+            Ok(Value::Text(text))
         }
     }
 }
 
-struct Root {
-    name: Ident,
-    root: Value,
+struct Organize {
+    value_index: usize,
+    keyed_index: usize,
+    build: TokenStream,
 }
-impl Parse for Root {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let name: Ident = input.parse()?;
-        input.parse::<Token![=]>()?;
-        Ok(Root {
-            name,
-            root: Value::parse(input)?,
-        })
+impl Organize {
+    fn new() -> Self {
+        Organize {
+            value_index: 0,
+            keyed_index: 0,
+            build: TokenStream::new(),
+        }
+    }
+    fn value(&mut self, value: &mut Value) {
+        match value {
+            Value::List(items) => self.list(items),
+            Value::Dict(items) => self.dict(items),
+            _ => {}
+        }
+    }
+    fn list(&mut self, items: &mut Punctuated<Indexed, Token![,]>) {
+        for indexed in items.iter_mut() {
+            self.value(&mut indexed.value);
+        }
+        for indexed in items.iter_mut() {
+            indexed.index = self.value_index;
+            self.value_index += 1;
+            indexed.to_tokens(&mut self.build);
+        }
+    }
+    fn dict(&mut self, items: &mut Punctuated<Keyed, Token![,]>) {
+        for keyed in items.iter_mut() {
+            self.value(&mut keyed.value);
+        }
+        for keyed in items.iter_mut() {
+            keyed.index = self.keyed_index;
+            self.keyed_index += 1;
+            keyed.to_tokens(&mut self.build);
+        }
+    }
+    fn root(&mut self, root: &mut Value) {
+        self.value(root);
+        self.value_index += 1; // so root fits in value_cells
+        match root {
+            Value::Text(root) => {
+                self.build.extend(quote!(.tv(#root);));
+            }
+            Value::List(root) => {
+                let range = Range::list(root);
+                self.build.extend(quote!(.lv(#range);))
+            }
+            Value::Dict(root) => {
+                let range = Range::dict(root);
+                self.build.extend(quote!(.dv(#range);))
+            }
+            Value::Expr(expr) => {
+                self.build.extend(quote!(.vv((#expr).to_value());));
+            }
+        }
     }
 }
 
 struct Arena {
-    utf8: String,
-    list: usize,
-    dict: usize,
-    make: TokenStream,
+    name: Ident,
+    root: Value,
+    make: Organize,
 }
-impl Arena {
-    fn new(value: &mut Value) -> Self {
-        let mut arena = Arena {
-            utf8: String::new(),
-            list: 0,
-            dict: 0,
-            make: TokenStream::new(),
-        };
-        arena.value(value);
-        arena
-    }
-    fn value(&mut self, value: &mut Value) {
-        match value {
-            Value::Text(text) => self.text(text),
-            Value::List(list) => self.list(list),
-            Value::Dict(dict) => self.dict(dict),
-            Value::Expr(_expr) => {}
-        }
-    }
-    fn text(&mut self, text: &mut UTF8) {
-        text.range.start = self.utf8.len();
-        self.utf8.push_str(&text.token.value());
-        text.range.end = self.utf8.len();
-    }
-    fn list(&mut self, list: &mut Punctuated<Indexed, Token![,]>) {
-        for indexed in list.iter_mut() {
-            self.value(&mut indexed.value);
-        }
-        for indexed in list.iter_mut() {
-            indexed.index = self.list;
-            self.list += 1;
-            indexed.to_tokens(&mut self.make);
-        }
-    }
-    fn dict(&mut self, dict: &mut Punctuated<Keyed, Token![,]>) {
-        for keyed in dict.iter_mut() {
-            self.text(&mut keyed.key);
-            self.value(&mut keyed.value);
-        }
-        for keyed in dict.iter_mut() {
-            keyed.index = self.dict;
-            self.dict += 1;
-            keyed.to_tokens(&mut self.make)
-        }
+impl Parse for Arena {
+    fn parse(input: ParseStream) -> Result<Self> {
+        input.parse::<Token![let]>()?;
+        let name = Ident::parse(input)?;
+        input.parse::<Token![=]>()?;
+        let root = Value::parse(input)?;
+        input.parse::<Token![;]>()?;
+        let make = Organize::new();
+        let mut arena = Arena { name, root, make };
+        arena.make.root(&mut arena.root);
+        Ok(arena)
     }
 }
 impl ToTokens for Arena {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let utf8 = &self.utf8;
-        let list = &self.list;
-        let dict = &self.dict;
+        let name = &self.name;
+        let value_size = self.make.value_index;
+        let keyed_size = self.make.keyed_index;
+        let build = &self.make.build;
         tokens.extend(quote! {
-            ::tindalwic::Arena {
-                utf8_bytes: #utf8,
-                value_cells: &::tindalwic::Value::array::<{1+#list}>(),
-                keyed_cells: &::tindalwic::Keyed::array::<#dict>(),
+            let mut #name = ::tindalwic::Arena {
+                value_cells: &::tindalwic::Value::array::<#value_size>(),
+                keyed_cells: &::tindalwic::Keyed::array::<#keyed_size>(),
                 value_next: 0,
                 keyed_next: 0,
-            }
+            }; #name #build
         });
     }
 }
 
 #[proc_macro]
 pub fn json(input: RawStream) -> RawStream {
-    let Root { name, mut root } = parse_macro_input!(input as Root);
-    let arena = Arena::new(&mut root);
-    let make = &arena.make;
-    match &root {
-        Value::Text(root) => {
-            let range = &root.range;
-            quote!(let mut #name = #arena; #name #make .tv(#range);)
-        }
-        Value::List(root) => {
-            let range = Range::list(root);
-            quote!(let mut #name = #arena; #name #make .lv(#range);)
-        }
-        Value::Dict(root) => {
-            let range = Range::dict(root);
-            quote!(let mut #name = #arena; #name #make .dv(#range);)
-        }
-        Value::Expr(expr) => {
-            quote!(let mut #name = #arena; #name #make .vv((#expr).to_value());)
-        }
-    }
-    .into()
+    let input =
+        parse_macro_input!(input with Punctuated::<Arena, syn::parse::Nothing>::parse_terminated);
+    quote!(#input).into()
 }

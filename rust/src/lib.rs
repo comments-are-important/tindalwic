@@ -499,39 +499,40 @@ impl<'a> File<'a> {
 
 /// support for the macro. public so macro can use it, but think of it as hidden.
 pub struct Arena<'a> {
-    pub value_cells: &'a [Cell<Value<'a>>],
-    pub keyed_cells: &'a [Cell<Keyed<'a>>],
-    pub value_next: usize,
-    pub keyed_next: usize,
+    value_cells: &'a [Cell<Value<'a>>],
+    keyed_cells: &'a [Cell<Keyed<'a>>],
+    value_next: usize,
+    keyed_next: usize,
 }
 impl<'a> Arena<'a> {
-    pub fn vv(&mut self, value: Value<'a>) -> &mut Self {
+    pub fn new(value_cells: &'a [Cell<Value<'a>>], keyed_cells: &'a [Cell<Keyed<'a>>]) -> Self {
+        Arena { value_cells, keyed_cells, value_next: 0, keyed_next: 0 }
+    }
+    pub fn value_in_list(&mut self, value: Value<'a>) {
         self.value_cells[self.value_next].set(value);
         self.value_next += 1;
-        self
     }
-    pub fn tv(&mut self, utf8: &'a str) -> &mut Self {
-        self.vv(Text::wrap(utf8))
+    pub fn text_in_list(&mut self, utf8: &'a str) {
+        self.value_in_list(Text::wrap(utf8));
     }
-    pub fn lv(&mut self, list: Range<usize>) -> &mut Self {
-        self.vv(List::wrap(&self.value_cells[list]))
+    pub fn list_in_list(&mut self, list: Range<usize>) {
+        self.value_in_list(List::wrap(&self.value_cells[list]));
     }
-    pub fn dv(&mut self, dict: Range<usize>) -> &mut Self {
-        self.vv(Dict::wrap(&self.keyed_cells[dict]))
+    pub fn dict_in_list(&mut self, dict: Range<usize>) {
+        self.value_in_list(Dict::wrap(&self.keyed_cells[dict]));
     }
-    pub fn vk(&mut self, key: &'a str, value: Value<'a>) -> &mut Self {
+    pub fn value_in_dict(&mut self, key: &'a str, value: Value<'a>) {
         self.keyed_cells[self.keyed_next].set(Keyed::from(key, value));
         self.keyed_next += 1;
-        self
     }
-    pub fn tk(&mut self, key: &'a str, utf8: &'a str) -> &mut Self {
-        self.vk(key, Text::wrap(utf8))
+    pub fn text_in_dict(&mut self, key: &'a str, utf8: &'a str) {
+        self.value_in_dict(key, Text::wrap(utf8));
     }
-    pub fn lk(&mut self, key: &'a str, list: Range<usize>) -> &mut Self {
-        self.vk(key, List::wrap(&self.value_cells[list]))
+    pub fn list_in_dict(&mut self, key: &'a str, list: Range<usize>) {
+        self.value_in_dict(key, List::wrap(&self.value_cells[list]));
     }
-    pub fn dk(&mut self, key: &'a str, dict: Range<usize>) -> &mut Self {
-        self.vk(key, Dict::wrap(&self.keyed_cells[dict]))
+    pub fn dict_in_dict(&mut self, key: &'a str, dict: Range<usize>) {
+        self.value_in_dict(key, Dict::wrap(&self.keyed_cells[dict]));
     }
     pub fn end(&self) -> &'a Cell<Value<'a>> {
         &self.value_cells[self.value_next - 1]

@@ -42,6 +42,7 @@ fn nested_lists() {
         let arena = [[[["value"]]]];
         let zzz = {"k":"v"};
     }
+    assert_eq!(zzz.dict().unwrap().dict.len(), 1);
     let list = arena.list().unwrap();
     assert_eq!(
         list.to_string(),
@@ -76,7 +77,7 @@ fn change_in_list() {
     }
     let file = File::new(arena.dict().unwrap().dict);
     walk!{
-        let text = {file}{"a"}["b"]<0>.unwrap();
+        let mut text = {file}{"a"}["b"]<0>.unwrap();
     }
     text.assign("c");
     text.persist();
@@ -141,22 +142,18 @@ fn prototype_input() {
     // proof that Arena might be used for Input.
     // no idea yet how to pick the const sizes for the arrays.
     let it = "1=one\n[2]\n\ttwo\n{a}\n\t{b}\n\t\t{c}\n\t\t\t{d}\n\t\t\t\tk=v\n";
-    let mut arena = Arena {
-        value_cells: &Value::array::<2>(),
-        keyed_cells: &Keyed::array::<7>(),
-        value_next: 0,
-        keyed_next: 0,
-    };
-    arena
-        .tv(&it[11..14])
-        .tk(&it[41..42], &it[43..44])
-        .dk(&it[34..35], 0..1)
-        .dk(&it[27..28], 1..2)
-        .dk(&it[21..22], 2..3)
-        .tk(&it[0..1], &it[2..5])
-        .lk(&it[7..8], 0..1)
-        .dk(&it[16..17], 3..4)
-        .dv(4..7);
+    let value_cells = Value::array::<2>();
+    let keyed_cells = Keyed::array::<7>();
+    let mut arena = Arena::new(&value_cells, &keyed_cells);
+    arena.text_in_list(&it[11..14]);
+    arena.text_in_dict(&it[41..42], &it[43..44]);
+    arena.dict_in_dict(&it[34..35], 0..1);
+    arena.dict_in_dict(&it[27..28], 1..2);
+    arena.dict_in_dict(&it[21..22], 2..3);
+    arena.text_in_dict(&it[0..1], &it[2..5]);
+    arena.list_in_dict(&it[7..8], 0..1);
+    arena.dict_in_dict(&it[16..17], 3..4);
+    arena.dict_in_list(4..7);
     let file = File::new(arena.dict().unwrap().dict);
     assert_eq!(file.to_string(), it);
 }

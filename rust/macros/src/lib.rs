@@ -399,6 +399,7 @@ struct JSON {
     name: Ident,
     root: Value,
     make: Organize,
+    after: TokenStream,
 }
 impl Parse for JSON {
     fn parse(input: ParseStream) -> Result<Self> {
@@ -406,9 +407,18 @@ impl Parse for JSON {
         let name = input.parse()?;
         input.parse::<Token![=]>()?;
         let root = input.parse()?;
+        let mut after = TokenStream::new();
+        while !input.is_empty() && !input.peek(Token![;]) {
+            after.append(input.parse::<TokenTree>()?);
+        }
         input.parse::<Token![;]>()?;
         let make = Organize::new(&name);
-        let mut arena = JSON { name, root, make };
+        let mut arena = JSON {
+            name,
+            root,
+            make,
+            after,
+        };
         arena.make.root(&mut arena.root);
         Ok(arena)
     }
@@ -416,18 +426,25 @@ impl Parse for JSON {
 impl ToTokens for JSON {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let name = &self.name;
-        let mutable = &self.make.name;
+        let arena = &self.make.name;
         let value_array = Ident::new(&format!("__{name}_value"), Span::mixed_site());
         let keyed_array = Ident::new(&format!("__{name}_keyed"), Span::mixed_site());
         let value_size = self.make.value_index;
         let keyed_size = self.make.keyed_index;
         let build = &self.make.build;
+        let unpack = match &self.root {
+            Value::Text(_) => quote!(.text().unwrap()),
+            Value::List(_) => quote!(.list().unwrap()),
+            Value::Dict(_) => quote!(.dict().unwrap()),
+            Value::Expr(_) => quote!(.value()),
+        };
+        let after = &self.after;
         tokens.extend(quote! {
             let #value_array = ::tindalwic::Value::array::<#value_size>();
             let #keyed_array = ::tindalwic::Keyed::array::<#keyed_size>();
-            let mut #mutable = ::tindalwic::Arena::new(&#value_array, &#keyed_array);
+            let mut #arena = ::tindalwic::Arena::new(&#value_array, &#keyed_array);
             #build
-            let #name = #mutable;
+            let #name = #arena #unpack #after;
         });
     }
 }

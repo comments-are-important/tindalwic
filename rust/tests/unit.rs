@@ -2,7 +2,7 @@
 //use std::{string::ToString, sync::LazyLock};
 use tindalwic::*;
 
-fn joined(text: Text<'_>) -> String {
+fn joined(text: &Text<'_>) -> String {
     // commented out code in main lib is marginally more efficient
     // todo - move that out to a "with alloc" feature and use it here
     text.lines().collect::<Vec<_>>().join("\n")
@@ -18,32 +18,24 @@ fn json_text() {
     // this is a very expensive way to do Text::wrap("hi")
     // macro supports it to be consistent, but don't do it this way...
     json! {
-        let arena = "hi";
+        let text = "hi";
     }
-    assert!(arena.list().is_none());
-    assert!(arena.dict().is_none());
-    assert_eq!(joined(arena.text().unwrap()), "hi");
+    assert_eq!(joined(&text), "hi");
 }
 
 #[test]
 fn two_lines() {
     json! {
-        let arena = {"key":"one\ntwo"};
+        let dict = {"key":"one\ntwo"};
     }
-    assert!(arena.text().is_none());
-    assert!(arena.list().is_none());
-    let dict = arena.dict().unwrap();
     assert_eq!(dict.to_string(), "{}\n\t<key>\n\t\tone\n\t\ttwo\n");
 }
 
 #[test]
 fn nested_lists() {
     json! {
-        let arena = [[[["value"]]]];
-        let zzz = {"k":"v"};
+        let list = [[[["value"]]]];
     }
-    assert_eq!(zzz.dict().unwrap().dict.len(), 1);
-    let list = arena.list().unwrap();
     assert_eq!(
         list.to_string(),
         "[]\n\t[]\n\t\t[]\n\t\t\t[]\n\t\t\t\tvalue\n"
@@ -51,15 +43,15 @@ fn nested_lists() {
     walk!{
         let text = [list][0][0][0]<0>.unwrap();
     }
-    assert_eq!(joined(*text), "value");
+    assert_eq!(joined(&*text), "value");
 }
 
 #[test]
 fn nested_dicts() {
     json!{
-        let arena = {"1":"one","2":["two"],"a":{"b":{"c":{"d":{"k":"v"}}}}};
+        let dict = {"1":"one","2":["two"],"a":{"b":{"c":{"d":{"k":"v"}}}}};
     }
-    let file = File::new(arena.dict().unwrap().dict);
+    let file = File::new(dict.dict);
     assert_eq!(
         file.to_string(),
         "1=one\n[2]\n\ttwo\n{a}\n\t{b}\n\t\t{c}\n\t\t\t{d}\n\t\t\t\tk=v\n"
@@ -73,9 +65,9 @@ fn nested_dicts() {
 #[test]
 fn change_in_list() {
     json!{
-        let arena = {"a":{"b":["z"]}};
+        let dict = {"a":{"b":["z"]}};
     }
-    let file = File::new(arena.dict().unwrap().dict);
+    let file = File::new(dict.dict);
     walk!{
         let mut text = {file}{"a"}["b"]<0>.unwrap();
     }
@@ -87,9 +79,9 @@ fn change_in_list() {
 #[test]
 fn change_in_dict() {
     json!{
-        let arena = {"a":[{"b":"z"}]};
+        let dict = {"a":[{"b":"z"}]};
     }
-    let file = File::new(arena.dict().unwrap().dict);
+    let file = File::new(dict.dict);
     walk!{
         let text = {file}["a"]{0}<"b">.unwrap();
     }
@@ -101,20 +93,17 @@ fn change_in_dict() {
 
 #[test]
 fn inject_comments() {
-    let value = "v";
     json!{
-        let arena = {"k":value};
+        let dict = {"k":["v"]};
     }
-    let file = File::new(arena.dict().unwrap().dict);
+    let file = File::new(dict.dict);
     walk!{
-        let text = {file}<"k">.unwrap();
+        let mut list = {file}["k"].unwrap();
     }
-    let mut keyed = text.cell.get();
+    let mut keyed = list.cell.get();
     keyed.before = Comment::some("b");
-    if let Value::Text(ref mut text) = keyed.value {
-        text.epilog = Comment::some("c");
-    }
-    text.cell.set(keyed);
+    list.epilog = Comment::some("c");
+    list.cell.set(keyed);
     assert_eq!(file.to_string(), "//b\nk=v\n#c\n");
 }
 
@@ -122,9 +111,8 @@ fn inject_comments() {
 fn change_structure() {
     let key = "k";
     json!{
-        let arena = {key:["v"]};
+        let dict = {key:["v"]};
     }
-    let dict = arena.dict().unwrap();
     walk!{
         let list = {dict}[key].unwrap();
     }
@@ -132,7 +120,7 @@ fn change_structure() {
         let patch = {"p":(list)};
     }
     let mut keyed = list.cell.get();
-    keyed.value = patch.value();
+    keyed.value = patch.to_value();
     list.cell.set(keyed);
     assert_eq!(dict.to_string(), "{}\n\t{k}\n\t\t[p]\n\t\t\tv\n")
 }

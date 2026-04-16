@@ -17,6 +17,9 @@ use core::sync::atomic;
 pub use tindalwic_macros::json;
 #[doc(inline)]
 /// main module re-exports the proc_macro from sub-crate.
+pub use tindalwic_macros::set;
+#[doc(inline)]
+/// main module re-exports the proc_macro from sub-crate.
 pub use tindalwic_macros::walk;
 
 /// Hidden parts of [Comment] and [Text].
@@ -90,7 +93,7 @@ macro_rules! cell_helpers {
     ($Name:ident, $NameInList:ident, $NameInDict:ident) => {
         pub struct $NameInList<'a> {
             pub value: $Name<'a>,
-            pub cell: &'a Cell<Value<'a>>,
+            cell: &'a Cell<Value<'a>>,
         }
         impl<'a> Deref for $NameInList<'a> {
             type Target = $Name<'a>;
@@ -111,13 +114,20 @@ macro_rules! cell_helpers {
                     None
                 }
             }
-            pub fn persist(&self) {
-                self.cell.set(Value::$Name(self.value))
+            #[doc(hidden)]
+            pub fn __set(&mut self, new: Option<Value<'a>>) {
+                self.cell.set(match new {
+                    None => Value::$Name(self.value),
+                    Some(value) => value,
+                });
             }
         }
         pub struct $NameInDict<'a> {
+            pub key: &'a str,
+            pub gap: bool,
+            pub before: Option<Comment<'a>>,
             pub value: $Name<'a>,
-            pub cell: &'a Cell<Keyed<'a>>,
+            cell: &'a Cell<Keyed<'a>>,
         }
         impl<'a> Deref for $NameInDict<'a> {
             type Target = $Name<'a>;
@@ -134,14 +144,29 @@ macro_rules! cell_helpers {
             pub fn from(cell: &'a Cell<Keyed<'a>>) -> Option<Self> {
                 let keyed = cell.get();
                 if let Value::$Name(value) = keyed.value {
-                    Some($NameInDict { value, cell })
+                    Some($NameInDict {
+                        key: keyed.key,
+                        gap: keyed.gap,
+                        before: keyed.before,
+                        value,
+                        cell,
+                    })
                 } else {
                     None
                 }
             }
-            // pub fn persist(&self) {
-            //     self.cell.set(Value::$Name(self.value))
-            // }
+            #[doc(hidden)]
+            pub fn __set(&mut self, new: Option<Value<'a>>) {
+                self.cell.set(Keyed {
+                    key: self.key,
+                    gap: self.gap,
+                    before: self.before,
+                    value: match new {
+                        None => Value::$Name(self.value),
+                        Some(value) => value,
+                    },
+                });
+            }
         }
     };
 }
@@ -506,7 +531,12 @@ pub struct Arena<'a> {
 }
 impl<'a> Arena<'a> {
     pub fn new(value_cells: &'a [Cell<Value<'a>>], keyed_cells: &'a [Cell<Keyed<'a>>]) -> Self {
-        Arena { value_cells, keyed_cells, value_next: 0, keyed_next: 0 }
+        Arena {
+            value_cells,
+            keyed_cells,
+            value_next: 0,
+            keyed_next: 0,
+        }
     }
     pub fn value_in_list(&mut self, value: Value<'a>) {
         self.value_cells[self.value_next].set(value);
@@ -582,18 +612,24 @@ impl<'a> Path<'a> {
         Path { branches }
     }
     pub fn error_full(&'a self, message: &'static str) -> Error<'a> {
-        Error { failed: &self.branches[..], message }
+        Error {
+            failed: &self.branches[..],
+            message,
+        }
     }
-    pub fn error(&'a self, bad:usize, message: &'static str) -> Error<'a> {
-        Error { failed: &self.branches[..=bad], message }
+    pub fn error(&'a self, bad: usize, message: &'static str) -> Error<'a> {
+        Error {
+            failed: &self.branches[..=bad],
+            message,
+        }
     }
     pub fn text_value(&'a self, from: Value<'a>) -> Result<TextInList<'a>, Error<'a>> {
         TextInList::from(self.value(from)?).ok_or(self.error_full("path does not end at text"))
     }
-    pub fn list_value(&'a self, from: Value<'a>)-> Result<ListInList<'a>, Error<'a>> {
+    pub fn list_value(&'a self, from: Value<'a>) -> Result<ListInList<'a>, Error<'a>> {
         ListInList::from(self.value(from)?).ok_or(self.error_full("path does not end at list"))
     }
-    pub fn dict_value(&'a self, from: Value<'a>)-> Result<DictInList<'a>, Error<'a>> {
+    pub fn dict_value(&'a self, from: Value<'a>) -> Result<DictInList<'a>, Error<'a>> {
         DictInList::from(self.value(from)?).ok_or(self.error_full("path does not end at dict"))
     }
     fn value(&'a self, mut from: Value<'a>) -> Result<&'a Cell<Value<'a>>, Error<'a>> {
@@ -639,10 +675,10 @@ impl<'a> Path<'a> {
     pub fn text_keyed(&'a self, from: Value<'a>) -> Result<TextInDict<'a>, Error<'a>> {
         TextInDict::from(self.keyed(from)?).ok_or(self.error_full("path does not end at text"))
     }
-    pub fn list_keyed(&'a self, from: Value<'a>)-> Result<ListInDict<'a>, Error<'a>> {
+    pub fn list_keyed(&'a self, from: Value<'a>) -> Result<ListInDict<'a>, Error<'a>> {
         ListInDict::from(self.keyed(from)?).ok_or(self.error_full("path does not end at list"))
     }
-    pub fn dict_keyed(&'a self, from: Value<'a>)-> Result<DictInDict<'a>, Error<'a>> {
+    pub fn dict_keyed(&'a self, from: Value<'a>) -> Result<DictInDict<'a>, Error<'a>> {
         DictInDict::from(self.keyed(from)?).ok_or(self.error_full("path does not end at dict"))
     }
     fn keyed(&'a self, mut from: Value<'a>) -> Result<&'a Cell<Keyed<'a>>, Error<'a>> {

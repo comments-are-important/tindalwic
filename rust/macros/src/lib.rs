@@ -170,6 +170,48 @@ pub fn walk(input: RawStream) -> RawStream {
     quote!(#output).into()
 }
 
+struct Save {
+    ident: Ident,
+    value: Option<TokenStream>,
+}
+impl Parse for Save {
+    fn parse(input: ParseStream) -> Result<Self> {
+        Ok(Save {
+            ident: input.parse()?,
+            value: if input.is_empty() {
+                None
+            } else {
+                input.parse::<Token![,]>()?;
+                Some(input.parse()?)
+            },
+        })
+    }
+}
+impl ToTokens for Save {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let Save{ident,value} = self;
+        match value {
+            None => {
+                tokens.extend(quote!{
+                    #ident.__set(None);
+                    drop(#ident)
+                });
+            },
+            Some(expr) => {
+                tokens.extend(quote!{
+                    #ident.__set(Some(#expr));
+                    drop(#ident)
+                });
+            },
+        }
+    }
+}
+#[proc_macro]
+pub fn set(input: RawStream) -> RawStream {
+    let output = parse_macro_input!(input as Save);
+    quote!(#output).into()
+}
+
 // ====================================================================================
 
 struct Range {

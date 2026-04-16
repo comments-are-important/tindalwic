@@ -40,7 +40,7 @@ fn nested_lists() {
         list.to_string(),
         "[]\n\t[]\n\t\t[]\n\t\t\t[]\n\t\t\t\tvalue\n"
     );
-    walk!{
+    walk! {
         let text = [list][0][0][0]<0>.unwrap();
     }
     assert_eq!(joined(&*text), "value");
@@ -48,7 +48,7 @@ fn nested_lists() {
 
 #[test]
 fn nested_dicts() {
-    json!{
+    json! {
         let dict = {"1":"one","2":["two"],"a":{"b":{"c":{"d":{"k":"v"}}}}};
     }
     let file = File::new(dict.dict);
@@ -56,7 +56,7 @@ fn nested_dicts() {
         file.to_string(),
         "1=one\n[2]\n\ttwo\n{a}\n\t{b}\n\t\t{c}\n\t\t\t{d}\n\t\t\t\tk=v\n"
     );
-    walk!{
+    walk! {
         let text = {file}{"a"}{"b"}{"c"}{"d"}<"k">.unwrap();
     }
     assert_eq!(Vec::from_iter(text.lines()), vec!["v"]);
@@ -64,64 +64,60 @@ fn nested_dicts() {
 
 #[test]
 fn change_in_list() {
-    json!{
+    json! {
         let dict = {"a":{"b":["z"]}};
     }
     let file = File::new(dict.dict);
-    walk!{
+    walk! {
         let mut text = {file}{"a"}["b"]<0>.unwrap();
     }
     text.assign("c");
-    text.persist();
+    set!(text);
     assert_eq!(file.to_string(), "{a}\n\t[b]\n\t\tc\n");
 }
 
 #[test]
 fn change_in_dict() {
-    json!{
+    json! {
         let dict = {"a":[{"b":"z"}]};
     }
     let file = File::new(dict.dict);
-    walk!{
-        let text = {file}["a"]{0}<"b">.unwrap();
+    walk! {
+        let mut text = {file}["a"]{0}<"b">.unwrap();
     }
-    let mut keyed = text.cell.get();
-    keyed.value = Text::wrap("c");
-    text.cell.set(keyed);
+    text.assign("c");
+    set!(text);
     assert_eq!(file.to_string(), "[a]\n\t{}\n\t\tb=c\n");
 }
 
 #[test]
 fn inject_comments() {
-    json!{
-        let dict = {"k":["v"]};
+    json! {
+        let dict = {"k":"v"};
     }
     let file = File::new(dict.dict);
-    walk!{
-        let mut list = {file}["k"].unwrap();
+    walk! {
+        let mut text = {file}<"k">.unwrap();
     }
-    let mut keyed = list.cell.get();
-    keyed.before = Comment::some("b");
-    list.epilog = Comment::some("c");
-    list.cell.set(keyed);
+    text.before = Comment::some("b");
+    text.epilog = Comment::some("c");
+    set!(text);
     assert_eq!(file.to_string(), "//b\nk=v\n#c\n");
 }
 
 #[test]
 fn change_structure() {
     let key = "k";
-    json!{
+    json! {
         let dict = {key:["v"]};
     }
-    walk!{
-        let list = {dict}[key].unwrap();
+    walk! {
+        let mut list = {dict}[key].unwrap();
     }
-    json!{
+    json! {
         let patch = {"p":(list)};
     }
-    let mut keyed = list.cell.get();
-    keyed.value = patch.to_value();
-    list.cell.set(keyed);
+    set!(list, patch.to_value());
     assert_eq!(dict.to_string(), "{}\n\t{k}\n\t\t[p]\n\t\t\tv\n")
 }
 

@@ -25,4 +25,5 @@
         "venv"
     ],
     "editor.hover.delay": 3000,
+    "rust-analyzer.cargo.features": ["alloc"],
 }

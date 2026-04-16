@@ -8,6 +8,9 @@ description = "tindalwic data format and tools"
 license = "MIT OR Apache-2.0"
 authors = ["Comments Are Important <comments.are.important@gmail.com>"]
 
+[features]
+alloc = []
+
 [dependencies]
 tindalwic-macros = { path = "./macros" }
 
@@ -15,3 +18,6 @@ tindalwic-macros = { path = "./macros" }
 markdown = "1.0.0"
 regex = "1.12.3"
 trybuild = "1.0.116"
+
+[package.metadata.docs.rs]
+all-features = true

@@ -74,9 +74,15 @@ python/build: python/test
 
 # =====================================================================================
 
+rust/test: must-run-inside
+	cd rust
+	cargo test -q
+	cargo test -q --features alloc
+.PHONY: rust/test
+
 rust/doc: must-run-inside
 	cd rust
-	cargo doc # --document-private-items
+	cargo doc --all-features --no-deps # --document-private-items
 	cd target/doc
 	uv run -- python -m http.server
 .PHONY: rust/doc
@@ -90,7 +96,7 @@ rust/api: rust/nightly
 	cd rust
 	cargo install --list | grep -q cargo-public-api || cargo install cargo-public-api
 	mkdir -p target
-	cargo public-api -sss \
+	cargo public-api -sss --all-features \
 	  | grep -v '^impl' \
 	  | sed -E -e 's=^pub (enum|fn|const fn|mod|struct|use) (.*)=|\2|\1|=' \
 	  | sed -E -e 's=^pub (.*)=|\1|property|=' \
@@ -100,7 +106,7 @@ rust/api: rust/nightly
 rust/llvm-lines: must-run-inside
 	cd rust
 	cargo install --list | grep -q cargo-llvm-lines || cargo install cargo-llvm-lines
-	cargo llvm-lines
+	cargo llvm-lines --all-features
 .PHONY: rust/llvm-lines
 
 rust/fmt: rust/nightly

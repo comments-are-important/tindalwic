@@ -2,25 +2,20 @@
 //use std::{string::ToString, sync::LazyLock};
 use tindalwic::*;
 
-fn joined(text: &Text<'_>) -> String {
-    // commented out code in main lib is marginally more efficient
-    // todo - move that out to a "with alloc" feature and use it here
-    text.lines().collect::<Vec<_>>().join("\n")
-}
-
 // #[test]
 // fn macro_failures() {
 //     trybuild::TestCases::new().compile_fail("tests/macro_err/*.rs");
 // }
 
 #[test]
+#[cfg(feature = "alloc")]
 fn json_text() {
     // this is a very expensive way to do Text::wrap("hi")
     // macro supports it to be consistent, but don't do it this way...
     json! {
         let text = "hi";
     }
-    assert_eq!(joined(&text), "hi");
+    assert_eq!(text.joined(), "hi");
 }
 
 #[test]
@@ -32,6 +27,7 @@ fn two_lines() {
 }
 
 #[test]
+#[cfg(feature = "alloc")]
 fn nested_lists() {
     json! {
         let list = [[[["value"]]]];
@@ -43,7 +39,7 @@ fn nested_lists() {
     walk! {
         let text = [list][0][0][0]<0>.unwrap();
     }
-    assert_eq!(joined(&*text), "value");
+    assert_eq!(text.joined(), "value");
 }
 
 #[test]
@@ -128,7 +124,7 @@ fn prototype_input() {
     let it = "1=one\n[2]\n\ttwo\n{a}\n\t{b}\n\t\t{c}\n\t\t\t{d}\n\t\t\t\tk=v\n";
     let value_cells = Value::array::<2>();
     let keyed_cells = Keyed::array::<7>();
-    let mut arena = Arena::new(&value_cells, &keyed_cells);
+    let mut arena = internals::Arena::new(&value_cells, &keyed_cells);
     arena.text_in_list(&it[11..14]);
     arena.text_in_dict(&it[41..42], &it[43..44]);
     arena.dict_in_dict(&it[34..35], 0..1);

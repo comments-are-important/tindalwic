@@ -22,9 +22,9 @@ impl ToTokens for Branch {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let expr = &self.expr;
         if self.keyed {
-            tokens.extend(quote!(::tindalwic::Branch::Dict(#expr)));
+            tokens.extend(quote!(::tindalwic::internals::Branch::Dict(#expr)));
         } else {
-            tokens.extend(quote!(::tindalwic::Branch::List(#expr)));
+            tokens.extend(quote!(::tindalwic::internals::Branch::List(#expr)));
         }
     }
 }
@@ -157,7 +157,7 @@ impl ToTokens for Walk {
         let after = &self.after;
         tokens.extend(quote! {
             let #array = [#(#branches),*];
-            let #path = ::tindalwic::Path { branches: &#array };
+            let #path = ::tindalwic::internals::Path { branches: &#array };
             let #mutable #name = #path.#method((#root).to_value()) #after;
         })
     }
@@ -484,7 +484,7 @@ impl ToTokens for JSON {
         tokens.extend(quote! {
             let #value_array = ::tindalwic::Value::array::<#value_size>();
             let #keyed_array = ::tindalwic::Keyed::array::<#keyed_size>();
-            let mut #arena = ::tindalwic::Arena::new(&#value_array, &#keyed_array);
+            let mut #arena = ::tindalwic::internals::Arena::new(&#value_array, &#keyed_array);
             #build
             let #name = #arena #unpack #after;
         });

@@ -1,14 +1,13 @@
+#![allow(unused)]
+
 use super::*;
 
-#[allow(unused)]
 struct Input<'a> {
     src: &'a str,
     next: usize,
     indent: usize,
 }
-#[allow(unused)]
 impl<'a> Input<'a> {
-    #[allow(unused)]
     fn encoded(&mut self, from: &'a str, start: usize) -> Encoded<'a> {
         let bytes = &from.as_bytes()[start..];
         let mut newlines = 0usize;

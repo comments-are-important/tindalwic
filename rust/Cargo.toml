@@ -1,4 +1,5 @@
-workspace = { members = ["macros"] }
+[workspace]
+members = ["macros"]
 
 [package]
 name = "tindalwic"
@@ -21,3 +22,10 @@ trybuild = "1.0.116"
 
 [package.metadata.docs.rs]
 all-features = true
+
+[workspace.lints.rust]
+unused = "deny"
+missing_docs = "warn"
+
+[lints]
+workspace = true

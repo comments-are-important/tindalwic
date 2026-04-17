@@ -16,7 +16,7 @@ pub use tindalwic_macros::walk;
 
 #[cfg(feature = "alloc")]
 mod alloc;
-pub mod internals;
+pub mod internals; // macro generated code needs access.
 mod fmt;
 mod parse;
 
@@ -32,7 +32,7 @@ struct Encoded<'a> {
 }
 impl<'a> Encoded<'a> {
     /// Return a zero-copy instance using the provided literal (not indented) slice.
-    pub const fn wrap(utf8: &'a str) -> Self {
+    pub fn wrap(utf8: &'a str) -> Self {
         let bytes = utf8.as_bytes();
         let mut newline = 0usize;
         while newline < bytes.len() && bytes[newline] != b'\n' {
@@ -42,11 +42,6 @@ impl<'a> Encoded<'a> {
             utf8,
             dedent: if newline < bytes.len() { 0 } else { usize::MAX },
         }
-    }
-    pub fn assign(&mut self, utf8: &'a str) {
-        let wrap = Encoded::wrap(utf8);
-        self.utf8 = wrap.utf8;
-        self.dedent = wrap.dedent;
     }
     fn one_liner(&self) -> bool {
         if self.dedent == usize::MAX {
@@ -90,15 +85,15 @@ impl<'a> Encoded<'a> {
 ///
 /// # Examples
 ///
-/// ``
+/// ```
 /// let comment = tindalwic::Comment::wrap("with ~strikethrough~ extension");
 ///
-/// let html = markdown::to_html_with_options(&comment.lines_joined(), &markdown::Options::gfm())
+/// let html = markdown::to_html_with_options(&comment.joined(), &markdown::Options::gfm())
 ///   .expect("should never error, according to:
 ///      <https://docs.rs/markdown/latest/markdown/fn.to_html_with_options.html#errors>");
 ///
 /// assert_eq!(html, "<p>with <del>strikethrough</del> extension</p>");
-/// ``
+/// ```
 #[derive(Clone, Copy, Debug)]
 pub struct Comment<'a> {
     encoded: Encoded<'a>,
@@ -109,9 +104,6 @@ impl<'a> Comment<'a> {
         Comment {
             encoded: Encoded::wrap(utf8),
         }
-    }
-    pub fn assign(&mut self, utf8: &'a str) {
-        self.encoded.assign(utf8);
     }
     /// instantiate into [Option::Some].
     pub fn some(utf8: &'a str) -> Option<Self> {
@@ -136,14 +128,11 @@ pub struct Text<'a> {
 }
 impl<'a> Text<'a> {
     /// Return a zero-copy instance using the provided literal (not indented) slice.
-    pub const fn wrap(utf8: &'a str) -> Value<'a> {
-        Value::Text(Text {
+    pub fn wrap(utf8: &'a str) -> Self {
+        Text {
             encoded: Encoded::wrap(utf8),
             epilog: None,
-        })
-    }
-    pub fn assign(&mut self, utf8: &'a str) {
-        self.encoded.assign(utf8);
+        }
     }
     fn one_liner_in_list(&self) -> bool {
         if !self.encoded.one_liner() {
@@ -176,9 +165,6 @@ impl<'a> Text<'a> {
     pub fn lines(&self) -> impl Iterator<Item = &'a str> {
         self.encoded.lines()
     }
-    pub fn to_value(&self) -> Value<'a> {
-        Value::Text(self.clone())
-    }
 }
 
 // ------------------------------------------------------------------------------------
@@ -187,22 +173,20 @@ impl<'a> Text<'a> {
 #[derive(Clone, Copy, Debug)]
 pub struct List<'a> {
     /// The contents of the Value::List.
-    pub list: &'a [Cell<Value<'a>>],
+    pub cells: &'a [Cell<Value<'a>>],
     /// A List can have an introductory Comment.
     pub prolog: Option<Comment<'a>>,
     /// A List can have a Comment after it.
     pub epilog: Option<Comment<'a>>,
 }
 impl<'a> List<'a> {
-    pub const fn wrap(list: &'a [Cell<Value<'a>>]) -> Value<'a> {
-        Value::List(List {
-            list,
+    /// Return a zero-copy instance using the provided cells (and no comments).
+    pub fn wrap(cells: &'a [Cell<Value<'a>>]) -> Self {
+        List {
+            cells,
             prolog: None,
             epilog: None,
-        })
-    }
-    pub fn to_value(&self) -> Value<'a> {
-        Value::List(self.clone())
+        }
     }
 }
 
@@ -223,7 +207,7 @@ pub struct Keyed<'a> {
     pub value: Value<'a>,
 }
 impl<'a> Keyed<'a> {
-    pub fn blank<'b>(_: usize) -> Cell<Keyed<'b>> {
+    fn blank<'b>(_: usize) -> Cell<Keyed<'b>> {
         Cell::new(Keyed {
             key: "",
             gap: false,
@@ -237,11 +221,12 @@ impl<'a> Keyed<'a> {
             }),
         })
     }
+    /// Make a fixed-size array of cells on the stack.
     pub fn array<const N: usize>() -> [Cell<Keyed<'a>>; N] {
         ::core::array::from_fn::<_, N, _>(Keyed::blank)
     }
     /// convert a key and a value into an entry (for a Dict).
-    pub const fn from(key: &'a str, value: Value<'a>) -> Self {
+    pub fn from(key: &'a str, value: Value<'a>) -> Self {
         Keyed {
             key,
             gap: false,
@@ -255,7 +240,7 @@ impl<'a> Keyed<'a> {
 #[derive(Clone, Copy, Debug)]
 pub struct Dict<'a> {
     /// The contents of the Value::Dict.
-    pub dict: &'a [Cell<Keyed<'a>>],
+    pub cells: &'a [Cell<Keyed<'a>>],
     /// A Dict can have an introductory Comment.
     pub prolog: Option<Comment<'a>>,
     /// A Dict can have a Comment after it.
@@ -265,23 +250,21 @@ fn position<'a>(dict: &'a [Cell<Keyed<'a>>], key: &str) -> Option<usize> {
     dict.iter().position(|x| x.get().key == key)
 }
 impl<'a> Dict<'a> {
-    pub fn wrap(dict: &'a [Cell<Keyed<'a>>]) -> Value<'a> {
-        Value::Dict(Dict {
-            dict,
+    /// Return a zero-copy instance using the provided cells (and no comments).
+    pub fn wrap(cells: &'a [Cell<Keyed<'a>>]) -> Self {
+        Dict {
+            cells,
             prolog: None,
             epilog: None,
-        })
+        }
     }
     /// returns the position of the entry with the given key.
     pub fn position(&self, key: &str) -> Option<usize> {
-        position(self.dict, key)
+        position(self.cells, key)
     }
     /// returns a reference to the entry with the given key.
     pub fn find(&self, key: &str) -> Option<&'a Cell<Keyed<'a>>> {
-        self.position(key).map(|i| &self.dict[i])
-    }
-    pub fn to_value(&self) -> Value<'a> {
-        Value::Dict(self.clone())
+        self.position(key).map(|i| &self.cells[i])
     }
 }
 
@@ -298,7 +281,7 @@ pub enum Value<'a> {
     Dict(Dict<'a>),
 }
 impl<'a> Value<'a> {
-    pub fn blank<'b>(_: usize) -> Cell<Value<'b>> {
+    fn blank<'b>(_: usize) -> Cell<Value<'b>> {
         Cell::new(Value::Text(Text {
             encoded: Encoded {
                 utf8: "",
@@ -307,11 +290,29 @@ impl<'a> Value<'a> {
             epilog: None,
         }))
     }
+    /// Make a fixed-size array of cells on the stack.
     pub fn array<const N: usize>() -> [Cell<Value<'a>>; N] {
         ::core::array::from_fn::<_, N, _>(Value::blank)
     }
-    pub fn to_value(self) -> Self {
-        self
+}
+impl<'a> From<Text<'a>> for Value<'a> {
+    fn from(value: Text<'a>) -> Self {
+        Value::Text(value)
+    }
+}
+impl<'a> From<List<'a>> for Value<'a> {
+    fn from(value: List<'a>) -> Self {
+        Value::List(value)
+    }
+}
+impl<'a> From<Dict<'a>> for Value<'a> {
+    fn from(value: Dict<'a>) -> Self {
+        Value::Dict(value)
+    }
+}
+impl<'a> From<File<'a>> for Value<'a> {
+    fn from(value: File<'a>) -> Self {
+        Value::Dict(Dict::wrap(value.cells))
     }
 }
 
@@ -323,37 +324,36 @@ impl<'a> Value<'a> {
 #[derive(Clone, Copy, Debug)]
 pub struct File<'a> {
     /// The contents of the Value::File.
-    pub dict: &'a [Cell<Keyed<'a>>],
+    pub cells: &'a [Cell<Keyed<'a>>],
     /// A File can start with a Unix `#!` Comment.
     pub hashbang: Option<Comment<'a>>,
     /// A File can have an introductory Comment.
     pub prolog: Option<Comment<'a>>,
 }
 impl<'a> File<'a> {
+    /// stub for decoding from tindalwic UTF-8
     pub fn parse(_content: &'a str) -> Self {
         todo!()
     }
-    pub fn new(dict: &'a [Cell<Keyed<'a>>]) -> Self {
+    /// Return a zero-copy instance using the provided cells (and no comments).
+    pub fn wrap(cells: &'a [Cell<Keyed<'a>>]) -> Self {
         File {
-            dict,
+            cells,
             hashbang: None,
             prolog: None,
         }
     }
     /// return true when there are no entries and no comments.
     pub fn is_empty(&self) -> bool {
-        self.dict.is_empty() && self.hashbang.is_none() && self.prolog.is_none()
+        self.cells.is_empty() && self.hashbang.is_none() && self.prolog.is_none()
     }
     /// returns the position of the entry with the given key.
     pub fn position(&self, key: &str) -> Option<usize> {
-        position(self.dict, key)
+        position(self.cells, key)
     }
     /// returns a reference to the entry with the given key.
     pub fn find(&self, key: &str) -> Option<&'a Cell<Keyed<'a>>> {
-        self.position(key).map(|i| &self.dict[i])
-    }
-    pub fn to_value(&self) -> Value<'a> {
-        Dict::wrap(self.dict)
+        self.position(key).map(|i| &self.cells[i])
     }
 }
 

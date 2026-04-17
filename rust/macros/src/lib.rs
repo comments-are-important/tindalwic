@@ -1,4 +1,4 @@
-#![deny(unused)]
+#![allow(missing_docs)]
 
 //! The macros defined here are re-exported from and documented in
 //! [the main tindalwic crate](https://docs.rs/tindalwic).
@@ -158,7 +158,7 @@ impl ToTokens for Walk {
         tokens.extend(quote! {
             let #array = [#(#branches),*];
             let #path = ::tindalwic::internals::Path { branches: &#array };
-            let #mutable #name = #path.#method((#root).to_value()) #after;
+            let #mutable #name = #path.#method((#root).into()) #after;
         })
     }
 }
@@ -266,7 +266,7 @@ impl ToTokens for Indexed {
                 tokens.extend(quote!(dict_in_list(#range)));
             }
             Value::Expr(expr) => {
-                tokens.extend(quote!(value_in_list((#expr).to_value())));
+                tokens.extend(quote!(value_in_list(#expr)));
             }
         }
     }
@@ -313,7 +313,7 @@ impl ToTokens for Keyed {
                 tokens.extend(quote!(dict_in_dict(#key,#range)));
             }
             Value::Expr(expr) => {
-                tokens.extend(quote!(value_in_dict(#key,(#expr).to_value())));
+                tokens.extend(quote!(value_in_dict(#key,#expr)));
             }
         }
     }
@@ -431,7 +431,7 @@ impl Organize {
             }
             Value::Expr(expr) => {
                 self.build
-                    .extend(quote!(#name.value_in_list((#expr).to_value());));
+                    .extend(quote!(#name.value_in_list(&(#expr));));
             }
         }
     }

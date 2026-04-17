@@ -1,36 +1,37 @@
+#![doc(hidden)] // only public so macro generated code can access.
+
 use super::*;
 
 use core::ops::{Deref, DerefMut, Range};
 
 macro_rules! cell_helpers {
-    ($Name:ident, $NameInList:ident, $NameInDict:ident) => {
+    ($Name:ident, $field:ident, $NameInList:ident, $NameInDict:ident) => {
         pub struct $NameInList<'a> {
-            pub value: $Name<'a>,
+            pub $field: $Name<'a>,
             cell: &'a Cell<Value<'a>>,
         }
         impl<'a> Deref for $NameInList<'a> {
             type Target = $Name<'a>;
             fn deref(&self) -> &Self::Target {
-                &self.value
+                &self.$field
             }
         }
         impl<'a> DerefMut for $NameInList<'a> {
             fn deref_mut(&mut self) -> &mut Self::Target {
-                &mut self.value
+                &mut self.$field
             }
         }
         impl<'a> $NameInList<'a> {
             pub fn from(cell: &'a Cell<Value<'a>>) -> Option<Self> {
-                if let Value::$Name(value) = cell.get() {
-                    Some($NameInList { value, cell })
+                if let Value::$Name($field) = cell.get() {
+                    Some($NameInList { $field, cell })
                 } else {
                     None
                 }
             }
-            #[doc(hidden)]
             pub fn __set(&mut self, new: Option<Value<'a>>) {
                 self.cell.set(match new {
-                    None => Value::$Name(self.value),
+                    None => Value::$Name(self.$field),
                     Some(value) => value,
                 });
             }
@@ -39,43 +40,47 @@ macro_rules! cell_helpers {
             pub key: &'a str,
             pub gap: bool,
             pub before: Option<Comment<'a>>,
-            pub value: $Name<'a>,
+            pub $field: $Name<'a>,
             cell: &'a Cell<Keyed<'a>>,
         }
         impl<'a> Deref for $NameInDict<'a> {
             type Target = $Name<'a>;
             fn deref(&self) -> &Self::Target {
-                &self.value
+                &self.$field
             }
         }
         impl<'a> DerefMut for $NameInDict<'a> {
             fn deref_mut(&mut self) -> &mut Self::Target {
-                &mut self.value
+                &mut self.$field
+            }
+        }
+        impl<'a> From<&$NameInDict<'a>> for Value<'a> {
+            fn from(value: &$NameInDict<'a>) -> Self {
+                Value::from(value.$field)
             }
         }
         impl<'a> $NameInDict<'a> {
             pub fn from(cell: &'a Cell<Keyed<'a>>) -> Option<Self> {
                 let keyed = cell.get();
-                if let Value::$Name(value) = keyed.value {
+                if let Value::$Name($field) = keyed.value {
                     Some($NameInDict {
                         key: keyed.key,
                         gap: keyed.gap,
                         before: keyed.before,
-                        value,
+                        $field,
                         cell,
                     })
                 } else {
                     None
                 }
             }
-            #[doc(hidden)]
             pub fn __set(&mut self, new: Option<Value<'a>>) {
                 self.cell.set(Keyed {
                     key: self.key,
                     gap: self.gap,
                     before: self.before,
                     value: match new {
-                        None => Value::$Name(self.value),
+                        None => Value::$Name(self.$field),
                         Some(value) => value,
                     },
                 });
@@ -84,11 +89,10 @@ macro_rules! cell_helpers {
     };
 }
 
-cell_helpers! {Text,TextInList,TextInDict}
-cell_helpers! {List,ListInList,ListInDict}
-cell_helpers! {Dict,DictInList,DictInDict}
+cell_helpers! {Text,text,TextInList,TextInDict}
+cell_helpers! {List,list,ListInList,ListInDict}
+cell_helpers! {Dict,dict,DictInList,DictInDict}
 
-/// support for the macro. public so macro can use it, but think of it as hidden.
 pub struct Arena<'a> {
     value_cells: &'a [Cell<Value<'a>>],
     keyed_cells: &'a [Cell<Keyed<'a>>],
@@ -109,26 +113,26 @@ impl<'a> Arena<'a> {
         self.value_next += 1;
     }
     pub fn text_in_list(&mut self, utf8: &'a str) {
-        self.value_in_list(Text::wrap(utf8));
+        self.value_in_list(Value::Text(Text::wrap(utf8)));
     }
     pub fn list_in_list(&mut self, list: Range<usize>) {
-        self.value_in_list(List::wrap(&self.value_cells[list]));
+        self.value_in_list(Value::List(List::wrap(&self.value_cells[list])));
     }
     pub fn dict_in_list(&mut self, dict: Range<usize>) {
-        self.value_in_list(Dict::wrap(&self.keyed_cells[dict]));
+        self.value_in_list(Value::Dict(Dict::wrap(&self.keyed_cells[dict])));
     }
     pub fn value_in_dict(&mut self, key: &'a str, value: Value<'a>) {
         self.keyed_cells[self.keyed_next].set(Keyed::from(key, value));
         self.keyed_next += 1;
     }
     pub fn text_in_dict(&mut self, key: &'a str, utf8: &'a str) {
-        self.value_in_dict(key, Text::wrap(utf8));
+        self.value_in_dict(key, Value::Text(Text::wrap(utf8)));
     }
     pub fn list_in_dict(&mut self, key: &'a str, list: Range<usize>) {
-        self.value_in_dict(key, List::wrap(&self.value_cells[list]));
+        self.value_in_dict(key, Value::List(List::wrap(&self.value_cells[list])));
     }
     pub fn dict_in_dict(&mut self, key: &'a str, dict: Range<usize>) {
-        self.value_in_dict(key, Dict::wrap(&self.keyed_cells[dict]));
+        self.value_in_dict(key, Value::Dict(Dict::wrap(&self.keyed_cells[dict])));
     }
     pub fn end(&self) -> &'a Cell<Value<'a>> {
         &self.value_cells[self.value_next - 1]
@@ -208,7 +212,7 @@ impl<'a> Path<'a> {
                     return Err(self.error(step, "path ended prematurely by a text value"));
                 }
                 Value::List(list) => match branch {
-                    Branch::List(at) => match list.list.get(*at) {
+                    Branch::List(at) => match list.cells.get(*at) {
                         None => return Err(self.error(step, "index out of bounds")),
                         Some(found) => {
                             if step + 1 == self.branches.len() {
@@ -257,7 +261,7 @@ impl<'a> Path<'a> {
                     return Err(self.error(step, "path ended prematurely by a text value"));
                 }
                 Value::List(list) => match branch {
-                    Branch::List(at) => match list.list.get(*at) {
+                    Branch::List(at) => match list.cells.get(*at) {
                         None => return Err(self.error(step, "index out of bounds")),
                         Some(found) => {
                             from = found.get();

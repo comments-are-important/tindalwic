@@ -1,5 +1,5 @@
-//use regex::{Regex, RegexBuilder};
-//use std::{string::ToString, sync::LazyLock};
+#![allow(missing_docs)]
+
 use tindalwic::*;
 
 // #[test]
@@ -47,7 +47,7 @@ fn nested_dicts() {
     json! {
         let dict = {"1":"one","2":["two"],"a":{"b":{"c":{"d":{"k":"v"}}}}};
     }
-    let file = File::new(dict.dict);
+    let file = File::wrap(dict.cells);
     assert_eq!(
         file.to_string(),
         "1=one\n[2]\n\ttwo\n{a}\n\t{b}\n\t\t{c}\n\t\t\t{d}\n\t\t\t\tk=v\n"
@@ -63,11 +63,11 @@ fn change_in_list() {
     json! {
         let dict = {"a":{"b":["z"]}};
     }
-    let file = File::new(dict.dict);
+    let file = File::wrap(dict.cells);
     walk! {
         let mut text = {file}{"a"}["b"]<0>.unwrap();
     }
-    text.assign("c");
+    *text = Text::wrap("c");
     set!(text);
     assert_eq!(file.to_string(), "{a}\n\t[b]\n\t\tc\n");
 }
@@ -77,11 +77,11 @@ fn change_in_dict() {
     json! {
         let dict = {"a":[{"b":"z"}]};
     }
-    let file = File::new(dict.dict);
+    let file = File::wrap(dict.cells);
     walk! {
         let mut text = {file}["a"]{0}<"b">.unwrap();
     }
-    text.assign("c");
+    *text = Text::wrap("c");
     set!(text);
     assert_eq!(file.to_string(), "[a]\n\t{}\n\t\tb=c\n");
 }
@@ -91,7 +91,7 @@ fn inject_comments() {
     json! {
         let dict = {"k":"v"};
     }
-    let file = File::new(dict.dict);
+    let file = File::wrap(dict.cells);
     walk! {
         let mut text = {file}<"k">.unwrap();
     }
@@ -105,16 +105,17 @@ fn inject_comments() {
 fn change_structure() {
     let key = "k";
     json! {
-        let dict = {key:["v"]};
+        let changing = {key:["v"]};
     }
     walk! {
-        let mut list = {dict}[key].unwrap();
+        let mut resolved = {changing}[key].unwrap();
     }
+    resolved.before = Comment::some("b");
     json! {
-        let patch = {"p":(list)};
+        let patch = {"p":(resolved.list.into())};
     }
-    set!(list, patch.to_value());
-    assert_eq!(dict.to_string(), "{}\n\t{k}\n\t\t[p]\n\t\t\tv\n")
+    set!(resolved, patch.into());
+    assert_eq!(changing.to_string(), "{}\n\t//b\n\t{k}\n\t\t[p]\n\t\t\tv\n")
 }
 
 #[test]
@@ -134,7 +135,7 @@ fn prototype_input() {
     arena.list_in_dict(&it[7..8], 0..1);
     arena.dict_in_dict(&it[16..17], 3..4);
     arena.dict_in_list(4..7);
-    let file = File::new(arena.dict().unwrap().dict);
+    let file = File::wrap(arena.dict().unwrap().cells);
     assert_eq!(file.to_string(), it);
 }
 

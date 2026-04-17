@@ -82,7 +82,7 @@ impl<'o, 'f> Output<'o, 'f> {
         self.indent()?;
         self.out.write_str("[]\n")?;
         self.indent += 1;
-        for value in list.list {
+        for value in list.cells {
             self.value_in_list(value)?;
         }
         self.indent -= 1;
@@ -94,7 +94,7 @@ impl<'o, 'f> Output<'o, 'f> {
         self.out.write_str(key)?;
         self.out.write_str("]\n")?;
         self.indent += 1;
-        for value in list.list {
+        for value in list.cells {
             self.value_in_list(value)?;
         }
         self.indent -= 1;
@@ -104,7 +104,7 @@ impl<'o, 'f> Output<'o, 'f> {
         self.indent()?;
         self.out.write_str("{}\n")?;
         self.indent += 1;
-        for keyed in dict.dict {
+        for keyed in dict.cells {
             self.value_in_dict(keyed)?;
         }
         self.indent -= 1;
@@ -116,7 +116,7 @@ impl<'o, 'f> Output<'o, 'f> {
         self.out.write_str(key)?;
         self.out.write_str("}\n")?;
         self.indent += 1;
-        for keyed in dict.dict {
+        for keyed in dict.cells {
             self.value_in_dict(keyed)?;
         }
         self.indent -= 1;
@@ -146,7 +146,7 @@ impl<'o, 'f> Output<'o, 'f> {
     fn file<'a>(&mut self, file: &File<'a>) -> Result {
         self.comment("#!", &file.hashbang)?;
         self.comment("#", &file.prolog)?;
-        for keyed in file.dict {
+        for keyed in file.cells {
             self.value_in_dict(&keyed)?;
         }
         Ok(())

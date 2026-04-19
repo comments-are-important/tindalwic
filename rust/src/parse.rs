@@ -8,7 +8,7 @@ struct Input<'a> {
     indent: usize,
 }
 impl<'a> Input<'a> {
-    fn encoded(&mut self, from: &'a str, start: usize) -> Encoded<'a> {
+    fn encoded(&mut self, from: &'a str, start: usize) -> UTF8<'a> {
         let bytes = &from.as_bytes()[start..];
         let mut newlines = 0usize;
         let indent = self.indent + 1;
@@ -29,8 +29,8 @@ impl<'a> Input<'a> {
             cursor += 1 + indent;
             newlines += 1;
         }
-        Encoded {
-            utf8: &from[..cursor],
+        UTF8 {
+            slice: &from[..cursor],
             dedent: if newlines == 0 { usize::MAX } else { indent },
         }
     }

@@ -13,9 +13,9 @@ impl<'o, 'f> Output<'o, 'f> {
         }
         Ok(())
     }
-    fn encoded<'a>(&mut self, encoded: &Encoded<'a>) -> Result {
+    fn encoded<'a>(&mut self, encoded: &UTF8<'a>) -> Result {
         if self.indent == encoded.dedent || encoded.one_liner() {
-            self.out.write_str(encoded.utf8)?;
+            self.out.write_str(encoded.slice)?;
             self.out.write_char('\n')?;
         } else {
             let mut lines = encoded.lines();
@@ -35,7 +35,7 @@ impl<'o, 'f> Output<'o, 'f> {
         self.indent()?;
         self.out.write_str(marker)?;
         self.indent += 1;
-        self.encoded(&comment.encoded)?;
+        self.encoded(&comment.utf8)?;
         self.indent -= 1;
         Ok(())
     }
@@ -48,13 +48,13 @@ impl<'o, 'f> Output<'o, 'f> {
     fn text_in_list<'a>(&mut self, text: &Text<'a>) -> Result {
         self.indent()?;
         if text.one_liner_in_list() {
-            self.out.write_str(text.encoded.utf8)?;
+            self.out.write_str(text.utf8.slice)?;
             self.out.write_char('\n')?;
         } else {
             self.out.write_str("<>\n")?;
             self.indent += 1;
             self.indent()?;
-            self.encoded(&text.encoded)?;
+            self.encoded(&text.utf8)?;
             self.indent -= 1;
         }
         self.comment("#", &text.epilog)
@@ -64,7 +64,7 @@ impl<'o, 'f> Output<'o, 'f> {
         if text.one_liner_in_dict(key) {
             self.out.write_str(key)?;
             self.out.write_char('=')?;
-            self.out.write_str(text.encoded.utf8)?;
+            self.out.write_str(text.utf8.slice)?;
             self.out.write_char('\n')?;
         } else {
             self.out.write_char('<')?;
@@ -72,7 +72,7 @@ impl<'o, 'f> Output<'o, 'f> {
             self.out.write_str(">\n")?;
             self.indent += 1;
             self.indent()?;
-            self.encoded(&text.encoded)?;
+            self.encoded(&text.utf8)?;
             self.indent -= 1;
         }
         self.comment("#", &text.epilog)
@@ -82,8 +82,8 @@ impl<'o, 'f> Output<'o, 'f> {
         self.indent()?;
         self.out.write_str("[]\n")?;
         self.indent += 1;
-        for value in list.cells {
-            self.value_in_list(value)?;
+        for cell in list.cells {
+            self.item_in_list(cell)?;
         }
         self.indent -= 1;
         self.comment("#", &list.epilog)
@@ -94,8 +94,8 @@ impl<'o, 'f> Output<'o, 'f> {
         self.out.write_str(key)?;
         self.out.write_str("]\n")?;
         self.indent += 1;
-        for value in list.cells {
-            self.value_in_list(value)?;
+        for cell in list.cells {
+            self.item_in_list(cell)?;
         }
         self.indent -= 1;
         self.comment("#", &list.epilog)
@@ -104,8 +104,8 @@ impl<'o, 'f> Output<'o, 'f> {
         self.indent()?;
         self.out.write_str("{}\n")?;
         self.indent += 1;
-        for keyed in dict.cells {
-            self.value_in_dict(keyed)?;
+        for cell in dict.cells {
+            self.entry_in_dict(cell)?;
         }
         self.indent -= 1;
         self.comment("#", &dict.epilog)
@@ -116,38 +116,38 @@ impl<'o, 'f> Output<'o, 'f> {
         self.out.write_str(key)?;
         self.out.write_str("}\n")?;
         self.indent += 1;
-        for keyed in dict.cells {
-            self.value_in_dict(keyed)?;
+        for cell in dict.cells {
+            self.entry_in_dict(cell)?;
         }
         self.indent -= 1;
         self.comment("#", &dict.epilog)
     }
-    fn value_in_list<'a>(&mut self, cell: &Cell<Value<'a>>) -> Result {
-        let value = cell.get();
-        match value {
-            Value::Text(text) => self.text_in_list(&text),
-            Value::List(list) => self.list_in_list(&list),
-            Value::Dict(dict) => self.dict_in_list(&dict),
+    fn item_in_list<'a>(&mut self, cell: &Cell<Item<'a>>) -> Result {
+        let item = cell.get();
+        match item {
+            Item::Text(text) => self.text_in_list(&text),
+            Item::List(list) => self.list_in_list(&list),
+            Item::Dict(dict) => self.dict_in_list(&dict),
         }
     }
-    fn value_in_dict<'a>(&mut self, cell: &Cell<Keyed<'a>>) -> Result {
-        let keyed = cell.get();
-        if keyed.gap {
+    fn entry_in_dict<'a>(&mut self, cell: &Cell<Entry<'a>>) -> Result {
+        let entry = cell.get();
+        if entry.name.gap {
             // TODO be strict? f.write_indent(self.indent)?;
             self.out.write_char('\n')?;
         }
-        self.comment("//", &keyed.before)?;
-        match &keyed.value {
-            Value::Text(text) => self.text_in_dict(keyed.key, text),
-            Value::List(list) => self.list_in_dict(keyed.key, list),
-            Value::Dict(dict) => self.dict_in_dict(keyed.key, dict),
+        self.comment("//", &entry.name.before)?;
+        match &entry.item {
+            Item::Text(text) => self.text_in_dict(entry.name.key, text),
+            Item::List(list) => self.list_in_dict(entry.name.key, list),
+            Item::Dict(dict) => self.dict_in_dict(entry.name.key, dict),
         }
     }
     fn file<'a>(&mut self, file: &File<'a>) -> Result {
         self.comment("#!", &file.hashbang)?;
         self.comment("#", &file.prolog)?;
-        for keyed in file.cells {
-            self.value_in_dict(&keyed)?;
+        for cell in file.cells {
+            self.entry_in_dict(&cell)?;
         }
         Ok(())
     }
@@ -196,13 +196,13 @@ impl<'a> Display for Dict<'a> {
     }
 }
 
-impl<'a> Display for Value<'a> {
+impl<'a> Display for Item<'a> {
     fn fmt(&self, out: &mut Formatter<'_>) -> Result {
         let mut out = Output { out, indent: 0 };
         match self {
-            Value::Text(text) => out.text_in_list(text),
-            Value::List(list) => out.list_in_list(list),
-            Value::Dict(dict) => out.dict_in_list(dict),
+            Item::Text(text) => out.text_in_list(text),
+            Item::List(list) => out.list_in_list(list),
+            Item::Dict(dict) => out.dict_in_list(dict),
         }
     }
 }
@@ -212,3 +212,5 @@ impl<'a> Display for File<'a> {
         Output { out, indent: 0 }.file(self)
     }
 }
+
+// TODO file is good, but others include a superfluous introductory first line

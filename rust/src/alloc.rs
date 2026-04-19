@@ -3,10 +3,10 @@ extern crate alloc;
 use alloc::string::String;
 use super::*;
 
-impl<'a> Encoded<'a> {
+impl<'a> UTF8<'a> {
     /// Allocates a [String], filled with the UTF-8 copied from `self`.
-    pub fn joined(&self) -> String {
-        let mut result = String::with_capacity(self.utf8.len());
+    fn joined(&self) -> String {
+        let mut result = String::with_capacity(self.slice.len());
         for line in self.lines() {
             result.push_str(line);
             result.push('\n');
@@ -21,13 +21,13 @@ impl<'a> Encoded<'a> {
 impl<'a> Comment<'a> {
     /// Allocates a [String], filled with the UTF-8 copied from `self`.
     pub fn joined(&self) -> String {
-        self.encoded.joined()
+        self.utf8.joined()
     }
 }
 
 impl<'a> Text<'a> {
     /// Allocates a [String], filled with the UTF-8 copied from `self`.
     pub fn joined(&self) -> String {
-        self.encoded.joined()
+        self.utf8.joined()
     }
 }

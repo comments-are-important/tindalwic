@@ -84,7 +84,7 @@ rust/doc: must-run-inside
 	cd rust
 	cargo doc --all-features --no-deps # --document-private-items
 	cd target/doc
-	uv run -- python -m http.server
+	uv run -- python -m http.server >&http.server.log
 .PHONY: rust/doc
 
 rust/nightly: must-run-inside
@@ -96,11 +96,11 @@ rust/api: rust/nightly
 	cd rust
 	cargo install --list | grep -q cargo-public-api || cargo install cargo-public-api
 	mkdir -p target
-	cargo public-api -sss --all-features \
+	cargo public-api -sss --all-features --target-dir target/public-api \
 	  | grep -v '^impl' \
-	  | sed -E -e 's=^pub (enum|fn|const fn|mod|struct|use) (.*)=|\2|\1|=' \
+	  | sed -E -e 's=^pub (enum|fn|const fn|mod|struct|use|type) (.*)=|\2|\1|=' \
 	  | sed -E -e 's=^pub (.*)=|\1|property|=' \
-	  | LC_ALL=C sort >target/api.txt
+	  | LC_ALL=C sort >target/public-api/tindalwic.org
 .PHONY: rust/api
 
 rust/llvm-lines: must-run-inside

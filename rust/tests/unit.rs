@@ -10,12 +10,11 @@ use tindalwic::*;
 #[test]
 #[cfg(feature = "alloc")]
 fn json_text() {
-    // this is a very expensive way to do Text::wrap("hi")
-    // macro supports it to be consistent, but don't do it this way...
+    // this is just Text::wrap("hi") - no arena
     json! {
-        let text = "hi";
+        let value = "hi";
     }
-    assert_eq!(text.joined(), "hi");
+    assert_eq!(value.joined(), "hi");
 }
 
 #[test]
@@ -47,13 +46,12 @@ fn nested_dicts() {
     json! {
         let dict = {"1":"one","2":["two"],"a":{"b":{"c":{"d":{"k":"v"}}}}};
     }
-    let file = File::wrap(dict.cells);
     assert_eq!(
-        file.to_string(),
+        File::wrap(dict.cells).to_string(),
         "1=one\n[2]\n\ttwo\n{a}\n\t{b}\n\t\t{c}\n\t\t\t{d}\n\t\t\t\tk=v\n"
     );
     walk! {
-        let text = {file}{"a"}{"b"}{"c"}{"d"}<"k">.unwrap();
+        let text = {dict}{"a"}{"b"}{"c"}{"d"}<"k">.unwrap();
     }
     assert_eq!(Vec::from_iter(text.lines()), vec!["v"]);
 }
@@ -63,13 +61,12 @@ fn change_in_list() {
     json! {
         let dict = {"a":{"b":["z"]}};
     }
-    let file = File::wrap(dict.cells);
     walk! {
-        let mut text = {file}{"a"}["b"]<0>.unwrap();
+        let (mut text, cell) = {dict}{"a"}["b"]<0>.unwrap();
     }
-    *text = Text::wrap("c");
-    set!(text);
-    assert_eq!(file.to_string(), "{a}\n\t[b]\n\t\tc\n");
+    text = Text::wrap("c");
+    cell.set(text.into());
+    assert_eq!(File::wrap(dict.cells).to_string(), "{a}\n\t[b]\n\t\tc\n");
 }
 
 #[test]
@@ -79,10 +76,10 @@ fn change_in_dict() {
     }
     let file = File::wrap(dict.cells);
     walk! {
-        let mut text = {file}["a"]{0}<"b">.unwrap();
+        let (mut text, name, cell) = {dict}["a"]{0}<"b">.unwrap();
     }
-    *text = Text::wrap("c");
-    set!(text);
+    text = Text::wrap("c");
+    cell.set(Entry{name,item:text.into()});
     assert_eq!(file.to_string(), "[a]\n\t{}\n\t\tb=c\n");
 }
 
@@ -93,11 +90,11 @@ fn inject_comments() {
     }
     let file = File::wrap(dict.cells);
     walk! {
-        let mut text = {file}<"k">.unwrap();
+        let (mut text, mut name, cell) = {dict}<"k">.unwrap();
     }
-    text.before = Comment::some("b");
+    name.before = Comment::some("b");
     text.epilog = Comment::some("c");
-    set!(text);
+    cell.set(Entry{name,item:text.into()});
     assert_eq!(file.to_string(), "//b\nk=v\n#c\n");
 }
 
@@ -108,35 +105,14 @@ fn change_structure() {
         let changing = {key:["v"]};
     }
     walk! {
-        let mut resolved = {changing}[key].unwrap();
+        let (mut resolved, cell) = {changing}[key]<0>.unwrap();
     }
-    resolved.before = Comment::some("b");
+    resolved.epilog = Comment::some("b");
     json! {
-        let patch = {"p":(resolved.list.into())};
+        let patch = {"p":(resolved.into())};
     }
-    set!(resolved, patch.into());
-    assert_eq!(changing.to_string(), "{}\n\t//b\n\t{k}\n\t\t[p]\n\t\t\tv\n")
-}
-
-#[test]
-fn prototype_input() {
-    // proof that Arena might be used for Input.
-    // no idea yet how to pick the const sizes for the arrays.
-    let it = "1=one\n[2]\n\ttwo\n{a}\n\t{b}\n\t\t{c}\n\t\t\t{d}\n\t\t\t\tk=v\n";
-    let value_cells = Value::array::<2>();
-    let keyed_cells = Keyed::array::<7>();
-    let mut arena = internals::Arena::new(&value_cells, &keyed_cells);
-    arena.text_in_list(&it[11..14]);
-    arena.text_in_dict(&it[41..42], &it[43..44]);
-    arena.dict_in_dict(&it[34..35], 0..1);
-    arena.dict_in_dict(&it[27..28], 1..2);
-    arena.dict_in_dict(&it[21..22], 2..3);
-    arena.text_in_dict(&it[0..1], &it[2..5]);
-    arena.list_in_dict(&it[7..8], 0..1);
-    arena.dict_in_dict(&it[16..17], 3..4);
-    arena.dict_in_list(4..7);
-    let file = File::wrap(arena.dict().unwrap().cells);
-    assert_eq!(file.to_string(), it);
+    cell.set(patch.into());
+    assert_eq!(changing.to_string(), "{}\n\t[k]\n\t\t{}\n\t\t\tp=v\n\t\t\t#b\n")
 }
 
 /*

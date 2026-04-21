@@ -8,19 +8,9 @@ use tindalwic::*;
 // }
 
 #[test]
-#[cfg(feature = "alloc")]
-fn json_text() {
-    // this is just Text::wrap("hi") - no arena
-    json! {
-        let value = "hi";
-    }
-    assert_eq!(value.joined(), "hi");
-}
-
-#[test]
 fn two_lines() {
     json! {
-        let dict = {"key":"one\ntwo"};
+        let dict = {"key":"one\ntwo"}.unwrap();
     }
     assert_eq!(dict.to_string(), "{}\n\t<key>\n\t\tone\n\t\ttwo\n");
 }
@@ -29,7 +19,7 @@ fn two_lines() {
 #[cfg(feature = "alloc")]
 fn nested_lists() {
     json! {
-        let list = [[[["value"]]]];
+        let list = [[[["value"]]]].unwrap();
     }
     assert_eq!(
         list.to_string(),
@@ -44,7 +34,7 @@ fn nested_lists() {
 #[test]
 fn nested_dicts() {
     json! {
-        let dict = {"1":"one","2":["two"],"a":{"b":{"c":{"d":{"k":"v"}}}}};
+        let dict = {"1":"one","2":["two"],"a":{"b":{"c":{"d":{"k":"v"}}}}}.unwrap();
     }
     assert_eq!(
         File::wrap(dict.cells).to_string(),
@@ -59,7 +49,7 @@ fn nested_dicts() {
 #[test]
 fn change_in_list() {
     json! {
-        let dict = {"a":{"b":["z"]}};
+        let dict = {"a":{"b":["z"]}}.unwrap();
     }
     walk! {
         let (mut text, cell) = {dict}{"a"}["b"]<0>.unwrap();
@@ -72,7 +62,7 @@ fn change_in_list() {
 #[test]
 fn change_in_dict() {
     json! {
-        let dict = {"a":[{"b":"z"}]};
+        let dict = {"a":[{"b":"z"}]}.unwrap();
     }
     let file = File::wrap(dict.cells);
     walk! {
@@ -86,7 +76,7 @@ fn change_in_dict() {
 #[test]
 fn inject_comments() {
     json! {
-        let dict = {"k":"v"};
+        let dict = {"k":"v"}.unwrap();
     }
     let file = File::wrap(dict.cells);
     walk! {
@@ -102,21 +92,32 @@ fn inject_comments() {
 fn change_structure() {
     let key = "k";
     json! {
-        let changing = {key:["v"]};
+        let changing = {"k":["v"]}.unwrap();
     }
     walk! {
         let (mut resolved, cell) = {changing}[key]<0>.unwrap();
     }
     resolved.epilog = Comment::some("b");
     json! {
-        let patch = {"p":(resolved.into())};
+        let patch = {"p":(resolved)}.unwrap();
     }
     cell.set(patch.into());
     assert_eq!(changing.to_string(), "{}\n\t[k]\n\t\t{}\n\t\t\tp=v\n\t\t\t#b\n")
 }
 
 /*
-// move to tests/macro_err/badlife.rs
+// move to tests/macro_err/
+#[test]
+#[cfg(feature = "alloc")]
+fn json_text() {
+    // used to work but now gets red squiggled
+    json! {
+        let just_a_text = "hi".unwrap();
+        let just_a_copy = (just_a_text).unwrap();
+    }
+    assert_eq!(just_a_text.joined(), "hi");
+    assert_eq!(just_a_copy.joined(), "hi");
+}
 fn zzz() {
     let mut hi = String::from("hi");
     let mut root = tindalwic!([hi[..]]);

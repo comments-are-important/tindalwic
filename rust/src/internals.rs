@@ -2,20 +2,46 @@
 
 use super::*;
 
-use core::ops::Range;
-
 struct Bump<'a, T> {
     cells: &'a [Cell<T>],
     next: usize,
+    done: usize,
 }
 impl<'a, T> Bump<'a, T> {
     fn wrap(cells: &'a [Cell<T>]) -> Self {
-        let next = 0;
-        Bump { cells, next }
+        Bump {
+            cells,
+            next: 0,
+            done: cells.len(),
+        }
     }
-    fn push(&mut self, value: T) {
-        self.cells[self.next].set(value);
-        self.next += 1;
+    fn push(&mut self, value: T) -> Option<()> {
+        if self.next >= self.done {
+            return None;
+        }
+        let next = self.next;
+        self.cells[next].set(value);
+        self.next = next + 1;
+        Some(())
+    }
+    fn finish(&mut self, count: usize) -> Option<&'a [Cell<T>]> {
+        if self.next < count || self.next > self.done {
+            return None;
+        }
+        if self.next == self.done {
+            let both = self.next - count;
+            self.next = both;
+            self.done = both;
+            return Some(&self.cells[both..both + count]);
+        }
+        let next = self.next - count;
+        let done = self.done - count;
+        for offset in (0..count).rev() {
+            self.cells[next + offset].swap(&self.cells[done + offset]);
+        }
+        self.next = next;
+        self.done = done;
+        Some(&self.cells[done..done + count])
     }
 }
 
@@ -29,35 +55,42 @@ impl<'a> Arena<'a> {
         let entries = Bump::wrap(entries);
         Arena { items, entries }
     }
-    pub fn list(&self, range: Range<usize>) -> List<'a> {
-        List::wrap(&self.items.cells[range])
+    pub fn list(&mut self, count: usize) -> Option<List<'a>> {
+        Some(List::wrap(self.items.finish(count)?))
     }
-    pub fn dict(&self, range: Range<usize>) -> Dict<'a> {
-        Dict::wrap(&self.entries.cells[range])
+    pub fn dict(&mut self, count: usize) -> Option<Dict<'a>> {
+        Some(Dict::wrap(self.entries.finish(count)?))
     }
-    pub fn item(&mut self, item: Item<'a>) {
-        self.items.push(item);
+    pub fn item(&mut self, item: Item<'a>) -> Option<()> {
+        self.items.push(item)
     }
-    pub fn text_item(&mut self, utf8: &'a str) {
-        self.item(Item::Text(Text::wrap(utf8)));
+    pub fn keyed(&mut self, key: &'a str, item: Item<'a>) -> Option<()> {
+        self.entry(Entry::wrap(key, item))
     }
-    pub fn list_item(&mut self, range: Range<usize>) {
-        self.item(Item::List(self.list(range)));
+    pub fn entry(&mut self, entry: Entry<'a>) -> Option<()> {
+        self.entries.push(entry)
     }
-    pub fn dict_item(&mut self, range: Range<usize>) {
-        self.item(Item::Dict(self.dict(range)));
+    pub fn text_item(&mut self, utf8: &'a str) -> Option<()> {
+        self.item(Text::wrap(utf8).into())
     }
-    pub fn entry(&mut self, key: &'a str, item: Item<'a>) {
-        self.entries.push(Entry::wrap(key, item));
+    pub fn list_item(&mut self, count: usize) -> Option<()> {
+        let list = self.list(count)?;
+        self.item(list.into())
     }
-    pub fn text_entry(&mut self, key: &'a str, utf8: &'a str) {
-        self.entry(key, Item::Text(Text::wrap(utf8)));
+    pub fn dict_item(&mut self, count: usize) -> Option<()> {
+        let dict = self.dict(count)?;
+        self.item(dict.into())
     }
-    pub fn list_entry(&mut self, key: &'a str, range: Range<usize>) {
-        self.entry(key, Item::List(self.list(range)));
+    pub fn text_entry(&mut self, key: &'a str, utf8: &'a str) -> Option<()> {
+        self.keyed(key, Text::wrap(utf8).into())
     }
-    pub fn dict_entry(&mut self, key: &'a str, range: Range<usize>) {
-        self.entry(key, Item::Dict(self.dict(range)));
+    pub fn list_entry(&mut self, key: &'a str, count: usize) -> Option<()> {
+        let list = self.list(count)?;
+        self.keyed(key, list.into())
+    }
+    pub fn dict_entry(&mut self, key: &'a str, count: usize) -> Option<()> {
+        let dict = self.dict(count)?;
+        self.keyed(key, dict.into())
     }
 }
 

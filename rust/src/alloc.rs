@@ -1,7 +1,7 @@
 extern crate alloc;
 
-use alloc::string::String;
 use super::*;
+use alloc::string::String;
 
 impl<'a> UTF8<'a> {
     /// Allocates a [String], filled with the UTF-8 copied from `self`.

@@ -100,9 +100,10 @@ impl<'a> UTF8<'a> {
 /// # {
 /// let comment = tindalwic::Comment::wrap("with ~strikethrough~ extension");
 ///
-/// let html = markdown::to_html_with_options(&comment.joined(), &markdown::Options::gfm())
-///   .expect("should never error, according to:
-///      <https://docs.rs/markdown/latest/markdown/fn.to_html_with_options.html#errors>");
+/// let html = markdown::to_html_with_options(&comment.joined(), &markdown::Options::gfm()).expect(
+///     "should never error, according to:
+///      <https://docs.rs/markdown/latest/markdown/fn.to_html_with_options.html#errors>",
+/// );
 ///
 /// assert_eq!(html, "<p>with <del>strikethrough</del> extension</p>");
 /// # }

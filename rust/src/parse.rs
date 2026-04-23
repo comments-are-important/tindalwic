@@ -148,7 +148,7 @@ where
     /// use this whenever a comment is allowed, returns None if current line does not
     /// have exactly the provided indent and prefix.
     fn comment(&mut self, indent: usize, prefix: &'static [u8]) -> Option<Comment<'a>> {
-        if self.tabs() != indent {
+        if self.start == usize::MAX || self.tabs() != indent {
             return None;
         }
         let bytes = self.utf8.as_bytes();
@@ -271,6 +271,7 @@ where
             };
             let before = self.comment(indent, b"//");
             if self.start == usize::MAX || tabs != indent {
+                // report if gap or before
                 break;
             }
             let mut key: &'a str = "";
@@ -304,7 +305,7 @@ where
                                 self.text(indent, end)
                             } else {
                                 // first line of stretched text can have excess indent
-                                self.text(indent, end + indent + 1)
+                                self.text(indent, end + 1 + indent + 1)
                             }
                             .into(),
                         );
@@ -316,6 +317,7 @@ where
                         self.next(indent);
                     } else {
                         key = &self.utf8[self.first + 1..self.end - 1];
+                        self.next(indent + 1);
                         item = Some(self.items(indent + 1, arena)?.into());
                     }
                 }
@@ -325,14 +327,20 @@ where
                         self.next(indent);
                     } else {
                         key = &self.utf8[self.first + 1..self.end - 1];
+                        self.next(indent + 1);
                         item = Some(self.entries(indent + 1, arena)?.into());
                     }
+                }
+                b'\t' => {
+                    (self.report)(&(self.line, "excess indentation?"));
+                    self.next(indent);
                 }
                 _ => {
                     if self.assign == usize::MAX {
                         (self.report)(&(self.line, "missing `=` in dict"))
                     } else {
-                        item = Some(self.text(indent, self.start + indent).into());
+                        key = &self.utf8[self.first..self.assign];
+                        item = Some(self.text(indent, self.assign + 1).into());
                     }
                 }
             }
@@ -342,7 +350,7 @@ where
                     item,
                 })?;
                 count += 1;
-            }
+            } // else report if gap or before or key
         }
         let mut dict = arena.dict(count)?;
         dict.prolog = prolog;
@@ -350,5 +358,92 @@ where
             dict.epilog = self.comment(indent - 1, b"#");
         }
         Some(dict)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty() {
+        let items = Item::array::<0>();
+        let entries = Entry::array::<0>();
+        let mut arena = internals::Arena::wrap(&items, &entries);
+        let file =
+            parse::Input::parse(&mut arena, "", |(line, message)| panic!("{line}:{message}"));
+        match file {
+            None => panic!("got None"),
+            Some(file) => {
+                assert!(file.is_empty())
+            }
+        }
+    }
+    #[test]
+    fn assign() {
+        let items = Item::array::<0>();
+        let entries = Entry::array::<1>();
+        let mut arena = internals::Arena::wrap(&items, &entries);
+        let file = parse::Input::parse(&mut arena, "k=v", |(line, message)| {
+            panic!("{line}:{message}")
+        });
+        match file {
+            None => panic!("got None"),
+            Some(file) => {
+                assert!(file.hashbang.is_none());
+                assert!(file.prolog.is_none());
+                assert_eq!(file.cells.len(), 1);
+                let entry = file.find("k").unwrap();
+                let Item::Text(text) = entry.get().item else {
+                    panic!("not text?");
+                };
+                let mut lines = text.lines();
+                assert_eq!(lines.next(), Some("v"));
+                assert_eq!(lines.next(), None);
+            }
+        }
+    }
+    #[test]
+    fn sublist() {
+        let items = Item::array::<1>();
+        let entries = Entry::array::<1>();
+        let mut arena = internals::Arena::wrap(&items, &entries);
+        let file = parse::Input::parse(&mut arena, "[k]\n\tv", |(line, message)| {
+            panic!("{line}:{message}")
+        });
+        match file {
+            None => panic!("got None"),
+            Some(file) => {
+                assert!(file.hashbang.is_none());
+                assert!(file.prolog.is_none());
+                assert_eq!(file.cells.len(), 1);
+                let entry = file.find("k").unwrap();
+                let Item::List(list) = entry.get().item else {
+                    panic!("not list?");
+                };
+                assert_eq!(list.cells.len(), 1);
+                let Item::Text(text) = list.cells[0].get() else {
+                    panic!("not text?");
+                };
+                let mut lines = text.lines();
+                assert_eq!(lines.next(), Some("v"));
+                assert_eq!(lines.next(), None);
+            }
+        }
+    }
+    #[test]
+    fn subdict() {
+        let items = Item::array::<0>();
+        let entries = Entry::array::<2>();
+        let mut arena = internals::Arena::wrap(&items, &entries);
+        let file = parse::Input::parse(&mut arena, "{z}\n\t<k>\n\t\tv", |(line, message)| {
+            panic!("{line}:{message}")
+        });
+        walk! {
+            let v = (file.unwrap()){"z"}<"k">.unwrap();
+        }
+        let mut lines = v.lines();
+        assert_eq!(lines.next(), Some("v"));
+        assert_eq!(lines.next(), None);
     }
 }

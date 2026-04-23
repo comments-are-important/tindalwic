@@ -4,6 +4,9 @@
 
 use core::cell::Cell;
 
+#[cfg(test)]
+extern crate self as tindalwic;
+
 #[doc(inline)]
 /// traverse a path from the root down into the data structure.
 ///

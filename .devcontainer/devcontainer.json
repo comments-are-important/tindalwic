@@ -33,10 +33,10 @@
                 "vadimcn.vscode-lldb"
             ],
             "settings": {
+                "lldb.cargo": "/home/node/.cargo/bin/cargo",
                 "python": {
                     "defaultInterpreterPath": "/home/node/tindalwic.venv/bin/python",
-                    "editor.defaultFormatter": "charliermarsh.ruff",
-                    "lldb.cargo": "/home/node/.cargo/bin/cargo"
+                    "editor.defaultFormatter": "charliermarsh.ruff"
                 },
                 "yaml.schemas": {}
             }

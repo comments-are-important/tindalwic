@@ -16,7 +16,6 @@ fn two_lines() {
 }
 
 #[test]
-#[cfg(feature = "alloc")]
 fn nested_lists() {
     json! {
         let list = [[[["value"]]]].unwrap();
@@ -28,7 +27,7 @@ fn nested_lists() {
     walk! {
         let text = [list][0][0][0]<0>.unwrap();
     }
-    assert_eq!(text.joined(), "value");
+    assert_eq!(Vec::from_iter(text.lines()), vec!["value"]);
 }
 
 #[test]

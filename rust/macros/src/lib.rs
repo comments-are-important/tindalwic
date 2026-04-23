@@ -147,16 +147,24 @@ impl Parse for Walk {
             let content;
             let delims = bracketed!(content in input).span;
             if content.is_empty() {
-                return Err(Error::new(delims.join(), "missing origin inside []"));
+                return Err(Error::new(delims.join(), "missing list inside []"));
             }
             origin = content.parse()?;
         } else if input.peek(Brace) {
             let content;
             let delims = braced!(content in input).span;
             if content.is_empty() {
-                return Err(Error::new(delims.join(), "missing origin inside {}"));
+                return Err(Error::new(delims.join(), "missing dict inside {}"));
             }
             origin = content.parse()?;
+        } else if input.peek(Paren) {
+            let content;
+            let delims = parenthesized!(content in input).span;
+            if content.is_empty() {
+                return Err(Error::new(delims.join(), "missing file inside ()"));
+            }
+            let content: TokenStream = content.parse()?;
+            origin = quote!(::tindalwic::Dict::wrap((#content).cells));
         } else {
             return Err(input.error("must start with [origin] or {origin}"));
         }

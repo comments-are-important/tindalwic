@@ -367,8 +367,17 @@ pub struct File<'a> {
 }
 impl<'a> File<'a> {
     /// stub for decoding from tindalwic UTF-8
-    pub fn parse(_content: &'a str) -> Self {
-        todo!()
+    pub fn parse<F>(content: &'a str, then: F)
+    where
+        F: FnOnce(File),
+    {
+        let items = Item::array::<15>();
+        let entries = Entry::array::<15>();
+        let mut arena = internals::Arena::wrap(&items, &entries);
+        let file = parse::Input::parse(&mut arena, content, |(line, message)| {
+            panic!("{line}:{message}")
+        });
+        (then)(file.unwrap());
     }
     /// Return a zero-copy instance using the provided cells (and no comments).
     pub fn wrap(cells: &'a [Cell<Entry<'a>>]) -> Self {

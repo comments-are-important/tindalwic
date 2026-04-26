@@ -176,9 +176,17 @@ impl Parse for Arena {
         let name: Variable = input.parse()?;
         input.parse::<Token![=]>()?;
         input.parse::<Token![<]>()?;
-        let items = LitInt::parse(input)?.base10_parse::<usize>()?;
+        let items = LitInt::parse(input)?;
+        if items.suffix() != "list" {
+            return Err(Error::new_spanned(items, "need `list` suffix here"))
+        }
+        let items = items.base10_parse::<usize>()?;
         input.parse::<Token![,]>()?;
-        let entries = LitInt::parse(input)?.base10_parse::<usize>()?;
+        let entries = LitInt::parse(input)?;
+        if entries.suffix() != "dict" {
+            return Err(Error::new_spanned(entries, "need `dict` suffix here"))
+        }
+        let entries = entries.base10_parse::<usize>()?;
         input.parse::<Token![>]>()?;
         input.parse::<Token![;]>()?;
         if !name.mutable {

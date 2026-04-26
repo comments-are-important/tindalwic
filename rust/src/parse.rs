@@ -371,7 +371,7 @@ mod tests {
     }
 
     macro_rules! assert_lines_eq {
-        // gets repetitive without Vec
+        // checking this gets repetitive without Vec
         ($text:ident, $($line:literal),*) => {
             let mut it = $text.lines();
             $(assert_eq!(it.next(), Some($line));)*
@@ -381,72 +381,57 @@ mod tests {
 
     #[test]
     fn empty() {
-        arena! { $crate = crate;
-            let mut arena = <0,0>;
+        arena! {
+            $crate = crate;
+            let mut arena = <0list,0dict>;
         }
         let file = Input::parse(&mut arena, "", bail).unwrap();
         assert!(file.is_empty());
     }
 
     #[test]
-    fn assign() {
-        let items = Item::array::<0>();
-        let entries = Entry::array::<1>();
-        let mut arena = internals::Arena::wrap(&items, &entries);
-        let file = Input::parse(&mut arena, "k=v", |(line, message)| {
-            panic!("{line}:{message}")
-        });
-        match file {
-            None => panic!("got None"),
-            Some(file) => {
-                assert!(file.hashbang.is_none());
-                assert!(file.prolog.is_none());
-                assert_eq!(file.cells.len(), 1);
-                let entry = file.find("k").unwrap();
-                let Item::Text(text) = entry.get().item else {
-                    panic!("not text?");
-                };
-                assert_lines_eq!(text, "v");
-            }
+    fn key_eq_value() {
+        arena! {
+            $crate = crate;
+            let mut arena = <0list,1dict>;
         }
+        let file = Input::parse(&mut arena, "k=v", bail).unwrap();
+        assert!(file.hashbang.is_none());
+        assert!(file.prolog.is_none());
+        assert_eq!(file.cells.len(), 1);
+        let entry = file.find("k").unwrap();
+        let Item::Text(text) = entry.get().item else {
+            panic!("not text?");
+        };
+        assert_lines_eq!(text, "v");
     }
     #[test]
     fn sub_list() {
-        let items = Item::array::<1>();
-        let entries = Entry::array::<1>();
-        let mut arena = internals::Arena::wrap(&items, &entries);
-        let file = Input::parse(&mut arena, "[k]\n\tv", |(line, message)| {
-            panic!("{line}:{message}")
-        });
-        match file {
-            None => panic!("got None"),
-            Some(file) => {
-                assert!(file.hashbang.is_none());
-                assert!(file.prolog.is_none());
-                assert_eq!(file.cells.len(), 1);
-                let entry = file.find("k").unwrap();
-                let Item::List(list) = entry.get().item else {
-                    panic!("not list?");
-                };
-                assert_eq!(list.cells.len(), 1);
-                let Item::Text(text) = list.cells[0].get() else {
-                    panic!("not text?");
-                };
-                let mut lines = text.lines();
-                assert_eq!(lines.next(), Some("v"));
-                assert_eq!(lines.next(), None);
-            }
+        arena! {
+            $crate = crate;
+            let mut arena = <1list,1dict>;
         }
+        let file = Input::parse(&mut arena, "[k]\n\tv", bail).unwrap();
+        assert_eq!(file.cells.len(), 1);
+        let entry = file.find("k").unwrap();
+        let Item::List(list) = entry.get().item else {
+            panic!("not list?");
+        };
+        assert_eq!(list.cells.len(), 1);
+        let Item::Text(text) = list.cells[0].get() else {
+            panic!("not text?");
+        };
+        let mut lines = text.lines();
+        assert_eq!(lines.next(), Some("v"));
+        assert_eq!(lines.next(), None);
     }
     #[test]
     fn sub_dict() {
-        let items = Item::array::<0>();
-        let entries = Entry::array::<2>();
-        let mut arena = internals::Arena::wrap(&items, &entries);
-        let file = Input::parse(&mut arena, "{z}\n\t<k>\n\t\tv", |(line, message)| {
-            panic!("{line}:{message}")
-        })
-        .unwrap();
+        arena! {
+            $crate = crate;
+            let mut arena = <0list,2dict>;
+        }
+        let file = Input::parse(&mut arena, "{z}\n\t<k>\n\t\tv", bail).unwrap();
         // walk! { $crate = crate;
         //     let v = (&file){"z"}<"k">.unwrap();
         // }

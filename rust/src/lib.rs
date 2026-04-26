@@ -404,7 +404,7 @@ impl<'a> File<'a> {
 
 #[cfg(test)]
 #[allow(unused_extern_crates)]
-extern crate self as test_toml_rename_tindalwic_dependency;
+extern crate self as test_rename_of_tindalwic_dependency;
 
 #[cfg(test)]
 mod tests {
@@ -413,7 +413,7 @@ mod tests {
     #[test]
     fn rename() {
         json! {
-            $crate = test_toml_rename_tindalwic_dependency;
+            $crate = test_rename_of_tindalwic_dependency;
             let empty = {}.unwrap();
         }
         assert!(empty.cells.is_empty());

@@ -68,7 +68,10 @@ fn change_in_dict() {
         let (mut text, name, cell) = {dict}["a"]{0}<"b">.unwrap();
     }
     text = Text::wrap("c");
-    cell.set(Entry{name,item:text.into()});
+    cell.set(Entry {
+        name,
+        item: text.into(),
+    });
     assert_eq!(file.to_string(), "[a]\n\t{}\n\t\tb=c\n");
 }
 
@@ -83,7 +86,10 @@ fn inject_comments() {
     }
     name.before = Comment::some("b");
     text.epilog = Comment::some("c");
-    cell.set(Entry{name,item:text.into()});
+    cell.set(Entry {
+        name,
+        item: text.into(),
+    });
     assert_eq!(file.to_string(), "//b\nk=v\n#c\n");
 }
 
@@ -101,7 +107,10 @@ fn change_structure() {
         let patch = {"p":(resolved)}.unwrap();
     }
     cell.set(patch.into());
-    assert_eq!(changing.to_string(), "{}\n\t[k]\n\t\t{}\n\t\t\tp=v\n\t\t\t#b\n")
+    assert_eq!(
+        changing.to_string(),
+        "{}\n\t[k]\n\t\t{}\n\t\t\tp=v\n\t\t\t#b\n"
+    )
 }
 
 /*

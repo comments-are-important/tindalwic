@@ -4,9 +4,6 @@
 
 use core::cell::Cell;
 
-#[cfg(test)]
-extern crate self as tindalwic;
-
 #[doc(inline)]
 /// traverse a path from the root down into the data structure.
 ///
@@ -22,6 +19,9 @@ pub use tindalwic_macros::walk;
 ///  + use [json!] to build a new [Item],
 ///  + then use [Cell::set] to affect the change.
 pub use tindalwic_macros::json;
+
+#[doc(inline)]
+pub use tindalwic_macros::arena;
 
 #[cfg(feature = "alloc")]
 mod alloc;
@@ -401,3 +401,21 @@ impl<'a> File<'a> {
 }
 
 // ====================================================================================
+
+#[cfg(test)]
+#[allow(unused_extern_crates)]
+extern crate self as test_toml_rename_tindalwic_dependency;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rename() {
+        json! {
+            $crate = test_toml_rename_tindalwic_dependency;
+            let empty = {}.unwrap();
+        }
+        assert!(empty.cells.is_empty());
+    }
+}

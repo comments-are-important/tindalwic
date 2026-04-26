@@ -111,7 +111,8 @@ rust/llvm-lines: must-run-inside
 
 rust/fmt: rust/nightly
 	cd rust
-	rustfmt +nightly --config format_code_in_doc_comments=true src/lib.rs
+	SRC=$$(find src macros/src -name '*.rs')
+	rustfmt +nightly --config format_code_in_doc_comments=true $$SRC tests/*.rs
 .PHONY: rust/fmt
 
 # =====================================================================================

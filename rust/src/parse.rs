@@ -365,26 +365,35 @@ where
 mod tests {
     use super::*;
 
+    fn bail(args: &(usize, &str)) {
+        let (line, message) = args;
+        panic!("{line}: {message}");
+    }
+
+    macro_rules! assert_lines_eq {
+        // gets repetitive without Vec
+        ($text:ident, $($line:literal),*) => {
+            let mut it = $text.lines();
+            $(assert_eq!(it.next(), Some($line));)*
+            assert_eq!(it.next(), None);
+        };
+    }
+
     #[test]
     fn empty() {
-        let items = Item::array::<0>();
-        let entries = Entry::array::<0>();
-        let mut arena = internals::Arena::wrap(&items, &entries);
-        let file =
-            parse::Input::parse(&mut arena, "", |(line, message)| panic!("{line}:{message}"));
-        match file {
-            None => panic!("got None"),
-            Some(file) => {
-                assert!(file.is_empty())
-            }
+        arena! { $crate = crate;
+            let mut arena = <0,0>;
         }
+        let file = Input::parse(&mut arena, "", bail).unwrap();
+        assert!(file.is_empty());
     }
+
     #[test]
     fn assign() {
         let items = Item::array::<0>();
         let entries = Entry::array::<1>();
         let mut arena = internals::Arena::wrap(&items, &entries);
-        let file = parse::Input::parse(&mut arena, "k=v", |(line, message)| {
+        let file = Input::parse(&mut arena, "k=v", |(line, message)| {
             panic!("{line}:{message}")
         });
         match file {
@@ -397,18 +406,16 @@ mod tests {
                 let Item::Text(text) = entry.get().item else {
                     panic!("not text?");
                 };
-                let mut lines = text.lines();
-                assert_eq!(lines.next(), Some("v"));
-                assert_eq!(lines.next(), None);
+                assert_lines_eq!(text, "v");
             }
         }
     }
     #[test]
-    fn sublist() {
+    fn sub_list() {
         let items = Item::array::<1>();
         let entries = Entry::array::<1>();
         let mut arena = internals::Arena::wrap(&items, &entries);
-        let file = parse::Input::parse(&mut arena, "[k]\n\tv", |(line, message)| {
+        let file = Input::parse(&mut arena, "[k]\n\tv", |(line, message)| {
             panic!("{line}:{message}")
         });
         match file {
@@ -432,18 +439,23 @@ mod tests {
         }
     }
     #[test]
-    fn subdict() {
+    fn sub_dict() {
         let items = Item::array::<0>();
         let entries = Entry::array::<2>();
         let mut arena = internals::Arena::wrap(&items, &entries);
-        let file = parse::Input::parse(&mut arena, "{z}\n\t<k>\n\t\tv", |(line, message)| {
+        let file = Input::parse(&mut arena, "{z}\n\t<k>\n\t\tv", |(line, message)| {
             panic!("{line}:{message}")
-        });
-        walk! {
-            let v = (file.unwrap()){"z"}<"k">.unwrap();
+        })
+        .unwrap();
+        // walk! { $crate = crate;
+        //     let v = (&file){"z"}<"k">.unwrap();
+        // }
+        // let mut lines = v.lines();
+        // assert_eq!(lines.next(), Some("v"));
+        // assert_eq!(lines.next(), None);
+        walk! { $crate = crate;
+            let x = (&file){"z"}<"k">.unwrap();
         }
-        let mut lines = v.lines();
-        assert_eq!(lines.next(), Some("v"));
-        assert_eq!(lines.next(), None);
+        assert_lines_eq!(x, "v");
     }
 }

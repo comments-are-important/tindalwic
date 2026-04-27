@@ -415,6 +415,7 @@ mod tests {
         json! {
             $crate = test_rename_of_tindalwic_dependency;
             let empty = {}.unwrap();
+            completed.unwrap();
         }
         assert!(empty.cells.is_empty());
     }

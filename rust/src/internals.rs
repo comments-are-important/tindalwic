@@ -55,6 +55,13 @@ impl<'a> Arena<'a> {
         let entries = Bump::wrap(entries);
         Arena { items, entries }
     }
+    pub fn completed(&self) -> Option<()> {
+        if self.items.done == 0 && self.entries.done == 0 {
+            Some(())
+        } else {
+            None
+        }
+    }
     pub fn list(&mut self, count: usize) -> Option<List<'a>> {
         Some(List::wrap(self.items.finish(count)?))
     }
@@ -95,58 +102,59 @@ impl<'a> Arena<'a> {
 }
 
 #[derive(Debug)]
-pub enum Branch<'a> {
+pub enum Branch<'p> {
     List(usize),
-    Dict(Key<'a>),
+    Dict(Key<'p>),
 }
 #[derive(Debug)]
-pub struct Error<'a> {
-    pub failed: &'a [Branch<'a>],
+pub struct Error<'p> {
+    pub failed: &'p [Branch<'p>],
     pub message: &'static str,
 }
 #[derive(Debug)]
-pub struct Path<'a> {
-    pub branches: &'a [Branch<'a>],
+pub struct Path<'p> {
+    pub branches: &'p [Branch<'p>],
 }
 
-impl<'a> Path<'a> {
-    pub fn wrap(branches: &'a [Branch<'a>]) -> Self {
+impl<'p> Path<'p> {
+    pub fn wrap(branches: &'p [Branch<'p>]) -> Self {
         Path { branches }
     }
-    pub fn error_full(&'a self, message: &'static str) -> Error<'a> {
+    pub fn error_full(&self, message: &'static str) -> Error<'p> {
         Error {
             failed: &self.branches[..],
             message,
         }
     }
-    pub fn error_at(&'a self, bad: usize, message: &'static str) -> Error<'a> {
+    pub fn error_at(&self, bad: usize, message: &'static str) -> Error<'p> {
         Error {
             failed: &self.branches[..=bad],
             message,
         }
     }
-    pub fn text(&'a self, item: &'a Item<'a>) -> Result<Text<'a>, Error<'a>> {
+    pub fn text<'a>(&self, item: &Item<'a>) -> Result<Text<'a>, Error<'p>> {
         let Item::Text(text) = item else {
             return Err(self.error_full("path does not end at Text"));
         };
         Ok(*text)
     }
-    pub fn list(&'a self, item: &'a Item<'a>) -> Result<List<'a>, Error<'a>> {
+    pub fn list<'a>(&self, item: &Item<'a>) -> Result<List<'a>, Error<'p>> {
         let Item::List(list) = item else {
             return Err(self.error_full("path does not end at List"));
         };
         Ok(*list)
     }
-    pub fn dict(&'a self, item: &'a Item<'a>) -> Result<Dict<'a>, Error<'a>> {
+    pub fn dict<'a>(&self, item: &Item<'a>) -> Result<Dict<'a>, Error<'p>> {
         let Item::Dict(dict) = item else {
             return Err(self.error_full("path does not end at Dict"));
         };
         Ok(*dict)
     }
-    pub fn item_cell(&'a self, mut from: Item<'a>) -> Result<&'a Cell<Item<'a>>, Error<'a>> {
+    pub fn item_cell<'a>(&self, item: &Item<'a>) -> Result<&'a Cell<Item<'a>>, Error<'p>> {
         if self.branches.is_empty() {
             return Err(self.error_full("empty path can't be resolved"));
         }
+        let mut from = *item;
         for (step, branch) in self.branches.iter().enumerate() {
             match &from {
                 Item::Text(_text) => {
@@ -183,10 +191,11 @@ impl<'a> Path<'a> {
         }
         Err(self.error_full("path did not end at an item inside a list"))
     }
-    pub fn entry_cell(&'a self, mut from: Item<'a>) -> Result<&'a Cell<Entry<'a>>, Error<'a>> {
+    pub fn entry_cell<'a>(&self, item: &Item<'a>) -> Result<&'a Cell<Entry<'a>>, Error<'p>> {
         if self.branches.is_empty() {
             return Err(self.error_full("empty path can't be resolved"));
         }
+        let mut from = *item;
         for (step, branch) in self.branches.iter().enumerate() {
             match &from {
                 Item::Text(_text) => {

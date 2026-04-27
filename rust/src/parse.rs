@@ -383,9 +383,10 @@ mod tests {
     fn empty() {
         arena! {
             $crate = crate;
-            let mut arena = <0list,0dict>;
+            let mut arena = <10dict,10list>;
         }
         let file = Input::parse(&mut arena, "", bail).unwrap();
+        assert!(!arena.completed().is_some());
         assert!(file.is_empty());
     }
 
@@ -393,9 +394,10 @@ mod tests {
     fn key_eq_value() {
         arena! {
             $crate = crate;
-            let mut arena = <0list,1dict>;
+            let mut arena = <1dict>;
         }
         let file = Input::parse(&mut arena, "k=v", bail).unwrap();
+        assert!(arena.completed().is_some());
         assert!(file.hashbang.is_none());
         assert!(file.prolog.is_none());
         assert_eq!(file.cells.len(), 1);
@@ -412,6 +414,7 @@ mod tests {
             let mut arena = <1list,1dict>;
         }
         let file = Input::parse(&mut arena, "[k]\n\tv", bail).unwrap();
+        assert!(arena.completed().is_some());
         assert_eq!(file.cells.len(), 1);
         let entry = file.find("k").unwrap();
         let Item::List(list) = entry.get().item else {
@@ -429,18 +432,13 @@ mod tests {
     fn sub_dict() {
         arena! {
             $crate = crate;
-            let mut arena = <0list,2dict>;
+            let mut arena = <2dict>;
         }
         let file = Input::parse(&mut arena, "{z}\n\t<k>\n\t\tv", bail).unwrap();
-        // walk! { $crate = crate;
-        //     let v = (&file){"z"}<"k">.unwrap();
-        // }
-        // let mut lines = v.lines();
-        // assert_eq!(lines.next(), Some("v"));
-        // assert_eq!(lines.next(), None);
+        assert!(arena.completed().is_some());
         walk! { $crate = crate;
-            let x = (&file){"z"}<"k">.unwrap();
+            let v = (&file){"z"}<"k">.unwrap();
         }
-        assert_lines_eq!(x, "v");
+        assert_lines_eq!(v, "v");
     }
 }

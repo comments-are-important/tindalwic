@@ -173,30 +173,30 @@ struct Arena {
 impl Parse for Arena {
     fn parse(input: ParseStream) -> Result<Self> {
         input.parse::<Token![let]>()?;
-        let name: Variable = input.parse()?;
+        let mut arena = Arena::new(input.parse()?);
         input.parse::<Token![=]>()?;
         input.parse::<Token![<]>()?;
-        let items = LitInt::parse(input)?;
-        if items.suffix() != "list" {
-            return Err(Error::new_spanned(items, "need `list` suffix here"))
+        for dimension in Punctuated::<LitInt, Token![,]>::parse_separated_nonempty(input)? {
+            match dimension.suffix() {
+                "list" => arena.items = dimension.base10_parse::<usize>()?,
+                "dict" => arena.entries = dimension.base10_parse::<usize>()?,
+                _ => {
+                    return Err(Error::new_spanned(
+                        dimension,
+                        "need `list` or `dict` suffix",
+                    ));
+                }
+            }
         }
-        let items = items.base10_parse::<usize>()?;
-        input.parse::<Token![,]>()?;
-        let entries = LitInt::parse(input)?;
-        if entries.suffix() != "dict" {
-            return Err(Error::new_spanned(entries, "need `dict` suffix here"))
+        if arena.items == 0 && arena.entries == 0 {
+            return Err(input.error("need at least one non-zero dimension"));
         }
-        let entries = entries.base10_parse::<usize>()?;
+        if !arena.name.mutable {
+            return Err(Error::new_spanned(arena.name.ident, "must specify `mut`"));
+        }
         input.parse::<Token![>]>()?;
         input.parse::<Token![;]>()?;
-        if !name.mutable {
-            return Err(Error::new_spanned(name, "must specify `mut` here"));
-        }
-        Ok(Arena {
-            name,
-            items,
-            entries,
-        })
+        Ok(arena)
     }
 }
 impl Arena {
@@ -439,7 +439,7 @@ impl ToTokens for Walk {
         tokens.extend(quote! {
             let #branches = [#(#steps),*];
             let #path = #tindalwic::internals::Path::wrap(&#branches);
-            let #cell = #path.#method((#origin).into())#unwrap;
+            let #cell = #path.#method(&(#origin).into())#unwrap;
         });
         let item = result.derive("item");
         if let Some(name) = &self.name {
@@ -603,14 +603,27 @@ impl Parse for JSON {
 
 struct JSONs {
     arena: Arena,
-    statements: Punctuated<JSON, Nothing>,
+    statements: Vec<JSON>,
+    completed: Option<Propagate>,
 }
 impl Parse for JSONs {
     fn parse(input: ParseStream) -> Result<Self> {
-        let statements = Punctuated::<JSON, Nothing>::parse_terminated(input)?;
+        let mut statements = Vec::<JSON>::new();
+        while input.peek(Token![let]) {
+            statements.push(input.parse()?);
+        }
         let Some(first) = statements.first() else {
             return Err(input.error("expecting a `let` statement"));
         };
+        let mut completed: Option<Propagate> = None;
+        if !input.is_empty() {
+            let ident: Ident = input.parse()?;
+            if ident != "completed" {
+                return Err(Error::new_spanned(ident, "only `completed` allowed"));
+            }
+            completed = Some(input.parse()?);
+            input.parse::<Token![;]>()?;
+        }
         // the arena name is derived from the name of the first JSON value,
         // even though all the JSONs get built into the single arena instance.
         // the arena `let` bindings are hidden, so they don't really matter, but
@@ -619,7 +632,11 @@ impl Parse for JSONs {
         for json in &statements {
             json.root.count(&mut arena);
         }
-        Ok(JSONs { arena, statements })
+        Ok(JSONs {
+            arena,
+            statements,
+            completed,
+        })
     }
 }
 /// it would be easier to impl ToTokens for JSON/Root/Item/Entry, and then generate
@@ -702,7 +719,11 @@ impl JSONs {
 }
 impl ToTokens for JSONs {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        let JSONs { arena, statements } = self;
+        let JSONs {
+            arena,
+            statements,
+            completed,
+        } = self;
         tokens.extend(quote!(#arena));
         let ident = &self.arena.name.ident;
         for json in statements {
@@ -723,6 +744,9 @@ impl ToTokens for JSONs {
                     });
                 }
             }
+        }
+        if let Some(err) = completed {
+            tokens.extend(quote!(#ident.completed()#err));
         }
     }
 }

@@ -253,12 +253,17 @@ impl<'a> List<'a> {
         !(self.is_empty() && self.prolog.is_none() && self.epilog.is_none())
     }
     /// return None if index is out of bounds, else Some(item at that index).
-    pub fn get(&self, index: usize) -> Option<Item<'a>> {
+    /// same as Self::get, provided for parity with Dict::at and File::at
+    pub fn at(&self, index: usize) -> Option<Item<'a>> {
         self.cells.get(index).map(Cell::get)
     }
     /// iterate over each item.
     pub fn iter(&self) -> impl Iterator<Item = Item<'a>> {
         self.cells.iter().map(Cell::get)
+    }
+    /// returns Option of the item at the given index.
+    pub fn get(&self, index: usize) -> Option<Item<'a>> {
+        self.at(index)
     }
 }
 impl<'a> IntoIterator for List<'a> {
@@ -376,7 +381,7 @@ impl<'a> Dict<'a> {
         !(self.is_empty() && self.prolog.is_none() && self.epilog.is_none())
     }
     /// return None if index is out of bounds, else Some(entry at that index).
-    pub fn get(&self, index: usize) -> Option<Entry<'a>> {
+    pub fn at(&self, index: usize) -> Option<Entry<'a>> {
         self.cells.get(index).map(Cell::get)
     }
     /// iterate over each entry.
@@ -388,7 +393,7 @@ impl<'a> Dict<'a> {
         Entry::position(self.cells, key)
     }
     /// returns Option of the entry with the given key.
-    pub fn find(&self, key: Key<'_>) -> Option<Entry<'a>> {
+    pub fn get(&self, key: Key<'_>) -> Option<Entry<'a>> {
         Entry::position(self.cells, key).map(|i| self.cells[i].get())
     }
 }
@@ -503,7 +508,7 @@ impl<'a> File<'a> {
         !(self.is_empty() && self.hashbang.is_none() && self.prolog.is_none())
     }
     /// return None if index is out of bounds, else Some(entry at that index).
-    pub fn get(&self, index: usize) -> Option<Entry<'a>> {
+    pub fn at(&self, index: usize) -> Option<Entry<'a>> {
         self.cells.get(index).map(Cell::get)
     }
     /// iterate over each entry.
@@ -515,7 +520,7 @@ impl<'a> File<'a> {
         Entry::position(self.cells, key)
     }
     /// returns Option of the entry with the given key.
-    pub fn find(&self, key: Key<'_>) -> Option<Entry<'a>> {
+    pub fn get(&self, key: Key<'_>) -> Option<Entry<'a>> {
         Entry::position(self.cells, key).map(|i| self.cells[i].get())
     }
 }

@@ -401,7 +401,7 @@ mod tests {
         assert!(file.hashbang.is_none());
         assert!(file.prolog.is_none());
         assert_eq!(file.cells.len(), 1);
-        let entry = file.find("k").unwrap();
+        let entry = file.get("k").unwrap();
         let Item::Text(text) = entry.item else {
             panic!("not text?");
         };
@@ -416,7 +416,7 @@ mod tests {
         let file = Input::parse(&mut arena, "[k]\n\tv", bail).unwrap();
         assert!(arena.completed().is_some());
         assert_eq!(file.cells.len(), 1);
-        let entry = file.find("k").unwrap();
+        let entry = file.get("k").unwrap();
         let Item::List(list) = entry.item else {
             panic!("not list?");
         };

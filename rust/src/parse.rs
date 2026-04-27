@@ -387,7 +387,7 @@ mod tests {
         }
         let file = Input::parse(&mut arena, "", bail).unwrap();
         assert!(!arena.completed().is_some());
-        assert!(file.is_empty());
+        assert!(!file.has_content());
     }
 
     #[test]
@@ -402,7 +402,7 @@ mod tests {
         assert!(file.prolog.is_none());
         assert_eq!(file.cells.len(), 1);
         let entry = file.find("k").unwrap();
-        let Item::Text(text) = entry.get().item else {
+        let Item::Text(text) = entry.item else {
             panic!("not text?");
         };
         assert_lines_eq!(text, "v");
@@ -417,7 +417,7 @@ mod tests {
         assert!(arena.completed().is_some());
         assert_eq!(file.cells.len(), 1);
         let entry = file.find("k").unwrap();
-        let Item::List(list) = entry.get().item else {
+        let Item::List(list) = entry.item else {
             panic!("not list?");
         };
         assert_eq!(list.cells.len(), 1);

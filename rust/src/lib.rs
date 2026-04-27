@@ -29,6 +29,30 @@ mod fmt;
 pub mod internals; // macro generated code needs access.
 mod parse;
 
+/// an iter type to enable for-loops for List, Dict, and File.
+#[derive(Clone, Debug)]
+pub struct CellIter<'a, T: Copy> {
+    inner: core::slice::Iter<'a, Cell<T>>,
+}
+
+impl<'a, T: Copy> Iterator for CellIter<'a, T> {
+    type Item = T;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(Cell::get)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl<'a, T: Copy> ExactSizeIterator for CellIter<'a, T> {}
+impl<'a, T: Copy> DoubleEndedIterator for CellIter<'a, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.inner.next_back().map(Cell::get)
+    }
+}
+impl<'a, T: Copy> core::iter::FusedIterator for CellIter<'a, T> {}
+
 /// Hidden parts of [Comment] and [Text].
 ///
 /// These are zero-copy slices from an external buffer of Tindalwic UTF-8. The iterator
@@ -52,7 +76,7 @@ impl<'a> UTF8<'a> {
             dedent: if newline < bytes.len() { 0 } else { usize::MAX },
         }
     }
-    /// return true when there are no UTF-8 bytes.
+    /// return true when there are zero UTF-8 bytes.
     pub fn is_empty(&self) -> bool {
         self.slice.is_empty()
     }
@@ -126,7 +150,7 @@ impl<'a> Comment<'a> {
     pub fn some(utf8: &'a str) -> Option<Self> {
         Some(Comment::wrap(utf8))
     }
-    /// return true when there are no UTF-8 bytes.
+    /// return true when there are zero UTF-8 bytes.
     pub fn is_empty(&self) -> bool {
         self.utf8.is_empty()
     }
@@ -180,9 +204,13 @@ impl<'a> Text<'a> {
             )
         }
     }
-    /// return true when there are no UTF-8 bytes and no comments.
+    /// return true when there are zero UTF-8 bytes.
     pub fn is_empty(&self) -> bool {
-        self.utf8.is_empty() && self.epilog.is_none()
+        self.utf8.is_empty()
+    }
+    /// return true when there is some comment or some UTF-8 bytes.
+    pub fn has_content(&self) -> bool {
+        !(self.is_empty() && self.epilog.is_none())
     }
     /// Returned iterator produces a sub-slice for each line, stripped of indentation
     /// and line separators, in order, from `self`. Always produces at least one line.
@@ -212,9 +240,43 @@ impl<'a> List<'a> {
             epilog: None,
         }
     }
-    /// return true when there are no items and no comments.
+    /// return number of items.
+    pub fn len(&self) -> usize {
+        self.cells.len()
+    }
+    /// return true when there are zero items.
     pub fn is_empty(&self) -> bool {
-        self.cells.is_empty() && self.prolog.is_none() && self.epilog.is_none()
+        self.cells.is_empty()
+    }
+    /// return true when there is some comment or some items.
+    pub fn has_content(&self) -> bool {
+        !(self.is_empty() && self.prolog.is_none() && self.epilog.is_none())
+    }
+    /// return None if index is out of bounds, else Some(item at that index).
+    pub fn get(&self, index: usize) -> Option<Item<'a>> {
+        self.cells.get(index).map(Cell::get)
+    }
+    /// iterate over each item.
+    pub fn iter(&self) -> impl Iterator<Item = Item<'a>> {
+        self.cells.iter().map(Cell::get)
+    }
+}
+impl<'a> IntoIterator for List<'a> {
+    type Item = Item<'a>;
+    type IntoIter = CellIter<'a, Self::Item>;
+    fn into_iter(self) -> Self::IntoIter {
+        CellIter {
+            inner: self.cells.iter(),
+        }
+    }
+}
+impl<'a> IntoIterator for &List<'a> {
+    type Item = Item<'a>;
+    type IntoIter = CellIter<'a, Self::Item>;
+    fn into_iter(self) -> Self::IntoIter {
+        CellIter {
+            inner: self.cells.iter(),
+        }
     }
 }
 
@@ -301,13 +363,51 @@ impl<'a> Dict<'a> {
             epilog: None,
         }
     }
-    /// return true when there are no entries and no comments.
-    pub fn is_empty(&self) -> bool {
-        self.cells.is_empty() && self.prolog.is_none() && self.epilog.is_none()
+    /// return number of entries.
+    pub fn len(&self) -> usize {
+        self.cells.len()
     }
-    /// returns a reference to the entry with the given key.
-    pub fn find(&self, key: Key<'_>) -> Option<&'a Cell<Entry<'a>>> {
-        Entry::position(self.cells, key).map(|i| &self.cells[i])
+    /// return true when there are zero entries.
+    pub fn is_empty(&self) -> bool {
+        self.cells.is_empty()
+    }
+    /// return true when there is some comment or some entries.
+    pub fn has_content(&self) -> bool {
+        !(self.is_empty() && self.prolog.is_none() && self.epilog.is_none())
+    }
+    /// return None if index is out of bounds, else Some(entry at that index).
+    pub fn get(&self, index: usize) -> Option<Entry<'a>> {
+        self.cells.get(index).map(Cell::get)
+    }
+    /// iterate over each entry.
+    pub fn iter(&self) -> impl Iterator<Item = Entry<'a>> {
+        self.cells.iter().map(Cell::get)
+    }
+    /// return Some(index of entry) of the first one matching the given key.
+    pub fn position(&self, key: Key<'_>) -> Option<usize> {
+        Entry::position(self.cells, key)
+    }
+    /// returns Option of the entry with the given key.
+    pub fn find(&self, key: Key<'_>) -> Option<Entry<'a>> {
+        Entry::position(self.cells, key).map(|i| self.cells[i].get())
+    }
+}
+impl<'a> IntoIterator for Dict<'a> {
+    type Item = Entry<'a>;
+    type IntoIter = CellIter<'a, Self::Item>;
+    fn into_iter(self) -> Self::IntoIter {
+        CellIter {
+            inner: self.cells.iter(),
+        }
+    }
+}
+impl<'a> IntoIterator for &Dict<'a> {
+    type Item = Entry<'a>;
+    type IntoIter = CellIter<'a, Self::Item>;
+    fn into_iter(self) -> Self::IntoIter {
+        CellIter {
+            inner: self.cells.iter(),
+        }
     }
 }
 
@@ -390,13 +490,51 @@ impl<'a> File<'a> {
             prolog: None,
         }
     }
-    /// return true when there are no entries and no comments.
-    pub fn is_empty(&self) -> bool {
-        self.cells.is_empty() && self.hashbang.is_none() && self.prolog.is_none()
+    /// return number of entries.
+    pub fn len(&self) -> usize {
+        self.cells.len()
     }
-    /// returns a reference to the entry with the given key.
-    pub fn find(&self, key: Key<'_>) -> Option<&'a Cell<Entry<'a>>> {
-        Entry::position(self.cells, key).map(|i| &self.cells[i])
+    /// return true when there are zero entries.
+    pub fn is_empty(&self) -> bool {
+        self.cells.is_empty()
+    }
+    /// return true when there is some comment or some entries.
+    pub fn has_content(&self) -> bool {
+        !(self.is_empty() && self.hashbang.is_none() && self.prolog.is_none())
+    }
+    /// return None if index is out of bounds, else Some(entry at that index).
+    pub fn get(&self, index: usize) -> Option<Entry<'a>> {
+        self.cells.get(index).map(Cell::get)
+    }
+    /// iterate over each entry.
+    pub fn iter(&self) -> impl Iterator<Item = Entry<'a>> {
+        self.cells.iter().map(Cell::get)
+    }
+    /// return Some(index of entry) of the first one matching the given key.
+    pub fn position(&self, key: Key<'_>) -> Option<usize> {
+        Entry::position(self.cells, key)
+    }
+    /// returns Option of the entry with the given key.
+    pub fn find(&self, key: Key<'_>) -> Option<Entry<'a>> {
+        Entry::position(self.cells, key).map(|i| self.cells[i].get())
+    }
+}
+impl<'a> IntoIterator for File<'a> {
+    type Item = Entry<'a>;
+    type IntoIter = CellIter<'a, Self::Item>;
+    fn into_iter(self) -> Self::IntoIter {
+        CellIter {
+            inner: self.cells.iter(),
+        }
+    }
+}
+impl<'a> IntoIterator for &File<'a> {
+    type Item = Entry<'a>;
+    type IntoIter = CellIter<'a, Self::Item>;
+    fn into_iter(self) -> Self::IntoIter {
+        CellIter {
+            inner: self.cells.iter(),
+        }
     }
 }
 

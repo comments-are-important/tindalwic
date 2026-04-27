@@ -35,6 +35,11 @@ fn nested_dicts() {
     json! {
         let dict = {"1":"one","2":["two"],"a":{"b":{"c":{"d":{"k":"v"}}}}}.unwrap();
     }
+    let mut keys = Vec::new();
+    for entry in dict {
+        keys.push(entry.name.key);
+    }
+    assert_eq!(keys, vec!["1", "2", "a"]);
     assert_eq!(
         File::wrap(dict.cells).to_string(),
         "1=one\n[2]\n\ttwo\n{a}\n\t{b}\n\t\t{c}\n\t\t\t{d}\n\t\t\t\tk=v\n"

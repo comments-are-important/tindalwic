@@ -176,10 +176,10 @@ impl<'p> Path<'p> {
                 },
                 Item::Dict(dict) => match branch {
                     Branch::Dict(key) => {
-                        match dict.find(key) {
+                        match dict.position(key) {
                             None => return Err(self.error_at(step, "key not found")),
                             Some(found) => {
-                                from = found.get().item;
+                                from = dict.cells[found].get().item;
                             }
                         };
                     }
@@ -214,13 +214,13 @@ impl<'p> Path<'p> {
                 },
                 Item::Dict(dict) => match branch {
                     Branch::Dict(key) => {
-                        match dict.find(key) {
+                        match dict.position(key) {
                             None => return Err(self.error_at(step, "key not found")),
                             Some(found) => {
                                 if step + 1 == self.branches.len() {
-                                    return Ok(found);
+                                    return Ok(&dict.cells[found]);
                                 }
-                                from = found.get().item;
+                                from = dict.cells[found].get().item;
                             }
                         };
                     }

@@ -28,6 +28,8 @@ mod alloc;
 mod fmt;
 pub mod internals; // macro generated code needs access.
 mod parse;
+#[cfg(feature = "rand")]
+mod rand;
 
 /// an iter type to enable for-loops for List, Dict, and File.
 #[derive(Clone, Debug)]
@@ -58,7 +60,7 @@ impl<'a, T: Copy> core::iter::FusedIterator for CellIter<'a, T> {}
 /// These are zero-copy slices from an external buffer of Tindalwic UTF-8. The iterator
 /// returned by [Encoded::lines()] is the most efficient way to strip the indentation
 /// from a multi-line slice.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct UTF8<'a> {
     slice: &'a str,
     dedent: usize, // usize::MAX => one_liner
@@ -135,7 +137,7 @@ impl<'a> UTF8<'a> {
 /// assert_eq!(html, "<p>with <del>strikethrough</del> extension</p>");
 /// # }
 /// ```
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Comment<'a> {
     utf8: UTF8<'a>,
 }
@@ -164,7 +166,7 @@ impl<'a> Comment<'a> {
 // ------------------------------------------------------------------------------------
 
 /// [Item::Text] wraps a sequence of lines of UTF-8, and optional epilog comment.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Text<'a> {
     utf8: UTF8<'a>,
     /// A Text can have a Comment after it.
@@ -222,7 +224,7 @@ impl<'a> Text<'a> {
 // ------------------------------------------------------------------------------------
 
 /// [Item::List] wraps a sequence of `Cell<Item>`, and optional prolog and epilog comments.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct List<'a> {
     /// The contents of the Item::List.
     pub cells: &'a [Cell<Item<'a>>],
@@ -291,7 +293,7 @@ impl<'a> IntoIterator for &List<'a> {
 pub type Key<'a> = &'a str;
 
 /// aggregates the Key with the metadata.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Name<'a> {
     /// a key can have a blank line before it (before its comment)
     pub gap: bool,
@@ -305,7 +307,7 @@ pub struct Name<'a> {
 ///
 /// at the lowest level, these are stored in an array. TODO a Map view can be
 /// built (if the `alloc` feature is enabled).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Entry<'a> {
     /// the name given to the [Item].
     pub name: Name<'a>,
@@ -350,7 +352,7 @@ impl<'a> Entry<'a> {
 }
 
 /// [Item::Dict] wraps a sequence of `Cell<Entry>`, and optional prolog and epilog comments.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Dict<'a> {
     /// The contents of the Item::Dict.
     pub cells: &'a [Cell<Entry<'a>>],
@@ -419,7 +421,7 @@ impl<'a> IntoIterator for &Dict<'a> {
 // ------------------------------------------------------------------------------------
 
 /// the three Item variants
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Item<'a> {
     /// a [Text] Item holds UTF-8 content
     Text(Text<'a>),
@@ -464,7 +466,7 @@ impl<'a> From<Dict<'a>> for Item<'a> {
 /// the outermost context.
 ///
 /// similar to a [Item::Dict], but with different comments.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct File<'a> {
     /// The contents of the Item::File.
     pub cells: &'a [Cell<Entry<'a>>],

@@ -76,8 +76,9 @@ python/build: python/test
 
 rust/test: must-run-inside
 	cd rust
-	cargo test -q
-	cargo test -q --features alloc
+	echo ====== default && cargo test -q
+	echo ====== alloc && cargo test -q --features alloc
+	echo ====== rand && cargo test -q --all-features
 .PHONY: rust/test
 
 rust/doc: must-run-inside
@@ -112,7 +113,7 @@ rust/llvm-lines: must-run-inside
 rust/fmt: rust/nightly
 	cd rust
 	SRC=$$(find src macros/src -name '*.rs')
-	rustfmt +nightly --config format_code_in_doc_comments=true $$SRC tests/*.rs
+	rustfmt +nightly $$SRC tests/*.rs
 .PHONY: rust/fmt
 
 # =====================================================================================

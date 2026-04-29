@@ -13,3 +13,5 @@ RUN set -x \
  && tar -xf uv.tgz --strip-components=1 && rm uv.tgz \
  && chmod 755 rustup-init \
  && chown -R node.node /home/node/.local
+
+ENV PATH="/home/node/.cargo/bin:${PATH}"

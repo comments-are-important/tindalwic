@@ -10,29 +10,29 @@ pub(crate) struct Input<'a, F> {
     first: usize,  // first non-tab byte of current line
     assign: usize, // the `=` on current line, `MAX` means none
     end: usize,    // the newline ending current line, or `utf8.len()`
+    tabs: usize,   // indentation on this line, unless gap, then peek from next line
     report: F,
 }
 impl<'a, F> Input<'a, F>
 where
     F: FnMut(&(usize, &'static str)),
 {
-    fn tabs(&self) -> usize {
-        self.first - self.start
-    }
-
-    /// None means the UTF-8 is too big.
+    /// None means the arena is too small (or the UTF-8 is way too big).
     pub(crate) fn parse(arena: &mut Arena<'a>, utf8: &'a str, report: F) -> Option<File<'a>> {
-        if utf8.len() >= usize::MAX - 2 {
-            // make sure sentinel can't show up in data
+        if utf8.len() >= usize::MAX {
+            // MAX is a sentinel, so it also can't be a len. the wrap-around that could
+            // maybe happen without this check will almost certainly never actually
+            // occur because the arena will fill up before that.
             return None;
         }
         let mut input = Input {
             utf8,
-            line: 1,
+            line: 0,
             start: 0,
             first: 0,
             assign: 0,
-            end: usize::MAX,
+            end: usize::MAX, // will wrap to 0 inside `next`
+            tabs: 0,
             report,
         };
         input.next(0);
@@ -45,9 +45,34 @@ where
         })
     }
 
-    /// examine UTF-8 starting at offset `start` and set: `first`, `assign`, `end`.
-    /// if `start` was already past `utf8.len()` set all 4 fields to `MAX` and return
-    /// false, else leave `start` as is and return true. never sets any other field.
+    /// done with current line, so advance, skipping excessively indented lines.
+    /// usize::MAX prevents skipping. return false if finished with entire UTF-8.
+    /// use `stretch` instead for Comment and Text (where no line is excessive).
+    fn next(&mut self, indent: usize) -> bool {
+        if self.start == usize::MAX {
+            return false;
+        }
+        self.line += 1;
+        self.start = self.end.wrapping_add(1);
+        if !self.scan() {
+            return false;
+        }
+        if self.tabs <= indent {
+            return true;
+        }
+        let begin = self.line;
+        self.line += 1;
+        self.start = self.end + 1;
+        while self.scan() && self.tabs > indent {
+            self.line += 1;
+            self.start = self.end + 1;
+        }
+        (self.report)(&(begin, "excess indentation")); // TODO begin..self.line-1
+        return self.start != usize::MAX;
+    }
+
+    /// helper for `next` to update state by examining a line of UTF-8.
+    /// assumes caller has correctly set `self.start` (out-of-bounds is fine).
     fn scan(&mut self) -> bool {
         let bytes = self.utf8.as_bytes();
         let limit = bytes.len();
@@ -56,7 +81,7 @@ where
             self.start = usize::MAX;
             self.first = usize::MAX;
             self.assign = usize::MAX;
-            self.end = usize::MAX;
+            self.tabs = 0;
             return false;
         }
         while offset < limit && bytes[offset] == b'\t' {
@@ -74,12 +99,31 @@ where
             }
             offset += 1;
         }
-        assert!(
-            offset != usize::MAX,
-            "impossible: previously checked content size"
-        );
-        self.end = offset;
-        true
+        self.end = offset; // never MAX because `parse` checked length
+        if self.start != self.end {
+            self.tabs = self.first - self.start;
+            return true;
+        }
+        // found a gap, peek ahead to figure out its virtual indentation
+        offset += 1;
+        if offset < limit && bytes[offset] == b'\n' {
+            let begin = self.line;
+            self.line += 1;
+            offset += 1;
+            while offset < limit && bytes[offset] == b'\n' {
+                self.line += 1;
+                offset += 1;
+            }
+            (self.report)(&(begin, "consecutive empty lines")); // TODO begin..self.line-1
+            self.start = offset - 1;
+            self.first = offset - 1;
+            self.end = offset - 1;
+        }
+        while offset < limit && bytes[offset] == b'\t' {
+            offset += 1;
+        }
+        self.tabs = offset - 1 - self.end;
+        return true;
     }
 
     /// current line has been recognized as beginning of a Comment or Text that might
@@ -116,39 +160,14 @@ where
         while offset < limit && bytes[offset] != b'\n' {
             offset += 1;
         }
-        self.end = offset;
+        self.end = offset; // never MAX because `parse` checked length
         true
-    }
-
-    /// done with current line, so advance, skipping excessively indented lines.
-    /// pass usize::MAX to never skip. return false if finished with entire UTF-8.
-    fn next(&mut self, excess: usize) -> bool {
-        if self.start == usize::MAX {
-            return false;
-        }
-        self.line += 1;
-        self.start = self.end.wrapping_add(1);
-        if !self.scan() {
-            return false;
-        }
-        if self.tabs() <= excess {
-            return true;
-        }
-        let begin = self.line;
-        self.line += 1;
-        self.start = self.end.wrapping_add(1);
-        while self.scan() && self.tabs() > excess {
-            self.line += 1;
-            self.start = self.end.wrapping_add(1);
-        }
-        (self.report)(&(begin, "excess indentation")); // TODO mention self.line-1
-        self.start != usize::MAX
     }
 
     /// use this whenever a comment is allowed, returns None if current line does not
     /// have exactly the provided indent and prefix.
     fn comment(&mut self, indent: usize, prefix: &'static [u8]) -> Option<Comment<'a>> {
-        if self.start == usize::MAX || self.tabs() != indent {
+        if self.start == usize::MAX || self.tabs != indent {
             return None;
         }
         let bytes = self.utf8.as_bytes();
@@ -180,11 +199,13 @@ where
         let mut count = 0usize;
         while self.start != usize::MAX {
             let mut item: Option<Item<'a>> = None;
-            let tabs = self.tabs();
-            if (tabs == 0 || tabs == indent) && self.first >= self.end {
-                // empty or indentation-only is shortcut for empty text
+            if self.start == self.end || self.tabs != indent {
+                break;
+            } else if self.first >= self.end {
+                // indentation-only is the shortcut for empty text
+                // TODO too easily confused with gaps (require explicit `<>`)?
                 item = Some(self.text(indent, self.end).into());
-            } else if tabs == indent {
+            } else {
                 let len = self.end - self.first;
                 match bytes[self.first] {
                     b'#' => {
@@ -225,6 +246,7 @@ where
                             (self.report)(&(self.line, "malformed `[]` in list"));
                             self.next(indent);
                         } else {
+                            self.next(indent + 1);
                             item = Some(self.items(indent + 1, arena)?.into());
                         }
                     }
@@ -233,6 +255,7 @@ where
                             (self.report)(&(self.line, "malformed `{}` in list"));
                             self.next(indent);
                         } else {
+                            self.next(indent + 1);
                             item = Some(self.entries(indent + 1, arena)?.into());
                         }
                     }
@@ -262,16 +285,15 @@ where
         let mut count = 0usize;
         while self.start != usize::MAX {
             let mut item: Option<Item<'a>> = None;
-            let tabs = self.tabs();
-            let gap = if (tabs == 0 || tabs == indent) && self.first >= self.end {
+            let gap = self.tabs == indent && self.first == self.end;
+            if gap {
                 self.next(indent);
-                true
-            } else {
-                false
-            };
+            }
             let before = self.comment(indent, b"//");
-            if self.start == usize::MAX || tabs != indent {
-                // report if gap or before
+            if self.start == usize::MAX || self.tabs != indent {
+                if gap || before.is_some() {
+                    (self.report)(&(self.line, "gap/before but no key"));
+                }
                 break;
             }
             let mut key: &'a str = "";
@@ -350,7 +372,9 @@ where
                     item,
                 })?;
                 count += 1;
-            } // else report if gap or before or key
+            } else if gap || before.is_some() {
+                (self.report)(&(self.line, "gap/before but no item"));
+            }
         }
         let mut dict = arena.dict(count)?;
         dict.prolog = prolog;
@@ -411,22 +435,28 @@ mod tests {
     fn sub_list() {
         arena! {
             $crate = crate;
-            let mut arena = <1list,1dict>;
+            let mut arena = <3list,1dict>;
         }
-        let file = Input::parse(&mut arena, "[k]\n\tv", bail).unwrap();
+        let file = Input::parse(&mut arena, "[k]\n\t1\n\t2\n\t3", bail).unwrap();
         assert!(arena.completed().is_some());
         assert_eq!(file.cells.len(), 1);
         let entry = file.get("k").unwrap();
         let Item::List(list) = entry.item else {
             panic!("not list?");
         };
-        assert_eq!(list.cells.len(), 1);
-        let Item::Text(text) = list.cells[0].get() else {
+        assert_eq!(list.cells.len(), 3);
+        let Item::Text(one) = list.cells[0].get() else {
             panic!("not text?");
         };
-        let mut lines = text.lines();
-        assert_eq!(lines.next(), Some("v"));
-        assert_eq!(lines.next(), None);
+        assert_lines_eq!(one, "1");
+        let Item::Text(two) = list.cells[1].get() else {
+            panic!("not text?");
+        };
+        assert_lines_eq!(two, "2");
+        let Item::Text(three) = list.cells[2].get() else {
+            panic!("not text?");
+        };
+        assert_lines_eq!(three, "3");
     }
     #[test]
     fn sub_dict() {

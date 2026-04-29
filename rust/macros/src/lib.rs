@@ -15,13 +15,13 @@
 
 use proc_macro::TokenStream as RawStream;
 use proc_macro2::{Span, TokenStream, TokenTree};
-use quote::{quote, ToTokens, TokenStreamExt};
+use quote::{ToTokens, TokenStreamExt, quote};
 use std::cell::RefCell;
 use syn::parse::{Nothing, Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::token::{Brace, Bracket, Paren};
 use syn::{
-    braced, bracketed, parenthesized, parse_macro_input, Error, Ident, LitInt, Result, Token,
+    Error, Ident, LitInt, Result, Token, braced, bracketed, parenthesized, parse_macro_input,
 };
 
 // ================================================================== dependency rename

@@ -55,6 +55,12 @@ impl<'a> Arena<'a> {
         let entries = Bump::wrap(entries);
         Arena { items, entries }
     }
+    pub fn item_slots(&self) -> usize {
+        self.items.done - self.items.next
+    }
+    pub fn entry_slots(&self) -> usize {
+        self.entries.done - self.entries.next
+    }
     pub fn completed(&self) -> Option<()> {
         if self.items.done == 0 && self.entries.done == 0 {
             Some(())
@@ -115,7 +121,6 @@ pub struct Error<'p> {
 pub struct Path<'p> {
     pub branches: &'p [Branch<'p>],
 }
-
 impl<'p> Path<'p> {
     pub fn wrap(branches: &'p [Branch<'p>]) -> Self {
         Path { branches }

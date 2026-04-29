@@ -78,10 +78,10 @@ impl<'o, 'f> Output<'o, 'f> {
         self.comment("#", &text.epilog)
     }
     fn list_in_list<'a>(&mut self, list: &List<'a>) -> Result {
-        self.comment("#", &list.prolog)?;
         self.indent()?;
         self.out.write_str("[]\n")?;
         self.indent += 1;
+        self.comment("#", &list.prolog)?;
         for cell in list.cells {
             self.item_in_list(cell)?;
         }
@@ -94,6 +94,7 @@ impl<'o, 'f> Output<'o, 'f> {
         self.out.write_str(key)?;
         self.out.write_str("]\n")?;
         self.indent += 1;
+        self.comment("#", &list.prolog)?;
         for cell in list.cells {
             self.item_in_list(cell)?;
         }
@@ -104,6 +105,7 @@ impl<'o, 'f> Output<'o, 'f> {
         self.indent()?;
         self.out.write_str("{}\n")?;
         self.indent += 1;
+        self.comment("#", &dict.prolog)?;
         for cell in dict.cells {
             self.entry_in_dict(cell)?;
         }
@@ -116,6 +118,7 @@ impl<'o, 'f> Output<'o, 'f> {
         self.out.write_str(key)?;
         self.out.write_str("}\n")?;
         self.indent += 1;
+        self.comment("#", &dict.prolog)?;
         for cell in dict.cells {
             self.entry_in_dict(cell)?;
         }

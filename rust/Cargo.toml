@@ -11,8 +11,10 @@ authors = ["Comments Are Important <comments.are.important@gmail.com>"]
 
 [features]
 alloc = []
+rand = ["dep:rand","alloc"]
 
 [dependencies]
+rand = { version = "0.10.1", optional = true }
 tindalwic-macros = { path = "./macros" }
 
 [dev-dependencies]

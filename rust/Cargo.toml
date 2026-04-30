@@ -11,23 +11,26 @@ authors = ["Comments Are Important <comments.are.important@gmail.com>"]
 
 [features]
 alloc = []
-rand = ["dep:rand","alloc"]
 
 [dependencies]
-rand = { version = "0.10.1", optional = true }
 tindalwic-macros = { path = "./macros" }
 
 [dev-dependencies]
+criterion = { version = "0.8.2", features = ["html_reports"] }
 markdown = "1.0.0"
-regex = "1.12.3"
+rand = "0.10.1"
 trybuild = "1.0.116"
 
 [package.metadata.docs.rs]
 all-features = true
 
 [workspace.lints.rust]
+missing_docs = "deny"
 unused = "deny"
-missing_docs = "warn"
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "rand"
+harness = false

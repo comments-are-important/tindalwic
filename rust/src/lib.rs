@@ -28,8 +28,52 @@ mod alloc;
 mod fmt;
 pub mod internals; // macro generated code needs access.
 mod parse;
-#[cfg(feature = "rand")]
-mod rand;
+
+/// hopefully change to `pub use core::range::Range` when that becomes stable.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Range<Idx> {
+    /// The lower bound of the range (inclusive).
+    pub start: Idx,
+    /// The upper bound of the range (exclusive).
+    pub end: Idx,
+}
+impl<Idx> From<core::ops::Range<Idx>> for Range<Idx> {
+    fn from(r: core::ops::Range<Idx>) -> Self {
+        Range {
+            start: r.start,
+            end: r.end,
+        }
+    }
+}
+impl<Idx> From<Range<Idx>> for core::ops::Range<Idx> {
+    fn from(value: Range<Idx>) -> Self {
+        value.start..value.end
+    }
+}
+
+/// parsing problem
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Error {
+    /// span of the problem
+    pub lines: Range<usize>,
+    /// English description of the problem
+    pub message: &'static str,
+}
+impl core::error::Error for Error {}
+impl Error {
+    /// make an Error with an arbitrary span of lines.
+    pub fn new(lines: impl Into<Range<usize>>, message: &'static str) -> Self {
+        Error {
+            lines: lines.into(),
+            message,
+        }
+    }
+    /// make an Error for a single line.
+    pub fn at(line: usize, message: &'static str) -> Self {
+        Error::new(line..line + 1, message)
+    }
+}
 
 /// an iter type to enable for-loops for List, Dict, and File.
 #[derive(Clone, Debug)]
@@ -476,19 +520,6 @@ pub struct File<'a> {
     pub prolog: Option<Comment<'a>>,
 }
 impl<'a> File<'a> {
-    /// stub for decoding from tindalwic UTF-8
-    pub fn parse<F>(content: &'a str, then: F)
-    where
-        F: FnOnce(File),
-    {
-        let items = Item::array::<15>();
-        let entries = Entry::array::<15>();
-        let mut arena = internals::Arena::wrap(&items, &entries);
-        let file = parse::Input::parse(&mut arena, content, |(line, message)| {
-            panic!("{line}:{message}")
-        });
-        (then)(file.unwrap());
-    }
     /// Return a zero-copy instance using the provided cells (and no comments).
     pub fn wrap(cells: &'a [Cell<Entry<'a>>]) -> Self {
         File {

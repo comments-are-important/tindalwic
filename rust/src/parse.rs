@@ -15,7 +15,7 @@ pub(crate) struct Input<'a, F> {
 }
 impl<'a, F> Input<'a, F>
 where
-    F: FnMut(&(usize, &'static str)),
+    F: FnMut(Error),
 {
     /// None means the arena is too small (or the UTF-8 is way too big).
     pub(crate) fn parse(arena: &mut Arena<'a>, utf8: &'a str, report: F) -> Option<File<'a>> {
@@ -67,7 +67,7 @@ where
             self.line += 1;
             self.start = self.end + 1;
         }
-        (self.report)(&(begin, "excess indentation")); // TODO begin..self.line-1
+        (self.report)(Error::new(begin..self.line, "excess indentation"));
         return self.start != usize::MAX;
     }
 
@@ -114,7 +114,7 @@ where
                 self.line += 1;
                 offset += 1;
             }
-            (self.report)(&(begin, "consecutive empty lines")); // TODO begin..self.line-1
+            (self.report)(Error::new(begin..self.line, "consecutive empty lines"));
             self.start = offset - 1;
             self.first = offset - 1;
             self.end = offset - 1;
@@ -209,11 +209,11 @@ where
                 let len = self.end - self.first;
                 match bytes[self.first] {
                     b'#' => {
-                        (self.report)(&(self.line, "stray `#` comment"));
+                        (self.report)(Error::at(self.line, "stray `#` comment"));
                         self.comment(indent, b"#"); // read and throw away
                     }
                     b'/' => {
-                        (self.report)(&(
+                        (self.report)(Error::at(
                             self.line,
                             if len < 2 || bytes[self.first + 1] != b'/' {
                                 "malformed // comment"
@@ -225,7 +225,7 @@ where
                     }
                     b'<' => {
                         if len != 2 || bytes[self.end - 1] != b'>' {
-                            (self.report)(&(self.line, "malformed `<>` in list"));
+                            (self.report)(Error::at(self.line, "malformed `<>` in list"));
                             self.next(indent);
                         } else {
                             let end = self.end;
@@ -243,7 +243,7 @@ where
                     }
                     b'[' => {
                         if len != 2 || bytes[self.end - 1] != b']' {
-                            (self.report)(&(self.line, "malformed `[]` in list"));
+                            (self.report)(Error::at(self.line, "malformed `[]` in list"));
                             self.next(indent);
                         } else {
                             self.next(indent + 1);
@@ -252,7 +252,7 @@ where
                     }
                     b'{' => {
                         if len != 2 || bytes[self.end - 1] != b'}' {
-                            (self.report)(&(self.line, "malformed `{}` in list"));
+                            (self.report)(Error::at(self.line, "malformed `{}` in list"));
                             self.next(indent);
                         } else {
                             self.next(indent + 1);
@@ -292,7 +292,7 @@ where
             let before = self.comment(indent, b"//");
             if self.start == usize::MAX || self.tabs != indent {
                 if gap || before.is_some() {
-                    (self.report)(&(self.line, "gap/before but no key"));
+                    (self.report)(Error::at(self.line, "gap/before but no key"));
                 }
                 break;
             }
@@ -300,11 +300,11 @@ where
             let len = self.end - self.first;
             match bytes[self.first] {
                 b'#' => {
-                    (self.report)(&(self.line, "stray `#` comment"));
+                    (self.report)(Error::at(self.line, "stray `#` comment"));
                     self.comment(indent, b"#"); // read and throw away
                 }
                 b'/' => {
-                    (self.report)(&(
+                    (self.report)(Error::at(
                         self.line,
                         if len < 2 || bytes[self.first + 1] != b'/' {
                             "malformed // comment"
@@ -316,7 +316,7 @@ where
                 }
                 b'<' => {
                     if len < 2 || bytes[self.end - 1] != b'>' {
-                        (self.report)(&(self.line, "malformed `<key>` in dict"));
+                        (self.report)(Error::at(self.line, "malformed `<key>` in dict"));
                         self.next(indent);
                     } else {
                         key = &self.utf8[self.first + 1..self.end - 1];
@@ -335,7 +335,7 @@ where
                 }
                 b'[' => {
                     if len < 2 || bytes[self.end - 1] != b']' {
-                        (self.report)(&(self.line, "malformed `[key]` in dict"));
+                        (self.report)(Error::at(self.line, "malformed `[key]` in dict"));
                         self.next(indent);
                     } else {
                         key = &self.utf8[self.first + 1..self.end - 1];
@@ -345,7 +345,7 @@ where
                 }
                 b'{' => {
                     if len < 2 || bytes[self.end - 1] != b'}' {
-                        (self.report)(&(self.line, "malformed `{key}` in dict"));
+                        (self.report)(Error::at(self.line, "malformed `{key}` in dict"));
                         self.next(indent);
                     } else {
                         key = &self.utf8[self.first + 1..self.end - 1];
@@ -354,12 +354,12 @@ where
                     }
                 }
                 b'\t' => {
-                    (self.report)(&(self.line, "excess indentation?"));
+                    (self.report)(Error::at(self.line, "excess indentation?"));
                     self.next(indent);
                 }
                 _ => {
                     if self.assign == usize::MAX {
-                        (self.report)(&(self.line, "missing `=` in dict"))
+                        (self.report)(Error::at(self.line, "missing `=` in dict"))
                     } else {
                         key = &self.utf8[self.first..self.assign];
                         item = Some(self.text(indent, self.assign + 1).into());
@@ -373,7 +373,7 @@ where
                 })?;
                 count += 1;
             } else if gap || before.is_some() {
-                (self.report)(&(self.line, "gap/before but no item"));
+                (self.report)(Error::at(self.line, "gap/before but no item"));
             }
         }
         let mut dict = arena.dict(count)?;
@@ -389,9 +389,8 @@ where
 mod tests {
     use super::*;
 
-    fn bail(args: &(usize, &str)) {
-        let (line, message) = args;
-        panic!("{line}: {message}");
+    fn bail(error: Error) {
+        panic!("{error}");
     }
 
     macro_rules! assert_lines_eq {

@@ -105,6 +105,9 @@ impl<'a> Arena<'a> {
         let dict = self.dict(count)?;
         self.keyed(key, dict.into())
     }
+    pub fn parse_or_panic(&mut self, content: &'a str) -> Option<File<'a>> {
+        parse::Input::parse(self, content, |error| panic!("{error}"))
+    }
 }
 
 #[derive(Debug)]

@@ -1,6 +1,23 @@
 use super::*;
 
 use core::fmt::{Display, Formatter, Result, Write};
+use core::write;
+
+impl Display for Error {
+    fn fmt(&self, out: &mut Formatter<'_>) -> Result {
+        if self.lines.start + 1 == self.lines.end {
+            write!(out, "{}: {}", self.lines.start, self.message)
+        } else {
+            write!(
+                out,
+                "{}-{}: {}",
+                self.lines.start,
+                self.lines.end - 1,
+                self.message
+            )
+        }
+    }
+}
 
 struct Output<'o, 'f> {
     out: &'o mut Formatter<'f>,

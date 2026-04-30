@@ -1,14 +1,15 @@
-//extern crate alloc;
-#![allow(unused)]
+#![allow(missing_docs)]
 
-use super::internals::Arena;
-use super::{Comment, Dict, Entry, File, Item, List, Name, Text};
+use criterion::{criterion_group, criterion_main, Criterion};
+use tindalwic::internals::Arena;
+use tindalwic::{arena,Comment, Dict, Entry, File, Item, List, Name, Text};
 use rand::distr::uniform::{UniformSampler, UniformUsize};
-use rand::{Rng, RngExt};
+use rand::{Rng, RngExt, SeedableRng};
+use rand::rngs::SmallRng;
 
 /// generate data
 pub struct Random<'a, 'r, R: Rng + ?Sized> {
-    pub utf8: &'a str,
+    pub utf8: &'a str, // TODO use a random String instead of asking caller
     pub arena: &'r mut Arena<'a>,
     pub rng: &'r mut R,
     pub width: UniformUsize,
@@ -32,19 +33,17 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
         }
     }
     fn item(&mut self, depth: usize) -> Option<Item<'a>> {
-        match if depth >= self.deepest {
+        let kind = if depth >= self.deepest {
             0
         } else {
             self.rng.random_range(0..3)
-        } {
+        };
+        match kind {
             0 => Some(Item::Text(Text::wrap(self.utf8(true)))),
             1 => Some(Item::List(self.list(depth)?)),
             2 => Some(Item::Dict(self.dict(depth)?)),
             _ => unreachable!(),
         }
-    }
-    fn width(&mut self, limit: usize) -> usize {
-        self.width.sample(self.rng).min(limit)
     }
     fn list(&mut self, depth: usize) -> Option<List<'a>> {
         let mut count = 0;
@@ -96,32 +95,12 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    extern crate alloc;
-    extern crate std;
-    use super::Random;
-    use crate::parse::Input;
-    use crate::{File, arena};
-    use alloc::string::ToString;
-    use rand::distr::uniform::{UniformSampler, UniformUsize};
-    use rand::rngs::SmallRng;
-    use rand::{RngExt, SeedableRng};
-    use std::eprintln;
-
-    fn bail(args: &(usize, &str)) {
-        let (line, message) = args;
-        panic!("{line}: {message}");
-    }
-
-    #[test]
-    fn zzz() {for _ in 0..800000{
+fn criterion_benchmark(c: &mut Criterion) {
+    c.bench_function("round-trip", |b| b.iter(|| {
         arena! {
-            $crate = crate;
             let mut original_arena = <50list,50dict>;
         }
         let seed: u64 = rand::rng().random();
-        eprintln!("seed = {}", seed);
         let mut rng = SmallRng::seed_from_u64(seed);
         let mut random = Random {
             utf8: "abcdefghijklmnopqrstuvwxyz",
@@ -132,14 +111,13 @@ mod tests {
         };
         let original: File = random.file();
         arena! {
-            $crate = crate;
             let mut parsed_arena = <50list,50dict>;
         }
         let original_string = original.to_string();
-        let parsed = Input::parse(&mut parsed_arena, &original_string, bail).unwrap();
-        if original != parsed {
-            eprintln!("======= original\n{original}\n======= parsed\n{parsed}");
-        }
-        assert_eq!(original, parsed);
-    }}
+        let parsed = parsed_arena.parse_or_panic(&original_string).unwrap();
+        assert_eq!(original, parsed, "failed round-trip:\n===\n{original}\n===\n{parsed}");
+    }));
 }
+
+criterion_group!(benches, criterion_benchmark);
+criterion_main!(benches);

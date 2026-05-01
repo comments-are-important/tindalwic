@@ -269,17 +269,17 @@ impl<'a> Text<'a> {
 
 /// [Item::List] wraps a sequence of `Cell<Item>`, and optional prolog and epilog comments.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct List<'a> {
+pub struct List<'a, 'store> {
     /// The contents of the Item::List.
-    pub cells: &'a [Cell<Item<'a>>],
+    pub cells: &'store [Cell<Item<'a, 'store>>],
     /// A List can have an introductory Comment.
     pub prolog: Option<Comment<'a>>,
     /// A List can have a Comment after it.
     pub epilog: Option<Comment<'a>>,
 }
-impl<'a> List<'a> {
+impl<'a, 'store> List<'a, 'store> {
     /// Return a zero-copy instance using the provided cells (and no comments).
-    pub fn wrap(cells: &'a [Cell<Item<'a>>]) -> Self {
+    pub fn wrap(cells: &'store [Cell<Item<'a, 'store>>]) -> Self {
         List {
             cells,
             prolog: None,
@@ -300,30 +300,30 @@ impl<'a> List<'a> {
     }
     /// return None if index is out of bounds, else Some(item at that index).
     /// same as Self::get, provided for parity with Dict::at and File::at
-    pub fn at(&self, index: usize) -> Option<Item<'a>> {
+    pub fn at(&self, index: usize) -> Option<Item<'a, 'store>> {
         self.cells.get(index).map(Cell::get)
     }
     /// iterate over each item.
-    pub fn iter(&self) -> impl Iterator<Item = Item<'a>> {
+    pub fn iter(&self) -> impl Iterator<Item = Item<'a, 'store>> {
         self.cells.iter().map(Cell::get)
     }
     /// returns Option of the item at the given index.
-    pub fn get(&self, index: usize) -> Option<Item<'a>> {
+    pub fn get(&self, index: usize) -> Option<Item<'a, 'store>> {
         self.at(index)
     }
 }
-impl<'a> IntoIterator for List<'a> {
-    type Item = Item<'a>;
-    type IntoIter = CellIter<'a, Self::Item>;
+impl<'a, 'store> IntoIterator for List<'a, 'store> {
+    type Item = Item<'a, 'store>;
+    type IntoIter = CellIter<'store, Self::Item>;
     fn into_iter(self) -> Self::IntoIter {
         CellIter {
             inner: self.cells.iter(),
         }
     }
 }
-impl<'a> IntoIterator for &List<'a> {
-    type Item = Item<'a>;
-    type IntoIter = CellIter<'a, Self::Item>;
+impl<'a, 'store> IntoIterator for &List<'a, 'store> {
+    type Item = Item<'a, 'store>;
+    type IntoIter = CellIter<'store, Self::Item>;
     fn into_iter(self) -> Self::IntoIter {
         CellIter {
             inner: self.cells.iter(),
@@ -352,14 +352,14 @@ pub struct Name<'a> {
 /// at the lowest level, these are stored in an array. TODO a Map view can be
 /// built (if the `alloc` feature is enabled).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Entry<'a> {
+pub struct Entry<'a, 'store> {
     /// the name given to the [Item].
     pub name: Name<'a>,
     /// the item associated to the [Name]
-    pub item: Item<'a>,
+    pub item: Item<'a, 'store>,
 }
-impl<'a> Entry<'a> {
-    fn blank<'b>(_: usize) -> Cell<Entry<'b>> {
+impl<'a, 'store> Entry<'a, 'store> {
+    fn blank<'b>(_: usize) -> Cell<Entry<'b, 'store>> {
         Cell::new(Entry {
             name: Name {
                 key: "",
@@ -376,11 +376,11 @@ impl<'a> Entry<'a> {
         })
     }
     /// Make a fixed-size array of cells on the stack.
-    pub fn array<const N: usize>() -> [Cell<Entry<'a>>; N] {
+    pub fn array<const N: usize>() -> [Cell<Entry<'a, 'store>>; N] {
         ::core::array::from_fn::<_, N, _>(Entry::blank)
     }
     /// convert a key and an item into an entry for a Dict.
-    pub fn wrap(key: Key<'a>, item: Item<'a>) -> Self {
+    pub fn wrap(key: Key<'a>, item: Item<'a, 'store>) -> Self {
         Entry {
             name: Name {
                 key,
@@ -390,24 +390,24 @@ impl<'a> Entry<'a> {
             item,
         }
     }
-    fn position(cells: &'a [Cell<Entry<'a>>], key: Key<'_>) -> Option<usize> {
+    fn position(cells: &'store [Cell<Entry<'a, 'store>>], key: Key<'_>) -> Option<usize> {
         cells.iter().position(|x| x.get().name.key == key)
     }
 }
 
 /// [Item::Dict] wraps a sequence of `Cell<Entry>`, and optional prolog and epilog comments.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Dict<'a> {
+pub struct Dict<'a, 'store> {
     /// The contents of the Item::Dict.
-    pub cells: &'a [Cell<Entry<'a>>],
+    pub cells: &'store [Cell<Entry<'a, 'store>>],
     /// A Dict can have an introductory Comment.
     pub prolog: Option<Comment<'a>>,
     /// A Dict can have a Comment after it.
     pub epilog: Option<Comment<'a>>,
 }
-impl<'a> Dict<'a> {
+impl<'a, 'store> Dict<'a, 'store> {
     /// Return a zero-copy instance using the provided cells (and no comments).
-    pub fn wrap(cells: &'a [Cell<Entry<'a>>]) -> Self {
+    pub fn wrap(cells: &'store [Cell<Entry<'a, 'store>>]) -> Self {
         Dict {
             cells,
             prolog: None,
@@ -427,11 +427,11 @@ impl<'a> Dict<'a> {
         !(self.is_empty() && self.prolog.is_none() && self.epilog.is_none())
     }
     /// return None if index is out of bounds, else Some(entry at that index).
-    pub fn at(&self, index: usize) -> Option<Entry<'a>> {
+    pub fn at(&self, index: usize) -> Option<Entry<'a, 'store>> {
         self.cells.get(index).map(Cell::get)
     }
     /// iterate over each entry.
-    pub fn iter(&self) -> impl Iterator<Item = Entry<'a>> {
+    pub fn iter(&self) -> impl Iterator<Item = Entry<'a, 'store>> {
         self.cells.iter().map(Cell::get)
     }
     /// return Some(index of entry) of the first one matching the given key.
@@ -439,22 +439,22 @@ impl<'a> Dict<'a> {
         Entry::position(self.cells, key)
     }
     /// returns Option of the entry with the given key.
-    pub fn get(&self, key: Key<'_>) -> Option<Entry<'a>> {
+    pub fn get(&self, key: Key<'_>) -> Option<Entry<'a, 'store>> {
         Entry::position(self.cells, key).map(|i| self.cells[i].get())
     }
 }
-impl<'a> IntoIterator for Dict<'a> {
-    type Item = Entry<'a>;
-    type IntoIter = CellIter<'a, Self::Item>;
+impl<'a, 'store> IntoIterator for Dict<'a, 'store> {
+    type Item = Entry<'a, 'store>;
+    type IntoIter = CellIter<'store, Self::Item>;
     fn into_iter(self) -> Self::IntoIter {
         CellIter {
             inner: self.cells.iter(),
         }
     }
 }
-impl<'a> IntoIterator for &Dict<'a> {
-    type Item = Entry<'a>;
-    type IntoIter = CellIter<'a, Self::Item>;
+impl<'a, 'store> IntoIterator for &Dict<'a, 'store> {
+    type Item = Entry<'a, 'store>;
+    type IntoIter = CellIter<'store, Self::Item>;
     fn into_iter(self) -> Self::IntoIter {
         CellIter {
             inner: self.cells.iter(),
@@ -466,16 +466,16 @@ impl<'a> IntoIterator for &Dict<'a> {
 
 /// the three Item variants
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Item<'a> {
+pub enum Item<'a, 'store> {
     /// a [Text] Item holds UTF-8 content
     Text(Text<'a>),
     /// a [List] Item is a linear array of [Item]
-    List(List<'a>),
+    List(List<'a, 'store>),
     /// a [Dict] Item is an associative array of [Entry]
-    Dict(Dict<'a>),
+    Dict(Dict<'a, 'store>),
 }
-impl<'a> Item<'a> {
-    fn blank<'b>(_: usize) -> Cell<Item<'b>> {
+impl<'a, 'store> Item<'a, 'store> {
+    fn blank<'b>(_: usize) -> Cell<Item<'b, 'store>> {
         Cell::new(Item::Text(Text {
             utf8: UTF8 {
                 slice: "",
@@ -485,22 +485,22 @@ impl<'a> Item<'a> {
         }))
     }
     /// Make a fixed-size array of cells on the stack.
-    pub fn array<const N: usize>() -> [Cell<Item<'a>>; N] {
+    pub fn array<const N: usize>() -> [Cell<Item<'a, 'store>>; N] {
         ::core::array::from_fn::<_, N, _>(Item::blank)
     }
 }
-impl<'a> From<Text<'a>> for Item<'a> {
+impl<'a, 'store> From<Text<'a>> for Item<'a, 'store> {
     fn from(value: Text<'a>) -> Self {
         Item::Text(value)
     }
 }
-impl<'a> From<List<'a>> for Item<'a> {
-    fn from(value: List<'a>) -> Self {
+impl<'a, 'store> From<List<'a, 'store>> for Item<'a, 'store> {
+    fn from(value: List<'a, 'store>) -> Self {
         Item::List(value)
     }
 }
-impl<'a> From<Dict<'a>> for Item<'a> {
-    fn from(value: Dict<'a>) -> Self {
+impl<'a, 'store> From<Dict<'a, 'store>> for Item<'a, 'store> {
+    fn from(value: Dict<'a, 'store>) -> Self {
         Item::Dict(value)
     }
 }
@@ -511,17 +511,17 @@ impl<'a> From<Dict<'a>> for Item<'a> {
 ///
 /// similar to a [Item::Dict], but with different comments.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct File<'a> {
+pub struct File<'a, 'store> {
     /// The contents of the Item::File.
-    pub cells: &'a [Cell<Entry<'a>>],
+    pub cells: &'store [Cell<Entry<'a, 'store>>],
     /// A File can start with a Unix `#!` Comment.
     pub hashbang: Option<Comment<'a>>,
     /// A File can have an introductory Comment.
     pub prolog: Option<Comment<'a>>,
 }
-impl<'a> File<'a> {
+impl<'a, 'store> File<'a, 'store> {
     /// Return a zero-copy instance using the provided cells (and no comments).
-    pub fn wrap(cells: &'a [Cell<Entry<'a>>]) -> Self {
+    pub fn wrap(cells: &'store [Cell<Entry<'a, 'store>>]) -> Self {
         File {
             cells,
             hashbang: None,
@@ -541,11 +541,11 @@ impl<'a> File<'a> {
         !(self.is_empty() && self.hashbang.is_none() && self.prolog.is_none())
     }
     /// return None if index is out of bounds, else Some(entry at that index).
-    pub fn at(&self, index: usize) -> Option<Entry<'a>> {
+    pub fn at(&self, index: usize) -> Option<Entry<'a, 'store>> {
         self.cells.get(index).map(Cell::get)
     }
     /// iterate over each entry.
-    pub fn iter(&self) -> impl Iterator<Item = Entry<'a>> {
+    pub fn iter(&self) -> impl Iterator<Item = Entry<'a, 'store>> {
         self.cells.iter().map(Cell::get)
     }
     /// return Some(index of entry) of the first one matching the given key.
@@ -553,22 +553,22 @@ impl<'a> File<'a> {
         Entry::position(self.cells, key)
     }
     /// returns Option of the entry with the given key.
-    pub fn get(&self, key: Key<'_>) -> Option<Entry<'a>> {
+    pub fn get(&self, key: Key<'_>) -> Option<Entry<'a, 'store>> {
         Entry::position(self.cells, key).map(|i| self.cells[i].get())
     }
 }
-impl<'a> IntoIterator for File<'a> {
-    type Item = Entry<'a>;
-    type IntoIter = CellIter<'a, Self::Item>;
+impl<'a, 'store> IntoIterator for File<'a, 'store> {
+    type Item = Entry<'a, 'store>;
+    type IntoIter = CellIter<'store, Self::Item>;
     fn into_iter(self) -> Self::IntoIter {
         CellIter {
             inner: self.cells.iter(),
         }
     }
 }
-impl<'a> IntoIterator for &File<'a> {
-    type Item = Entry<'a>;
-    type IntoIter = CellIter<'a, Self::Item>;
+impl<'a, 'store> IntoIterator for &File<'a, 'store> {
+    type Item = Entry<'a, 'store>;
+    type IntoIter = CellIter<'store, Self::Item>;
     fn into_iter(self) -> Self::IntoIter {
         CellIter {
             inner: self.cells.iter(),

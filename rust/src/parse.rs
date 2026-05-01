@@ -18,7 +18,11 @@ where
     F: FnMut(Error),
 {
     /// None means the arena is too small (or the UTF-8 is way too big).
-    pub(crate) fn parse(arena: &mut Arena<'a>, utf8: &'a str, report: F) -> Option<File<'a>> {
+    pub(crate) fn parse<'store>(
+        arena: &mut Arena<'a, 'store>,
+        utf8: &'a str,
+        report: F,
+    ) -> Option<File<'a, 'store>> {
         if utf8.len() >= usize::MAX {
             // MAX is a sentinel, so it also can't be a len. the wrap-around that could
             // maybe happen without this check will almost certainly never actually
@@ -193,12 +197,16 @@ where
 
     /// previous line opened a list context, so parse all the items in it.
     /// None means insufficient space in Arena.
-    fn items(&mut self, indent: usize, arena: &mut Arena<'a>) -> Option<List<'a>> {
+    fn items<'store>(
+        &mut self,
+        indent: usize,
+        arena: &mut Arena<'a, 'store>,
+    ) -> Option<List<'a, 'store>> {
         let bytes = self.utf8.as_bytes();
         let prolog = self.comment(indent, b"#");
         let mut count = 0usize;
         while self.start != usize::MAX {
-            let mut item: Option<Item<'a>> = None;
+            let mut item: Option<Item<'a, 'store>> = None;
             if self.start == self.end || self.tabs != indent {
                 break;
             } else if self.first >= self.end {
@@ -279,12 +287,16 @@ where
 
     /// previous line opened a dict context, so parse all the entries in it.
     /// None means insufficient space in Arena.
-    fn entries(&mut self, indent: usize, arena: &mut Arena<'a>) -> Option<Dict<'a>> {
+    fn entries<'store>(
+        &mut self,
+        indent: usize,
+        arena: &mut Arena<'a, 'store>,
+    ) -> Option<Dict<'a, 'store>> {
         let bytes = self.utf8.as_bytes();
         let prolog = self.comment(indent, b"#");
         let mut count = 0usize;
         while self.start != usize::MAX {
-            let mut item: Option<Item<'a>> = None;
+            let mut item: Option<Item<'a, 'store>> = None;
             let gap = self.tabs == indent && self.first == self.end;
             if gap {
                 self.next(indent);

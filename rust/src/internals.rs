@@ -2,13 +2,13 @@
 
 use super::*;
 
-struct Bump<'a, T> {
-    cells: &'a [Cell<T>],
+struct Bump<'store, T> {
+    cells: &'store [Cell<T>],
     next: usize,
     done: usize,
 }
-impl<'a, T> Bump<'a, T> {
-    fn wrap(cells: &'a [Cell<T>]) -> Self {
+impl<'store, T> Bump<'store, T> {
+    fn wrap(cells: &'store [Cell<T>]) -> Self {
         Bump {
             cells,
             next: 0,
@@ -24,7 +24,7 @@ impl<'a, T> Bump<'a, T> {
         self.next = next + 1;
         Some(())
     }
-    fn finish(&mut self, count: usize) -> Option<&'a [Cell<T>]> {
+    fn finish(&mut self, count: usize) -> Option<&'store [Cell<T>]> {
         if self.next < count || self.next > self.done {
             return None;
         }
@@ -45,12 +45,15 @@ impl<'a, T> Bump<'a, T> {
     }
 }
 
-pub struct Arena<'a> {
-    items: Bump<'a, Item<'a>>,
-    entries: Bump<'a, Entry<'a>>,
+pub struct Arena<'a, 'store> {
+    items: Bump<'store, Item<'a, 'store>>,
+    entries: Bump<'store, Entry<'a, 'store>>,
 }
-impl<'a> Arena<'a> {
-    pub fn wrap(items: &'a [Cell<Item<'a>>], entries: &'a [Cell<Entry<'a>>]) -> Self {
+impl<'a, 'store> Arena<'a, 'store> {
+    pub fn wrap(
+        items: &'store [Cell<Item<'a, 'store>>],
+        entries: &'store [Cell<Entry<'a, 'store>>],
+    ) -> Self {
         let items = Bump::wrap(items);
         let entries = Bump::wrap(entries);
         Arena { items, entries }
@@ -68,19 +71,19 @@ impl<'a> Arena<'a> {
             None
         }
     }
-    pub fn list(&mut self, count: usize) -> Option<List<'a>> {
+    pub fn list(&mut self, count: usize) -> Option<List<'a, 'store>> {
         Some(List::wrap(self.items.finish(count)?))
     }
-    pub fn dict(&mut self, count: usize) -> Option<Dict<'a>> {
+    pub fn dict(&mut self, count: usize) -> Option<Dict<'a, 'store>> {
         Some(Dict::wrap(self.entries.finish(count)?))
     }
-    pub fn item(&mut self, item: Item<'a>) -> Option<()> {
+    pub fn item(&mut self, item: Item<'a, 'store>) -> Option<()> {
         self.items.push(item)
     }
-    pub fn keyed(&mut self, key: &'a str, item: Item<'a>) -> Option<()> {
+    pub fn keyed(&mut self, key: &'a str, item: Item<'a, 'store>) -> Option<()> {
         self.entry(Entry::wrap(key, item))
     }
-    pub fn entry(&mut self, entry: Entry<'a>) -> Option<()> {
+    pub fn entry(&mut self, entry: Entry<'a, 'store>) -> Option<()> {
         self.entries.push(entry)
     }
     pub fn text_item(&mut self, utf8: &'a str) -> Option<()> {
@@ -105,7 +108,7 @@ impl<'a> Arena<'a> {
         let dict = self.dict(count)?;
         self.keyed(key, dict.into())
     }
-    pub fn parse_or_panic(&mut self, content: &'a str) -> Option<File<'a>> {
+    pub fn parse_or_panic(&mut self, content: &'a str) -> Option<File<'a, 'store>> {
         parse::Input::parse(self, content, |error| panic!("{error}"))
     }
 }
@@ -140,25 +143,28 @@ impl<'p> Path<'p> {
             message,
         }
     }
-    pub fn text<'a>(&self, item: &Item<'a>) -> Result<Text<'a>, Error<'p>> {
+    pub fn text<'a, 'store>(&self, item: &Item<'a, 'store>) -> Result<Text<'a>, Error<'p>> {
         let Item::Text(text) = item else {
             return Err(self.error_full("path does not end at Text"));
         };
         Ok(*text)
     }
-    pub fn list<'a>(&self, item: &Item<'a>) -> Result<List<'a>, Error<'p>> {
+    pub fn list<'a, 'store>(&self, item: &Item<'a, 'store>) -> Result<List<'a, 'store>, Error<'p>> {
         let Item::List(list) = item else {
             return Err(self.error_full("path does not end at List"));
         };
         Ok(*list)
     }
-    pub fn dict<'a>(&self, item: &Item<'a>) -> Result<Dict<'a>, Error<'p>> {
+    pub fn dict<'a, 'store>(&self, item: &Item<'a, 'store>) -> Result<Dict<'a, 'store>, Error<'p>> {
         let Item::Dict(dict) = item else {
             return Err(self.error_full("path does not end at Dict"));
         };
         Ok(*dict)
     }
-    pub fn item_cell<'a>(&self, item: &Item<'a>) -> Result<&'a Cell<Item<'a>>, Error<'p>> {
+    pub fn item_cell<'a, 'store>(
+        &self,
+        item: &Item<'a, 'store>,
+    ) -> Result<&'a Cell<Item<'a, 'store>>, Error<'p>> {
         if self.branches.is_empty() {
             return Err(self.error_full("empty path can't be resolved"));
         }
@@ -199,7 +205,10 @@ impl<'p> Path<'p> {
         }
         Err(self.error_full("path did not end at an item inside a list"))
     }
-    pub fn entry_cell<'a>(&self, item: &Item<'a>) -> Result<&'a Cell<Entry<'a>>, Error<'p>> {
+    pub fn entry_cell<'a, 'store>(
+        &self,
+        item: &Item<'a, 'store>,
+    ) -> Result<&'a Cell<Entry<'a, 'store>>, Error<'p>> {
         if self.branches.is_empty() {
             return Err(self.error_full("empty path can't be resolved"));
         }

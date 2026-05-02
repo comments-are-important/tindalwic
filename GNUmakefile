@@ -79,6 +79,7 @@ rust/test: must-run-inside
 	echo ====== default && cargo test -q
 	echo ====== alloc && cargo test -q --features alloc
 	echo ====== rand && cargo test -q --all-features
+	echo ====== bench && cargo bench
 .PHONY: rust/test
 
 rust/doc: must-run-inside
@@ -99,7 +100,8 @@ rust/api: rust/nightly
 	mkdir -p target
 	cargo public-api -sss --all-features --target-dir target/public-api \
 	  | grep -v '^impl' \
-	  | sed -E -e 's=^pub (enum|fn|const fn|mod|struct|use|type) (.*)=|\2|\1|=' \
+	  | sed -E -e 's=^#.non_exhaustive. ==' \
+	  | sed -E -e 's=^pub (enum|fn|const fn|mod|struct|use|type) (&?)(.*)=|\3|\2\1|=' \
 	  | sed -E -e 's=^pub (.*)=|\1|property|=' \
 	  | LC_ALL=C sort >target/public-api/tindalwic.org
 .PHONY: rust/api

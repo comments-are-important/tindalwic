@@ -113,6 +113,32 @@ impl<'a, 'store> Arena<'a, 'store> {
     }
 }
 
+// ====================================================================================
+
+/// an iter type to enable for-loops for List, Dict, and File.
+#[derive(Clone, Debug)]
+pub struct CellIter<'a, T: Copy> {
+    pub(crate) inner: core::slice::Iter<'a, Cell<T>>,
+}
+impl<'a, T: Copy> Iterator for CellIter<'a, T> {
+    type Item = T;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(Cell::get)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+impl<'a, T: Copy> ExactSizeIterator for CellIter<'a, T> {}
+impl<'a, T: Copy> DoubleEndedIterator for CellIter<'a, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.inner.next_back().map(Cell::get)
+    }
+}
+impl<'a, T: Copy> core::iter::FusedIterator for CellIter<'a, T> {}
+
+// ====================================================================================
+
 #[derive(Debug)]
 pub enum Branch<'p> {
     List(usize),

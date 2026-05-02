@@ -23,11 +23,13 @@ pub use tindalwic_macros::json;
 #[doc(inline)]
 pub use tindalwic_macros::arena;
 
+pub mod internals; // macro generated code needs access.
+
+mod fmt;
+mod parse;
+
 #[cfg(feature = "alloc")]
 mod alloc;
-mod fmt;
-pub mod internals; // macro generated code needs access.
-mod parse;
 
 /// hopefully change to `pub use core::range::Range` when that becomes stable.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -54,50 +56,26 @@ impl<Idx> From<Range<Idx>> for core::ops::Range<Idx> {
 /// parsing problem
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct Error {
+pub struct ParseError {
     /// span of the problem
     pub lines: Range<usize>,
     /// English description of the problem
     pub message: &'static str,
 }
-impl core::error::Error for Error {}
-impl Error {
+impl core::error::Error for ParseError {}
+impl ParseError {
     /// make an Error with an arbitrary span of lines.
     pub fn new(lines: impl Into<Range<usize>>, message: &'static str) -> Self {
-        Error {
+        ParseError {
             lines: lines.into(),
             message,
         }
     }
     /// make an Error for a single line.
     pub fn at(line: usize, message: &'static str) -> Self {
-        Error::new(line..line + 1, message)
+        ParseError::new(line..line + 1, message)
     }
 }
-
-/// an iter type to enable for-loops for List, Dict, and File.
-#[derive(Clone, Debug)]
-pub struct CellIter<'a, T: Copy> {
-    inner: core::slice::Iter<'a, Cell<T>>,
-}
-
-impl<'a, T: Copy> Iterator for CellIter<'a, T> {
-    type Item = T;
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(Cell::get)
-    }
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
-    }
-}
-
-impl<'a, T: Copy> ExactSizeIterator for CellIter<'a, T> {}
-impl<'a, T: Copy> DoubleEndedIterator for CellIter<'a, T> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        self.inner.next_back().map(Cell::get)
-    }
-}
-impl<'a, T: Copy> core::iter::FusedIterator for CellIter<'a, T> {}
 
 /// Hidden parts of [Comment] and [Text].
 ///
@@ -314,18 +292,18 @@ impl<'a, 'store> List<'a, 'store> {
 }
 impl<'a, 'store> IntoIterator for List<'a, 'store> {
     type Item = Item<'a, 'store>;
-    type IntoIter = CellIter<'store, Self::Item>;
+    type IntoIter = internals::CellIter<'store, Self::Item>;
     fn into_iter(self) -> Self::IntoIter {
-        CellIter {
+        internals::CellIter {
             inner: self.cells.iter(),
         }
     }
 }
 impl<'a, 'store> IntoIterator for &List<'a, 'store> {
     type Item = Item<'a, 'store>;
-    type IntoIter = CellIter<'store, Self::Item>;
+    type IntoIter = internals::CellIter<'store, Self::Item>;
     fn into_iter(self) -> Self::IntoIter {
-        CellIter {
+        internals::CellIter {
             inner: self.cells.iter(),
         }
     }
@@ -445,18 +423,18 @@ impl<'a, 'store> Dict<'a, 'store> {
 }
 impl<'a, 'store> IntoIterator for Dict<'a, 'store> {
     type Item = Entry<'a, 'store>;
-    type IntoIter = CellIter<'store, Self::Item>;
+    type IntoIter = internals::CellIter<'store, Self::Item>;
     fn into_iter(self) -> Self::IntoIter {
-        CellIter {
+        internals::CellIter {
             inner: self.cells.iter(),
         }
     }
 }
 impl<'a, 'store> IntoIterator for &Dict<'a, 'store> {
     type Item = Entry<'a, 'store>;
-    type IntoIter = CellIter<'store, Self::Item>;
+    type IntoIter = internals::CellIter<'store, Self::Item>;
     fn into_iter(self) -> Self::IntoIter {
-        CellIter {
+        internals::CellIter {
             inner: self.cells.iter(),
         }
     }
@@ -559,18 +537,18 @@ impl<'a, 'store> File<'a, 'store> {
 }
 impl<'a, 'store> IntoIterator for File<'a, 'store> {
     type Item = Entry<'a, 'store>;
-    type IntoIter = CellIter<'store, Self::Item>;
+    type IntoIter = internals::CellIter<'store, Self::Item>;
     fn into_iter(self) -> Self::IntoIter {
-        CellIter {
+        internals::CellIter {
             inner: self.cells.iter(),
         }
     }
 }
 impl<'a, 'store> IntoIterator for &File<'a, 'store> {
     type Item = Entry<'a, 'store>;
-    type IntoIter = CellIter<'store, Self::Item>;
+    type IntoIter = internals::CellIter<'store, Self::Item>;
     fn into_iter(self) -> Self::IntoIter {
-        CellIter {
+        internals::CellIter {
             inner: self.cells.iter(),
         }
     }

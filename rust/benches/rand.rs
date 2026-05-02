@@ -8,14 +8,14 @@ use rand::{Rng, RngExt, SeedableRng};
 use rand::rngs::SmallRng;
 
 /// generate data
-pub struct Random<'a, 'r, R: Rng + ?Sized> {
+pub struct Random<'a, 'store, 'r, R: Rng + ?Sized> {
     pub utf8: &'a str, // TODO use a random String instead of asking caller
-    pub arena: &'r mut Arena<'a>,
+    pub arena: &'r mut Arena<'a, 'store>,
     pub rng: &'r mut R,
     pub width: UniformUsize,
     pub deepest: usize,
 }
-impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
+impl<'a, 'store, 'r, R: Rng + ?Sized> Random<'a, 'store, 'r, R> {
     fn utf8(&mut self, newline: bool) -> &'a str {
         let one: usize = self.rng.random_range(..=self.utf8.len());
         let two: usize = self.rng.random_range(..=self.utf8.len());
@@ -32,7 +32,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
             None
         }
     }
-    fn item(&mut self, depth: usize) -> Option<Item<'a>> {
+    fn item(&mut self, depth: usize) -> Option<Item<'a, 'store>> {
         let kind = if depth >= self.deepest {
             0
         } else {
@@ -45,7 +45,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
             _ => unreachable!(),
         }
     }
-    fn list(&mut self, depth: usize) -> Option<List<'a>> {
+    fn list(&mut self, depth: usize) -> Option<List<'a, 'store>> {
         let mut count = 0;
         for _ in 0..self.width.sample(self.rng) {
             let item = self.item(depth + 1)?;
@@ -60,7 +60,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
         list.epilog = self.comment();
         Some(list)
     }
-    fn dict(&mut self, depth: usize) -> Option<Dict<'a>> {
+    fn dict(&mut self, depth: usize) -> Option<Dict<'a, 'store>> {
         let mut count = 0;
         for _ in 0..self.width.sample(self.rng) {
             let item = self.item(depth + 1)?;
@@ -82,7 +82,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
         Some(dict)
     }
     /// should never panic, assuming impl Random has no bugs
-    pub fn file(&mut self) -> File<'a> {
+    pub fn file(&mut self) -> File<'a, 'store> {
         // code above respects the Arena *_slots so the unwrap should not panic
         match self.dict(0) {
             None => unreachable!(),

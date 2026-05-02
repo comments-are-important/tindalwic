@@ -3,7 +3,7 @@ use super::*;
 use core::fmt::{Display, Formatter, Result, Write};
 use core::write;
 
-impl Display for Error {
+impl Display for ParseError {
     fn fmt(&self, out: &mut Formatter<'_>) -> Result {
         if self.lines.start + 1 == self.lines.end {
             write!(out, "{}: {}", self.lines.start, self.message)

@@ -107,7 +107,8 @@ fn change_structure() {
     walk! {
         let (mut resolved, cell) = {changing}[key]<0>.unwrap();
     }
-    resolved.epilog = Comment::some("b");
+    let b = String::from("b");
+    resolved.epilog = Comment::some(&b);
     json! {
         let patch = {"p":(resolved)}.unwrap();
     }

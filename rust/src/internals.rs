@@ -2,14 +2,21 @@
 
 use super::*;
 
-struct Bump<'store, T> {
+/// push T into stack on low side of array, finish them into high side.
+/// aligns to an in-order tree traversal: push on entry, visit kids, finish on exit.
+/// all kids finished before visiting next sibling, so siblings are adjacent,
+/// finish moves those adjacent cells to the high end of the array.
+/// total O(n) moves, zero extra space, caller only needs to track child count.
+/// basically two-stacks-in-one-array (Knuth, TAOCP Vol. 1, §2.2.2 p.246),
+/// but keep siblings together by transferring, as group, from low to high.
+struct LowToHigh<'store, T> {
     cells: &'store [Cell<T>],
     next: usize,
     done: usize,
 }
-impl<'store, T> Bump<'store, T> {
+impl<'store, T> LowToHigh<'store, T> {
     fn wrap(cells: &'store [Cell<T>]) -> Self {
-        Bump {
+        LowToHigh {
             cells,
             next: 0,
             done: cells.len(),
@@ -46,16 +53,16 @@ impl<'store, T> Bump<'store, T> {
 }
 
 pub struct Arena<'a, 'store> {
-    items: Bump<'store, Item<'a, 'store>>,
-    entries: Bump<'store, Entry<'a, 'store>>,
+    items: LowToHigh<'store, Item<'a, 'store>>,
+    entries: LowToHigh<'store, Entry<'a, 'store>>,
 }
 impl<'a, 'store> Arena<'a, 'store> {
     pub fn wrap(
         items: &'store [Cell<Item<'a, 'store>>],
         entries: &'store [Cell<Entry<'a, 'store>>],
     ) -> Self {
-        let items = Bump::wrap(items);
-        let entries = Bump::wrap(entries);
+        let items = LowToHigh::wrap(items);
+        let entries = LowToHigh::wrap(entries);
         Arena { items, entries }
     }
     pub fn item_slots(&self) -> usize {

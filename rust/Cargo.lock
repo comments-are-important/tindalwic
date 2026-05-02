@@ -674,6 +674,7 @@ dependencies = [
 name = "tindalwic"
 version = "0.1.0"
 dependencies = [
+ "bumpalo",
  "criterion",
  "markdown",
  "rand",

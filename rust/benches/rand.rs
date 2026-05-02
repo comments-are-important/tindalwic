@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use tindalwic::internals::Arena;
+use tindalwic::internals::{Arena,Builder};
 use tindalwic::{arena,Comment, Dict, Entry, File, Item, List, Name, Text};
 use rand::distr::uniform::{UniformSampler, UniformUsize};
 use rand::{Rng, RngExt, SeedableRng};

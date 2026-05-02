@@ -2,6 +2,13 @@
 
 use super::*;
 
+pub trait Builder<'a, 'store> {
+    fn list(&mut self, count: usize) -> Option<List<'a, 'store>>;
+    fn dict(&mut self, count: usize) -> Option<Dict<'a, 'store>>;
+    fn item(&mut self, item: Item<'a, 'store>) -> Option<()>;
+    fn entry(&mut self, entry: Entry<'a, 'store>) -> Option<()>;
+}
+
 /// push T into stack on low side of array, finish them into high side.
 /// aligns to an in-order tree traversal: push on entry, visit kids, finish on exit.
 /// all kids finished before visiting next sibling, so siblings are adjacent,
@@ -56,6 +63,20 @@ pub struct Arena<'a, 'store> {
     items: LowToHigh<'store, Item<'a, 'store>>,
     entries: LowToHigh<'store, Entry<'a, 'store>>,
 }
+impl<'a, 'store> Builder<'a, 'store> for Arena<'a, 'store> {
+    fn list(&mut self, count: usize) -> Option<List<'a, 'store>> {
+        Some(List::wrap(self.items.finish(count)?))
+    }
+    fn dict(&mut self, count: usize) -> Option<Dict<'a, 'store>> {
+        Some(Dict::wrap(self.entries.finish(count)?))
+    }
+    fn item(&mut self, item: Item<'a, 'store>) -> Option<()> {
+        self.items.push(item)
+    }
+    fn entry(&mut self, entry: Entry<'a, 'store>) -> Option<()> {
+        self.entries.push(entry)
+    }
+}
 impl<'a, 'store> Arena<'a, 'store> {
     pub fn wrap(
         items: &'store [Cell<Item<'a, 'store>>],
@@ -78,20 +99,8 @@ impl<'a, 'store> Arena<'a, 'store> {
             None
         }
     }
-    pub fn list(&mut self, count: usize) -> Option<List<'a, 'store>> {
-        Some(List::wrap(self.items.finish(count)?))
-    }
-    pub fn dict(&mut self, count: usize) -> Option<Dict<'a, 'store>> {
-        Some(Dict::wrap(self.entries.finish(count)?))
-    }
-    pub fn item(&mut self, item: Item<'a, 'store>) -> Option<()> {
-        self.items.push(item)
-    }
     pub fn keyed(&mut self, key: &'a str, item: Item<'a, 'store>) -> Option<()> {
         self.entry(Entry::wrap(key, item))
-    }
-    pub fn entry(&mut self, entry: Entry<'a, 'store>) -> Option<()> {
-        self.entries.push(entry)
     }
     pub fn text_item(&mut self, utf8: &'a str) -> Option<()> {
         self.item(Text::wrap(utf8).into())

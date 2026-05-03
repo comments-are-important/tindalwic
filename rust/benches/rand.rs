@@ -1,21 +1,84 @@
 #![allow(missing_docs)]
+#![warn(unused)]
 
 use bumpalo::Bump;
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
+use rand::rngs::SmallRng;
+use rand::{Rng, RngExt, SeedableRng};
+use std::fmt::{self, Write};
 use tindalwic::alloc::Arena;
 use tindalwic::internals::Builder as _;
 use tindalwic::{Comment, Dict, Entry, File, Item, List, Name, Text};
-use rand::distr::uniform::{UniformSampler, UniformUsize};
-use rand::{Rng, RngExt, SeedableRng};
-use rand::rngs::SmallRng;
+
+#[derive(Debug)]
+struct Silhouette {
+    branches: usize, // recursive count excluding leafs but including self
+    children: Vec<Option<Silhouette>>, // None indicates position of a leaf
+}
+impl Silhouette {
+    fn new() -> Self {
+        Silhouette {
+            branches: 1,
+            children: Vec::new(),
+        }
+    }
+    fn grow(&mut self, mut at: usize, leaf: bool) {
+        if at >= self.branches {
+            panic!("can't grow at {at} - no such branch exists");
+        }
+        for kid in &mut self.children {
+            let Some(kid) = kid else { continue };
+            if at < kid.branches {
+                kid.grow(at, leaf);
+                if !leaf {
+                    self.branches += 1;
+                }
+                return;
+            }
+            at -= kid.branches;
+        }
+        if at != 0 {
+            panic!("bad math somewhere");
+        }
+        if leaf {
+            self.children.push(None);
+        } else {
+            self.children.push(Some(Silhouette::new()));
+            self.branches += 1;
+        }
+    }
+    fn random<R: Rng + ?Sized>(size: usize, rng: &mut R) -> Self {
+        let mut root = Silhouette::new();
+        for _ in 1..size {
+            let at = rng.random_range(..root.branches);
+            let leaf = rng.random_ratio(1, 3);
+            root.grow(at, leaf);
+            // println!("grow({at},{leaf}) -> {root}");
+        }
+        root
+    }
+}
+impl fmt::Display for Silhouette {
+    fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
+        out.write_char('(')?;
+        usize::fmt(&self.branches, out)?;
+        for kid in &self.children {
+            if let Some(kid) = kid {
+                Silhouette::fmt(kid, out)?;
+            } else {
+                out.write_char('.')?;
+            }
+        }
+        out.write_char(')')?;
+        Ok(())
+    }
+}
 
 /// generate data
 pub struct Random<'a, 'store, 'r, R: Rng + ?Sized> {
     pub utf8: &'a str, // TODO use a random String instead of asking caller
     pub arena: &'r mut Arena<'a, 'store>,
     pub rng: &'r mut R,
-    pub width: UniformUsize,
-    pub deepest: usize,
 }
 impl<'a, 'store, 'r, R: Rng + ?Sized> Random<'a, 'store, 'r, R> {
     fn utf8(&mut self, newline: bool) -> &'a str {
@@ -34,35 +97,30 @@ impl<'a, 'store, 'r, R: Rng + ?Sized> Random<'a, 'store, 'r, R> {
             None
         }
     }
-    fn item(&mut self, depth: usize) -> Option<Item<'a, 'store>> {
-        let kind = if depth >= self.deepest {
-            0
+    fn item(&mut self, shape: &Option<Silhouette>) -> Option<Item<'a, 'store>> {
+        Some(if let Some(parent) = shape {
+            if self.rng.random_ratio(1, 2) {
+                Item::Dict(self.dict(parent)?)
+            } else {
+                Item::List(self.list(parent)?)
+            }
         } else {
-            self.rng.random_range(0..3)
-        };
-        match kind {
-            0 => Some(Item::Text(Text::wrap(self.utf8(true)))),
-            1 => Some(Item::List(self.list(depth)?)),
-            2 => Some(Item::Dict(self.dict(depth)?)),
-            _ => unreachable!(),
-        }
+            Item::Text(Text::wrap(self.utf8(true)))
+        })
     }
-    fn list(&mut self, depth: usize) -> Option<List<'a, 'store>> {
-        let mut count = 0;
-        for _ in 0..self.width.sample(self.rng) {
-            let item = self.item(depth + 1)?;
+    fn list(&mut self, shape: &Silhouette) -> Option<List<'a, 'store>> {
+        for kid in &shape.children {
+            let item = self.item(kid)?;
             self.arena.item(item)?;
-            count += 1;
         }
-        let mut list = self.arena.list(count)?;
+        let mut list = self.arena.list(shape.children.len())?;
         list.prolog = self.comment();
         list.epilog = self.comment();
         Some(list)
     }
-    fn dict(&mut self, depth: usize) -> Option<Dict<'a, 'store>> {
-        let mut count = 0;
-        for _ in 0..self.width.sample(self.rng) {
-            let item = self.item(depth + 1)?;
+    fn dict(&mut self, shape: &Silhouette) -> Option<Dict<'a, 'store>> {
+        for kid in &shape.children {
+            let item = self.item(kid)?;
             let gap = self.rng.random_bool(0.2);
             let before = self.comment();
             let key = self.utf8(false);
@@ -70,45 +128,44 @@ impl<'a, 'store, 'r, R: Rng + ?Sized> Random<'a, 'store, 'r, R> {
                 name: Name { gap, before, key },
                 item,
             })?;
-            count += 1;
         }
-        let mut dict = self.arena.dict(count)?;
+        let mut dict = self.arena.dict(shape.children.len())?;
         dict.prolog = self.comment();
         dict.epilog = self.comment();
         Some(dict)
     }
-    /// should never panic, assuming impl Random has no bugs
-    pub fn file(&mut self) -> File<'a, 'store> {
-        // code above respects the Arena *_slots so the unwrap should not panic
-        match self.dict(0) {
-            None => unreachable!(),
-            Some(dict) => File {
-                cells: dict.cells,
-                hashbang: dict.epilog,
-                prolog: dict.prolog,
-            },
+    pub fn file(&mut self, size: usize) -> File<'a, 'store> {
+        let shape = Silhouette::random(size, self.rng);
+        let dict = self.dict(&shape).unwrap();
+        File {
+            cells: dict.cells,
+            hashbang: dict.epilog,
+            prolog: dict.prolog,
         }
     }
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    c.bench_function("round-trip", |b| b.iter(|| {
-        let bump = Bump::new();
-        let mut arena = Arena::new(&bump);
-        let seed: u64 = rand::rng().random();
-        let mut rng = SmallRng::seed_from_u64(seed);
-        let mut random = Random {
-            utf8: "abcdefghijklmnopqrstuvwxyz",
-            arena: &mut arena,
-            rng: &mut rng,
-            width: UniformUsize::new(0, 6).unwrap(),
-            deepest: 5,
-        };
-        let original: File = random.file();
-        let original_string = original.to_string();
-        let parsed = arena.parse_or_panic(&original_string).unwrap();
-        assert_eq!(original, parsed, "failed round-trip:\n===\n{original}\n===\n{parsed}");
-    }));
+    c.bench_function("round-trip", |b| {
+        b.iter(|| {
+            let bump = Bump::new();
+            let mut arena = Arena::new(&bump);
+            let seed: u64 = rand::rng().random();
+            let mut rng = SmallRng::seed_from_u64(seed);
+            let mut random = Random {
+                utf8: "abcdefghijklmnopqrstuvwxyz",
+                arena: &mut arena,
+                rng: &mut rng,
+            };
+            let original: File = random.file(20);
+            let original_string = original.to_string();
+            let parsed = arena.parse_or_panic(&original_string).unwrap();
+            assert_eq!(
+                original, parsed,
+                "failed round-trip:\n===\n{original}\n===\n{parsed}"
+            );
+        })
+    });
 }
 
 criterion_group!(benches, criterion_benchmark);

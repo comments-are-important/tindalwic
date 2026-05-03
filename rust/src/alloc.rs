@@ -12,7 +12,8 @@ use bumpalo::Bump;
 pub struct Arena<'a, 'bump> {
     items: Vec<Item<'a, 'bump>>,
     entries: Vec<Entry<'a, 'bump>>,
-    bump: &'bump Bump,
+    /// expose bump assuming our owner knows what they're doing
+    pub bump: &'bump Bump,
 }
 impl<'a, 'bump> Builder<'a, 'bump> for Arena<'a, 'bump> {
     fn list(&mut self, count: usize) -> Option<List<'a, 'bump>> {

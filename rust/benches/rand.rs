@@ -1,8 +1,10 @@
 #![allow(missing_docs)]
 
+use bumpalo::Bump;
 use criterion::{criterion_group, criterion_main, Criterion};
-use tindalwic::internals::{Arena,Builder};
-use tindalwic::{arena,Comment, Dict, Entry, File, Item, List, Name, Text};
+use tindalwic::alloc::Arena;
+use tindalwic::internals::Builder as _;
+use tindalwic::{Comment, Dict, Entry, File, Item, List, Name, Text};
 use rand::distr::uniform::{UniformSampler, UniformUsize};
 use rand::{Rng, RngExt, SeedableRng};
 use rand::rngs::SmallRng;
@@ -49,9 +51,6 @@ impl<'a, 'store, 'r, R: Rng + ?Sized> Random<'a, 'store, 'r, R> {
         let mut count = 0;
         for _ in 0..self.width.sample(self.rng) {
             let item = self.item(depth + 1)?;
-            if self.arena.item_slots() == 0 {
-                break;
-            }
             self.arena.item(item)?;
             count += 1;
         }
@@ -64,9 +63,6 @@ impl<'a, 'store, 'r, R: Rng + ?Sized> Random<'a, 'store, 'r, R> {
         let mut count = 0;
         for _ in 0..self.width.sample(self.rng) {
             let item = self.item(depth + 1)?;
-            if self.arena.entry_slots() == 0 {
-                break;
-            }
             let gap = self.rng.random_bool(0.2);
             let before = self.comment();
             let key = self.utf8(false);
@@ -97,24 +93,20 @@ impl<'a, 'store, 'r, R: Rng + ?Sized> Random<'a, 'store, 'r, R> {
 
 fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("round-trip", |b| b.iter(|| {
-        arena! {
-            let mut original_arena = <50list,50dict>;
-        }
+        let bump = Bump::new();
+        let mut arena = Arena::new(&bump);
         let seed: u64 = rand::rng().random();
         let mut rng = SmallRng::seed_from_u64(seed);
         let mut random = Random {
             utf8: "abcdefghijklmnopqrstuvwxyz",
-            arena: &mut original_arena,
+            arena: &mut arena,
             rng: &mut rng,
             width: UniformUsize::new(0, 6).unwrap(),
             deepest: 5,
         };
         let original: File = random.file();
-        arena! {
-            let mut parsed_arena = <50list,50dict>;
-        }
         let original_string = original.to_string();
-        let parsed = parsed_arena.parse_or_panic(&original_string).unwrap();
+        let parsed = arena.parse_or_panic(&original_string).unwrap();
         assert_eq!(original, parsed, "failed round-trip:\n===\n{original}\n===\n{parsed}");
     }));
 }

@@ -2,6 +2,7 @@
 
 use super::*;
 
+/// TODO return Results, not Options, here and in Arenas.
 pub trait Builder<'a, 'store> {
     fn list(&mut self, count: usize) -> Option<List<'a, 'store>>;
     fn dict(&mut self, count: usize) -> Option<Dict<'a, 'store>>;

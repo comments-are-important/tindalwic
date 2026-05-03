@@ -29,7 +29,7 @@ mod fmt;
 mod parse;
 
 #[cfg(feature = "alloc")]
-mod alloc;
+pub mod alloc;
 
 /// hopefully change to `pub use core::range::Range` when that becomes stable.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]

@@ -34,4 +34,5 @@ workspace = true
 
 [[bench]]
 name = "rand"
+required-features = ["alloc"]
 harness = false

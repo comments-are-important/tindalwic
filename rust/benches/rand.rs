@@ -1,3 +1,10 @@
+//! generate random files, run them through the library algorithms, and collect timing.
+//! the randomness is not attempting to produce data that mimics the real world in any
+//! way. other benchmarks do that. instead, the ratios here are chosen to even out the
+//! library profiling line hit counts that would happen during this test: all the
+//! branches coming from each decision point in the algorithms should be taken roughly
+//! the same number of times.
+
 #![allow(missing_docs)]
 #![warn(unused)]
 
@@ -10,9 +17,11 @@ use tindalwic::alloc::Arena;
 use tindalwic::internals::Builder as _;
 use tindalwic::{Comment, Dict, Entry, File, Item, List, Name, Text};
 
+/// a very blurry outline of some data. created first to be able to call the
+/// Arena/Builder API in the order it requires.
 #[derive(Debug)]
 struct Silhouette {
-    branches: usize, // recursive count excluding leafs but including self
+    branches: usize, // recursive count excluding leaf nodes but including self
     children: Vec<Option<Silhouette>>, // None indicates position of a leaf
 }
 impl Silhouette {
@@ -23,6 +32,7 @@ impl Silhouette {
         }
     }
     fn grow(&mut self, mut at: usize, leaf: bool) {
+        // the `at` corresponds to index within post-order traversal (ignore leaf nodes)
         if at >= self.branches {
             panic!("can't grow at {at} - no such branch exists");
         }
@@ -74,21 +84,34 @@ impl fmt::Display for Silhouette {
     }
 }
 
-/// generate data
-pub struct Random<'a, 'store, 'r, R: Rng + ?Sized> {
-    pub utf8: &'a str, // TODO use a random String instead of asking caller
-    pub arena: &'r mut Arena<'a, 'store>,
-    pub rng: &'r mut R,
+/// generate random files containing the requested number of items.
+pub struct Random<'a, 'store: 'a, 'r, R: Rng + ?Sized> {
+    bump: &'store Bump,
+    arena: &'r mut Arena<'a, 'store>,
+    rng: &'r mut R,
 }
 impl<'a, 'store, 'r, R: Rng + ?Sized> Random<'a, 'store, 'r, R> {
     fn utf8(&mut self, newline: bool) -> &'a str {
-        let one: usize = self.rng.random_range(..=self.utf8.len());
-        let two: usize = self.rng.random_range(..=self.utf8.len());
-        let mut slice = &self.utf8[one.min(two)..one.max(two)];
-        if !newline && let Some(index) = slice.find('\n') {
-            slice = &slice[..index]
+        let mut utf8 = String::new();
+        let lines = if !newline {
+            1
+        } else {
+            1//self.rng.random_range(1..=4)
+        };
+        for line in 0..lines {
+            if line != 0 {
+                utf8.push('\n');
+            }
+            let mut len: usize = self.rng.random_range(..5);
+            while len > 0 {
+                let c: char = self.rng.random();
+                if c != '\n' {
+                    utf8.push(c);
+                    len -= 1;
+                }
+            }
         }
-        slice
+        self.bump.alloc_str(&utf8)
     }
     fn comment(&mut self) -> Option<Comment<'a>> {
         if self.rng.random_bool(0.5) {
@@ -146,23 +169,24 @@ impl<'a, 'store, 'r, R: Rng + ?Sized> Random<'a, 'store, 'r, R> {
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
+    let seed: u64 = 0;//rand::rng().random();
+    println!("seed={seed}");
+    let mut rng = SmallRng::seed_from_u64(seed);
     c.bench_function("round-trip", |b| {
         b.iter(|| {
             let bump = Bump::new();
             let mut arena = Arena::new(&bump);
-            let seed: u64 = rand::rng().random();
-            let mut rng = SmallRng::seed_from_u64(seed);
             let mut random = Random {
-                utf8: "abcdefghijklmnopqrstuvwxyz",
+                bump: &bump,
                 arena: &mut arena,
                 rng: &mut rng,
             };
-            let original: File = random.file(20);
+            let original: File = random.file(2);
             let original_string = original.to_string();
             let parsed = arena.parse_or_panic(&original_string).unwrap();
             assert_eq!(
                 original, parsed,
-                "failed round-trip:\n===\n{original}\n===\n{parsed}"
+                "failed round-trip:\n===\n{original}\n===\n{parsed}\n==="
             );
         })
     });

@@ -1,6 +1,7 @@
 {
     "cSpell.words": [
         "abnf",
+        "bumpalo",
         "charliermarsh",
         "deepdiff",
         "demarks",
@@ -14,8 +15,10 @@
         "pycache",
         "PYTHONPYCACHEPREFIX",
         "rfind",
+        "rngs",
         "ruamel",
         "rustup",
+        "seedable",
         "sdist",
         "snakeviz",
         "splitn",

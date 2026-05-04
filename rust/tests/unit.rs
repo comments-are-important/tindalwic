@@ -8,6 +8,22 @@ use tindalwic::*;
 // }
 
 #[test]
+#[cfg(feature = "alloc")]
+fn prolog_becomes_hashbang() {
+    let nothing = [];
+    let mut file = File::wrap(&nothing);
+    file.prolog = Comment::some("!oops");
+    let encoded = file.to_string();
+    assert_eq!(encoded, "#!oops\n");
+    arena! {
+        $crate = crate;
+        let mut arena = <1dict>;
+    }
+    let oops = arena.parse_or_panic(&encoded).unwrap();
+    assert!(oops.hashbang.is_none());
+}
+
+#[test]
 fn two_lines() {
     json! {
         let dict = {"key":"one\ntwo"}.unwrap();

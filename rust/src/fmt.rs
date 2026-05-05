@@ -55,7 +55,9 @@ impl<'o, 'f> Output<'o, 'f> {
             self.out.write_char('\n')?;
         } else {
             self.indent += 1;
-            if marker == "#" && comment.utf8.slice.starts_with('!') {
+            if marker == "#"
+                && (comment.utf8.slice.starts_with('!') || comment.utf8.slice.starts_with('\n'))
+            {
                 self.out.write_char('\n')?;
                 self.indent()?;
             }
@@ -193,8 +195,7 @@ impl<'o, 'f> Output<'o, 'f> {
 /// check("one-liner");
 /// check("two\nlines");
 /// check(
-///     "
-/// # heading
+///     "# heading
 /// paragraph
 ///     blockquote
 /// ",

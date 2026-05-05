@@ -98,7 +98,7 @@ impl<'a, 'store, 'r, R: Rng + ?Sized> Random<'a, 'store, 'r, R> {
         let lines = if !newline {
             1
         } else {
-            2 //self.rng.random_range(1..=4)
+            self.rng.random_range(1..=4)
         };
         for line in 0..lines {
             if line != 0 {
@@ -175,7 +175,7 @@ impl<'a, 'store, 'r, R: Rng + ?Sized> Random<'a, 'store, 'r, R> {
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let seed: u64 = 763768270265061924; //rand::rng().random();
+    let seed: u64 = rand::rng().random();
     println!("seed={seed}");
     let mut rng = SmallRng::seed_from_u64(seed);
     c.bench_function("round-trip", |b| {
@@ -186,12 +186,15 @@ fn criterion_benchmark(c: &mut Criterion) {
                 bump: &bump,
                 arena: &mut arena,
                 rng: &mut rng,
-                sample: "ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars().collect(),
+                sample: Vec::new(),//"ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars().collect(),
             };
-            let original: File = random.file(2);
-            let original_string = original.to_string();
-            let parsed = arena.parse_or_panic(&original_string).unwrap();
-            assert_json_diff::assert_json_eq!(original, parsed);
+            let original: File = random.file(32);
+            let encoded = original.to_string();
+            let parsed = arena.parse_or_panic(&encoded).unwrap();
+            if original != parsed {
+                println!("\n{original:?}\n===\n{encoded}===");
+                assert_json_diff::assert_json_eq!(original, parsed);
+            }
         })
     });
 }

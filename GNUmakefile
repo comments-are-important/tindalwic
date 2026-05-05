@@ -79,8 +79,8 @@ rust/test: must-run-inside
 	set -e
 	echo ====== default && cargo test -q
 	echo ====== alloc && cargo test -q --features alloc
-	echo ====== rand && cargo test -q --all-features
-	echo ====== bench && cargo bench --features serde
+	echo ====== serde && cargo test -q --features serde
+	echo ====== bench && cargo bench --all-features
 .PHONY: rust/test
 
 rust/doc: must-run-inside

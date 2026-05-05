@@ -30,6 +30,8 @@ mod parse;
 
 #[cfg(feature = "alloc")]
 pub mod alloc;
+#[cfg(feature = "serde")]
+mod serde;
 
 /// hopefully change to `pub use core::range::Range` when that becomes stable.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -169,6 +171,7 @@ impl<'a> UTF8<'a> {
 /// # }
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(::serde::Serialize))]
 pub struct Comment<'a> {
     utf8: UTF8<'a>,
 }
@@ -198,6 +201,7 @@ impl<'a> Comment<'a> {
 
 /// [Item::Text] wraps a sequence of lines of UTF-8, and optional epilog comment.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(::serde::Serialize))]
 pub struct Text<'a> {
     utf8: UTF8<'a>,
     /// A Text can have a Comment after it.
@@ -256,8 +260,13 @@ impl<'a> Text<'a> {
 
 /// [Item::List] wraps a sequence of `Cell<Item>`, and optional prolog and epilog comments.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(::serde::Serialize))]
 pub struct List<'a, 'store> {
     /// The contents of the Item::List.
+    #[cfg_attr(
+        feature = "serde",
+        serde(serialize_with = "crate::serde::serialize_items")
+    )]
     pub cells: &'store [Cell<Item<'a, 'store>>],
     /// A List can have an introductory Comment.
     pub prolog: Option<Comment<'a>>,
@@ -325,6 +334,7 @@ pub type Key<'a> = &'a str;
 
 /// aggregates the Key with the metadata.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(::serde::Serialize))]
 pub struct Name<'a> {
     /// a key can have a blank line before it (before its comment)
     pub gap: bool,
@@ -339,6 +349,7 @@ pub struct Name<'a> {
 /// at the lowest level, these are stored in an array. TODO a Map view can be
 /// built (if the `alloc` feature is enabled).
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(::serde::Serialize))]
 pub struct Entry<'a, 'store> {
     /// the name given to the [Item].
     pub name: Name<'a>,
@@ -384,8 +395,13 @@ impl<'a, 'store> Entry<'a, 'store> {
 
 /// [Item::Dict] wraps a sequence of `Cell<Entry>`, and optional prolog and epilog comments.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(::serde::Serialize))]
 pub struct Dict<'a, 'store> {
     /// The contents of the Item::Dict.
+    #[cfg_attr(
+        feature = "serde",
+        serde(serialize_with = "crate::serde::serialize_entries")
+    )]
     pub cells: &'store [Cell<Entry<'a, 'store>>],
     /// A Dict can have an introductory Comment.
     pub prolog: Option<Comment<'a>>,
@@ -453,6 +469,7 @@ impl<'a, 'store> IntoIterator for &Dict<'a, 'store> {
 
 /// the three Item variants
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(::serde::Serialize))]
 pub enum Item<'a, 'store> {
     /// a [Text] Item holds UTF-8 content
     Text(Text<'a>),
@@ -498,8 +515,13 @@ impl<'a, 'store> From<Dict<'a, 'store>> for Item<'a, 'store> {
 ///
 /// similar to a [Item::Dict], but with different comments.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(::serde::Serialize))]
 pub struct File<'a, 'store> {
     /// The contents of the Item::File.
+    #[cfg_attr(
+        feature = "serde",
+        serde(serialize_with = "crate::serde::serialize_entries")
+    )]
     pub cells: &'store [Cell<Entry<'a, 'store>>],
     /// A File can start with a Unix `#!` Comment.
     pub hashbang: Option<Comment<'a>>,

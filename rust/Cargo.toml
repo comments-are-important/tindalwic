@@ -11,12 +11,15 @@ authors = ["Comments Are Important <comments.are.important@gmail.com>"]
 
 [features]
 alloc = ["dep:bumpalo"]
+serde = ["alloc", "dep:serde"]
 
 [dependencies]
 bumpalo = { version = "3.20.2", optional = true }
+serde = { version = "1.0.228", optional = true, features = ["derive"] }
 tindalwic-macros = { path = "./macros" }
 
 [dev-dependencies]
+assert-json-diff = "2.0.2"
 criterion = { version = "0.8.2", features = ["html_reports"] }
 markdown = "1.0.0"
 rand = "0.10.1"
@@ -34,5 +37,5 @@ workspace = true
 
 [[bench]]
 name = "rand"
-required-features = ["alloc"]
+required-features = ["serde"]
 harness = false

@@ -60,16 +60,20 @@ impl<'a, 'bump> Arena<'a, 'bump> {
 
 impl<'a> UTF8<'a> {
     /// Allocates a [String], filled with the UTF-8 copied from `self`.
-    fn joined(&self) -> String {
-        let mut result = String::with_capacity(self.slice.len());
-        for line in self.lines() {
-            result.push_str(line);
-            result.push('\n');
+    pub(crate) fn joined(&self) -> String {
+        if self.dedent == 0 || self.dedent == usize::MAX {
+            String::from(self.slice)
+        } else {
+            let mut result = String::with_capacity(self.slice.len());
+            for line in self.lines() {
+                result.push_str(line);
+                result.push('\n');
+            }
+            if !result.is_empty() {
+                result.truncate(result.len() - 1);
+            }
+            result
         }
-        if !result.is_empty() {
-            result.truncate(result.len() - 1);
-        }
-        result
     }
 }
 

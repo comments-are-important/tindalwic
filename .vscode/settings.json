@@ -19,6 +19,7 @@
         "ruamel",
         "rustup",
         "seedable",
+        "serde",
         "sdist",
         "snakeviz",
         "splitn",

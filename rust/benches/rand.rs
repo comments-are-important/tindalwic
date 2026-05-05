@@ -175,7 +175,7 @@ impl<'a, 'store, 'r, R: Rng + ?Sized> Random<'a, 'store, 'r, R> {
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let seed: u64 = 763768270265061924;//rand::rng().random();
+    let seed: u64 = 763768270265061924; //rand::rng().random();
     println!("seed={seed}");
     let mut rng = SmallRng::seed_from_u64(seed);
     c.bench_function("round-trip", |b| {
@@ -191,10 +191,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             let original: File = random.file(2);
             let original_string = original.to_string();
             let parsed = arena.parse_or_panic(&original_string).unwrap();
-            assert_eq!(
-                original, parsed,
-                "failed round-trip:\n===\n{original}\n===\n{parsed}\n==="
-            );
+            assert_json_diff::assert_json_eq!(original, parsed);
         })
     });
 }

@@ -82,10 +82,19 @@ impl ParseError {
 /// These are zero-copy slices from an external buffer of Tindalwic UTF-8. The iterator
 /// returned by [Encoded::lines()] is the most efficient way to strip the indentation
 /// from a multi-line slice.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 struct UTF8<'a> {
     slice: &'a str,
     dedent: usize, // usize::MAX => one_liner
+}
+impl<'a> PartialEq for UTF8<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        if self.dedent == other.dedent {
+            self.slice == other.slice
+        } else {
+            self.lines().eq(other.lines())
+        }
+    }
 }
 impl<'a> UTF8<'a> {
     /// Return a zero-copy instance using the provided literal (not indented) slice.
@@ -572,5 +581,16 @@ mod tests {
             completed.unwrap();
         }
         assert!(empty.cells.is_empty());
+    }
+
+    #[test]
+    fn utf8_eq() {
+        assert_eq!(
+            UTF8::wrap("ONE\nTWO"),
+            UTF8 {
+                slice: "ONE\n\tTWO",
+                dedent: 1,
+            }
+        );
     }
 }

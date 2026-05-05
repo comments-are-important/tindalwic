@@ -76,6 +76,7 @@ python/build: python/test
 
 rust/test: must-run-inside
 	cd rust
+	set -e
 	echo ====== default && cargo test -q
 	echo ====== alloc && cargo test -q --features alloc
 	echo ====== rand && cargo test -q --all-features

@@ -51,9 +51,17 @@ impl<'o, 'f> Output<'o, 'f> {
     fn some_comment<'a>(&mut self, marker: &'a str, comment: &Comment<'a>) -> Result {
         self.indent()?;
         self.out.write_str(marker)?;
-        self.indent += 1;
-        self.encoded(&comment.utf8)?;
-        self.indent -= 1;
+        if comment.utf8.slice.is_empty() {
+            self.out.write_char('\n')?;
+        } else {
+            self.indent += 1;
+            if marker == "#" && comment.utf8.slice.starts_with('!') {
+                self.out.write_char('\n')?;
+                self.indent()?;
+            }
+            self.encoded(&comment.utf8)?;
+            self.indent -= 1;
+        }
         Ok(())
     }
     fn comment<'a>(&mut self, marker: &'a str, option: &Option<Comment<'a>>) -> Result {

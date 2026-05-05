@@ -1,5 +1,6 @@
 #![allow(missing_docs)]
 
+use std::cell::Cell;
 use tindalwic::*;
 
 // #[test]
@@ -9,18 +10,49 @@ use tindalwic::*;
 
 #[test]
 #[cfg(feature = "alloc")]
-fn prolog_becomes_hashbang() {
+fn hashbang_avoidance() {
     let nothing = [];
     let mut file = File::wrap(&nothing);
-    file.prolog = Comment::some("!oops");
+    file.prolog = Comment::some("!suspect");
     let encoded = file.to_string();
-    assert_eq!(encoded, "#!oops\n");
+    assert_eq!(encoded, "#\n\t!suspect\n");
     arena! {
         $crate = crate;
         let mut arena = <1dict>;
     }
-    let oops = arena.parse_or_panic(&encoded).unwrap();
-    assert!(oops.hashbang.is_none());
+    let parsed = arena.parse_or_panic(&encoded).unwrap();
+    assert!(parsed.hashbang.is_none());
+    assert_eq!(
+        Vec::from_iter(parsed.prolog.unwrap().lines()),
+        vec!["!suspect"]
+    );
+}
+#[test]
+fn three_blank_comments() {
+    let nothing = [];
+    let name = Name {
+        gap: false,
+        before: Comment::some(""),
+        key: "",
+    };
+    let entries = [Cell::new(Entry {
+        name,
+        item: Item::Dict(Dict::wrap(&nothing)),
+    })];
+    let mut file = File::wrap(&entries);
+    file.hashbang = Comment::some("");
+    file.prolog = Comment::some("");
+    let encoded = file.to_string();
+    assert_eq!(encoded, "#!\n#\n//\n{}\n");
+}
+#[test]
+fn text_stretch_bug() {
+    let content = "[K]\n\tV\n#L\n";
+    arena! {
+        let mut arena = <1dict,1list>;
+    }
+    let file = arena.parse_or_panic(content).unwrap();
+    assert_eq!(file.to_string(), content);
 }
 
 #[test]

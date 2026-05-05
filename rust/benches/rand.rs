@@ -10,6 +10,7 @@
 
 use bumpalo::Bump;
 use criterion::{Criterion, criterion_group, criterion_main};
+use rand::prelude::IndexedRandom;
 use rand::rngs::SmallRng;
 use rand::{Rng, RngExt, SeedableRng};
 use std::fmt::{self, Write};
@@ -89,6 +90,7 @@ pub struct Random<'a, 'store: 'a, 'r, R: Rng + ?Sized> {
     bump: &'store Bump,
     arena: &'r mut Arena<'a, 'store>,
     rng: &'r mut R,
+    sample: Vec<char>,
 }
 impl<'a, 'store, 'r, R: Rng + ?Sized> Random<'a, 'store, 'r, R> {
     fn utf8(&mut self, newline: bool) -> &'a str {
@@ -96,7 +98,7 @@ impl<'a, 'store, 'r, R: Rng + ?Sized> Random<'a, 'store, 'r, R> {
         let lines = if !newline {
             1
         } else {
-            1//self.rng.random_range(1..=4)
+            2 //self.rng.random_range(1..=4)
         };
         for line in 0..lines {
             if line != 0 {
@@ -104,7 +106,11 @@ impl<'a, 'store, 'r, R: Rng + ?Sized> Random<'a, 'store, 'r, R> {
             }
             let mut len: usize = self.rng.random_range(..5);
             while len > 0 {
-                let c: char = self.rng.random();
+                let c: char = if self.sample.is_empty() {
+                    self.rng.random()
+                } else {
+                    *self.sample.choose(&mut self.rng).unwrap()
+                };
                 if c != '\n' {
                     utf8.push(c);
                     len -= 1;
@@ -169,7 +175,7 @@ impl<'a, 'store, 'r, R: Rng + ?Sized> Random<'a, 'store, 'r, R> {
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    let seed: u64 = 0;//rand::rng().random();
+    let seed: u64 = 763768270265061924;//rand::rng().random();
     println!("seed={seed}");
     let mut rng = SmallRng::seed_from_u64(seed);
     c.bench_function("round-trip", |b| {
@@ -180,6 +186,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                 bump: &bump,
                 arena: &mut arena,
                 rng: &mut rng,
+                sample: "ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars().collect(),
             };
             let original: File = random.file(2);
             let original_string = original.to_string();

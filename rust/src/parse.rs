@@ -176,11 +176,15 @@ where
         }
         let bytes = self.utf8.as_bytes();
         let limit = bytes.len();
-        let from = self.first + prefix.len();
+        let mut from = self.first + prefix.len();
         if from > limit || &bytes[self.first..from] != prefix {
             return None;
         }
-        let utf8 = self.stretch(indent + 1, from);
+        let more = indent + 1;
+        if prefix == [b'#'] && from == self.end && self.stretch_once(more) {
+            from += more + 1;
+        }
+        let utf8 = self.stretch(more, from);
         self.next(usize::MAX); // stretch means excess is impossible
         Some(Comment { utf8 })
     }
@@ -243,7 +247,7 @@ where
                                     self.text(indent, end)
                                 } else {
                                     // first line of stretched text can have excess indent
-                                    self.text(indent, end + indent + 1)
+                                    self.text(indent, end + indent + 2)
                                 }
                                 .into(),
                             );

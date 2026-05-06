@@ -8,6 +8,7 @@
 #![allow(missing_docs)]
 #![warn(unused)]
 
+use assert_json_diff::assert_json_eq;
 use bumpalo::Bump;
 use criterion::{Criterion, criterion_group, criterion_main};
 use rand::prelude::IndexedRandom;
@@ -16,6 +17,7 @@ use rand::{Rng, RngExt, SeedableRng};
 use std::fmt::{self, Write};
 use tindalwic::alloc::Arena;
 use tindalwic::internals::Builder as _;
+use tindalwic::serde::Mode;
 use tindalwic::{Comment, Dict, Entry, File, Item, List, Name, Text};
 
 /// a very blurry outline of some data. created first to be able to call the
@@ -193,7 +195,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             let parsed = arena.parse_or_panic(&encoded).unwrap();
             if original != parsed {
                 println!("\n{original:?}\n===\n{encoded}===");
-                assert_json_diff::assert_json_eq!(original, parsed);
+                assert_json_eq!(Mode::Tindalwic(original), Mode::Tindalwic(parsed));
             }
         })
     });

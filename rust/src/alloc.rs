@@ -2,59 +2,80 @@
 
 extern crate alloc;
 
-use super::{internals::Builder, *};
+use super::internals::Builder;
+use crate::{Comment, Dict, Entry, File, Item, List, Text, UTF8};
 use alloc::string::String;
 use alloc::vec::Vec;
 use bumpalo::Bump;
+use core::cell::Cell;
+
+/// this pattern is typically implemented atop RefCell, but because this is in a
+/// critical path, small unsafe blocks avoid the cost of those runtime checks.
+struct CellVec<T>(Cell<Vec<T>>);
+impl<T: Copy> CellVec<T> {
+    fn new() -> Self {
+        CellVec(Cell::new(Vec::new()))
+    }
+    fn push(&self, value: T) -> Option<()> {
+        let CellVec(cell) = self;
+        // SAFETY: Cell instance is private, no ref to its Vec value leaks outside this
+        // impl, except via this let, only as receiver in Vec methods, which are safe.
+        let vec = unsafe { &mut *cell.as_ptr() };
+        vec.push(value);
+        Some(())
+    }
+    fn finish<'b>(&self, count: usize, bump: &'b Bump) -> Option<&'b [Cell<T>]> {
+        let CellVec(cell) = self;
+        // SAFETY: Cell instance is private, no ref to its Vec value leaks outside this
+        // impl, except via this let, only as receiver in Vec methods, which are safe.
+        let vec = unsafe { &mut *cell.as_ptr() };
+        let start = vec.len().checked_sub(count)?;
+        let cells = bump.alloc_slice_fill_with(count, |i| Cell::new(vec[start + i]));
+        vec.truncate(start);
+        Some(cells)
+    }
+}
 
 /// a flavor of Arena that uses bumpalo to put things in the heap.
 /// TODO think about fleshing this out with more convenient methods.
 pub struct Arena<'a, 'bump> {
-    items: Vec<Item<'a, 'bump>>,
-    entries: Vec<Entry<'a, 'bump>>,
+    items: CellVec<Item<'a, 'bump>>,
+    entries: CellVec<Entry<'a, 'bump>>,
     bump: &'bump Bump,
 }
 impl<'a, 'bump> Builder<'a, 'bump> for Arena<'a, 'bump> {
-    fn list(&mut self, count: usize) -> Option<List<'a, 'bump>> {
-        let start = self.items.len().checked_sub(count)?;
-        let cells = self
-            .bump
-            .alloc_slice_fill_with(count, |i| Cell::new(self.items[start + i]));
-        self.items.truncate(start);
-        Some(List::wrap(cells))
+    fn list(&self, count: usize) -> Option<List<'a, 'bump>> {
+        Some(List::wrap(self.items.finish(count, self.bump)?))
     }
 
-    fn dict(&mut self, count: usize) -> Option<Dict<'a, 'bump>> {
-        let start = self.entries.len().checked_sub(count)?;
-        let cells = self.bump.alloc_slice_fill_with(count, |i| {
-            Cell::new(self.entries[self.entries.len() - count + i])
-        });
-        self.entries.truncate(start);
-        Some(Dict::wrap(cells))
+    fn dict(&self, count: usize) -> Option<Dict<'a, 'bump>> {
+        Some(Dict::wrap(self.entries.finish(count, self.bump)?))
     }
 
-    fn item(&mut self, item: Item<'a, 'bump>) -> Option<()> {
-        self.items.push(item);
-        Some(())
+    fn item(&self, item: Item<'a, 'bump>) -> Option<()> {
+        self.items.push(item)
     }
 
-    fn entry(&mut self, entry: Entry<'a, 'bump>) -> Option<()> {
-        self.entries.push(entry);
-        Some(())
+    fn entry(&self, entry: Entry<'a, 'bump>) -> Option<()> {
+        self.entries.push(entry)
     }
 }
 impl<'a, 'bump> Arena<'a, 'bump> {
     /// the Bump needs an outside let binding so it lives long enough.
     pub fn new(bump: &'bump Bump) -> Self {
         Arena {
-            items: Vec::new(),
-            entries: Vec::new(),
+            items: CellVec::new(),
+            entries: CellVec::new(),
             bump,
         }
     }
+    /// copy a str into the bump
+    pub fn intern(&self, value: &'_ str) -> &'bump str {
+        self.bump.alloc_str(value)
+    }
     /// call the parser on the provided content, panic if the content isn't legit.
-    pub fn parse_or_panic(&mut self, content: &'a str) -> Option<File<'a, 'bump>> {
-        parse::Input::parse(self, content, |error| panic!("{error}"))
+    pub fn parse_or_panic(&self, content: &'a str) -> Option<File<'a, 'bump>> {
+        crate::parse::Input::parse(self, content, |error| panic!("{error}"))
     }
 }
 
@@ -98,7 +119,7 @@ mod tests {
     #[test]
     fn parse_alloc() {
         let bump = Bump::new();
-        let mut arena = Arena::new(&bump);
+        let arena = Arena::new(&bump);
         let file = arena.parse_or_panic("k=v\n").unwrap();
         assert_eq!(file.to_string(), "k=v\n");
     }

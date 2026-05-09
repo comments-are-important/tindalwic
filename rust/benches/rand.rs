@@ -17,7 +17,7 @@ use rand::{Rng, RngExt, SeedableRng};
 use std::fmt::{self, Write};
 use tindalwic::alloc::Arena;
 use tindalwic::internals::Builder as _;
-use tindalwic::serde::Mode;
+use tindalwic::serde::Verbose;
 use tindalwic::{Comment, Dict, Entry, File, Item, List, Name, Text};
 
 /// a very blurry outline of some data. created first to be able to call the
@@ -195,7 +195,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             let parsed = arena.parse_or_panic(&encoded).unwrap();
             if original != parsed {
                 println!("\n{original:?}\n===\n{encoded}===");
-                assert_json_eq!(Mode::Tindalwic(original), Mode::Tindalwic(parsed));
+                assert_json_eq!(Verbose(original), Verbose(parsed));
             }
         })
     });

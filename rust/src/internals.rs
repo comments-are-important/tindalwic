@@ -4,10 +4,10 @@ use super::*;
 
 /// TODO return Results, not Options, here and in Arenas.
 pub trait Builder<'a, 'store> {
-    fn list(&mut self, count: usize) -> Option<List<'a, 'store>>;
-    fn dict(&mut self, count: usize) -> Option<Dict<'a, 'store>>;
-    fn item(&mut self, item: Item<'a, 'store>) -> Option<()>;
-    fn entry(&mut self, entry: Entry<'a, 'store>) -> Option<()>;
+    fn list(&self, count: usize) -> Option<List<'a, 'store>>;
+    fn dict(&self, count: usize) -> Option<Dict<'a, 'store>>;
+    fn item(&self, item: Item<'a, 'store>) -> Option<()>;
+    fn entry(&self, entry: Entry<'a, 'store>) -> Option<()>;
 }
 
 /// push T into stack on low side of array, finish them into high side.
@@ -19,43 +19,45 @@ pub trait Builder<'a, 'store> {
 /// but keep siblings together by transferring, as group, from low to high.
 struct LowToHigh<'store, T> {
     cells: &'store [Cell<T>],
-    next: usize,
-    done: usize,
+    next: Cell<usize>,
+    done: Cell<usize>,
 }
 impl<'store, T> LowToHigh<'store, T> {
     fn wrap(cells: &'store [Cell<T>]) -> Self {
         LowToHigh {
             cells,
-            next: 0,
-            done: cells.len(),
+            next: 0.into(),
+            done: cells.len().into(),
         }
     }
-    fn push(&mut self, value: T) -> Option<()> {
+    fn push(&self, value: T) -> Option<()> {
         if self.next >= self.done {
             return None;
         }
-        let next = self.next;
+        let next = self.next.get();
         self.cells[next].set(value);
-        self.next = next + 1;
+        self.next.set(next + 1);
         Some(())
     }
-    fn finish(&mut self, count: usize) -> Option<&'store [Cell<T>]> {
-        if self.next < count || self.next > self.done {
+    fn finish(&self, count: usize) -> Option<&'store [Cell<T>]> {
+        let next = self.next.get();
+        let done = self.done.get();
+        if next < count || next > done {
             return None;
         }
-        if self.next == self.done {
-            let both = self.next - count;
-            self.next = both;
-            self.done = both;
+        if next == done {
+            let both = next - count;
+            self.next.set(both);
+            self.done.set(both);
             return Some(&self.cells[both..both + count]);
         }
-        let next = self.next - count;
-        let done = self.done - count;
+        let next = next - count;
+        let done = done - count;
         for offset in (0..count).rev() {
             self.cells[next + offset].swap(&self.cells[done + offset]);
         }
-        self.next = next;
-        self.done = done;
+        self.next.set(next);
+        self.done.set(done);
         Some(&self.cells[done..done + count])
     }
 }
@@ -65,16 +67,16 @@ pub struct Arena<'a, 'store> {
     entries: LowToHigh<'store, Entry<'a, 'store>>,
 }
 impl<'a, 'store> Builder<'a, 'store> for Arena<'a, 'store> {
-    fn list(&mut self, count: usize) -> Option<List<'a, 'store>> {
+    fn list(&self, count: usize) -> Option<List<'a, 'store>> {
         Some(List::wrap(self.items.finish(count)?))
     }
-    fn dict(&mut self, count: usize) -> Option<Dict<'a, 'store>> {
+    fn dict(&self, count: usize) -> Option<Dict<'a, 'store>> {
         Some(Dict::wrap(self.entries.finish(count)?))
     }
-    fn item(&mut self, item: Item<'a, 'store>) -> Option<()> {
+    fn item(&self, item: Item<'a, 'store>) -> Option<()> {
         self.items.push(item)
     }
-    fn entry(&mut self, entry: Entry<'a, 'store>) -> Option<()> {
+    fn entry(&self, entry: Entry<'a, 'store>) -> Option<()> {
         self.entries.push(entry)
     }
 }
@@ -88,44 +90,44 @@ impl<'a, 'store> Arena<'a, 'store> {
         Arena { items, entries }
     }
     pub fn item_slots(&self) -> usize {
-        self.items.done - self.items.next
+        self.items.done.get() - self.items.next.get()
     }
     pub fn entry_slots(&self) -> usize {
-        self.entries.done - self.entries.next
+        self.entries.done.get() - self.entries.next.get()
     }
     pub fn completed(&self) -> Option<()> {
-        if self.items.done == 0 && self.entries.done == 0 {
+        if self.items.done.get() == 0 && self.entries.done.get() == 0 {
             Some(())
         } else {
             None
         }
     }
-    pub fn keyed(&mut self, key: &'a str, item: Item<'a, 'store>) -> Option<()> {
+    pub fn keyed(&self, key: &'a str, item: Item<'a, 'store>) -> Option<()> {
         self.entry(Entry::wrap(key, item))
     }
-    pub fn text_item(&mut self, utf8: &'a str) -> Option<()> {
+    pub fn text_item(&self, utf8: &'a str) -> Option<()> {
         self.item(Text::wrap(utf8).into())
     }
-    pub fn list_item(&mut self, count: usize) -> Option<()> {
+    pub fn list_item(&self, count: usize) -> Option<()> {
         let list = self.list(count)?;
         self.item(list.into())
     }
-    pub fn dict_item(&mut self, count: usize) -> Option<()> {
+    pub fn dict_item(&self, count: usize) -> Option<()> {
         let dict = self.dict(count)?;
         self.item(dict.into())
     }
-    pub fn text_entry(&mut self, key: &'a str, utf8: &'a str) -> Option<()> {
+    pub fn text_entry(&self, key: &'a str, utf8: &'a str) -> Option<()> {
         self.keyed(key, Text::wrap(utf8).into())
     }
-    pub fn list_entry(&mut self, key: &'a str, count: usize) -> Option<()> {
+    pub fn list_entry(&self, key: &'a str, count: usize) -> Option<()> {
         let list = self.list(count)?;
         self.keyed(key, list.into())
     }
-    pub fn dict_entry(&mut self, key: &'a str, count: usize) -> Option<()> {
+    pub fn dict_entry(&self, key: &'a str, count: usize) -> Option<()> {
         let dict = self.dict(count)?;
         self.keyed(key, dict.into())
     }
-    pub fn parse_or_panic(&mut self, content: &'a str) -> Option<File<'a, 'store>> {
+    pub fn parse_or_panic(&self, content: &'a str) -> Option<File<'a, 'store>> {
         parse::Input::parse(self, content, |error| panic!("{error}"))
     }
 }

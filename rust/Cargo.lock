@@ -690,6 +690,7 @@ dependencies = [
  "markdown",
  "rand",
  "serde",
+ "serde_json",
  "tindalwic-macros",
  "trybuild",
 ]

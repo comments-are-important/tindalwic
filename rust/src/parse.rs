@@ -19,7 +19,7 @@ where
 {
     /// None means the arena is too small (or the UTF-8 is way too big).
     pub(crate) fn parse<'store>(
-        arena: &mut dyn Builder<'a, 'store>,
+        arena: &dyn Builder<'a, 'store>,
         utf8: &'a str,
         report: F,
     ) -> Option<File<'a, 'store>> {
@@ -204,7 +204,7 @@ where
     fn items<'store>(
         &mut self,
         indent: usize,
-        arena: &mut dyn Builder<'a, 'store>,
+        arena: &dyn Builder<'a, 'store>,
     ) -> Option<List<'a, 'store>> {
         let bytes = self.utf8.as_bytes();
         let prolog = self.comment(indent, b"#");
@@ -294,7 +294,7 @@ where
     fn entries<'store>(
         &mut self,
         indent: usize,
-        arena: &mut dyn Builder<'a, 'store>,
+        arena: &dyn Builder<'a, 'store>,
     ) -> Option<Dict<'a, 'store>> {
         let bytes = self.utf8.as_bytes();
         let prolog = self.comment(indent, b"#");

@@ -1,32 +1,56 @@
 #![allow(missing_docs)]
 
-use std::cell::Cell;
-use tindalwic::*;
+use tindalwic::{Comment, Dict, Entry, File, Item, Name, Text, arena, json, walk};
 
 // #[test]
 // fn macro_failures() {
 //     trybuild::TestCases::new().compile_fail("tests/macro_err/*.rs");
 // }
 
-#[test]
 #[cfg(feature = "alloc")]
-fn hashbang_avoidance() {
-    let nothing = [];
-    let mut file = File::wrap(&nothing);
-    file.prolog = Comment::some("!suspect");
-    let encoded = file.to_string();
-    assert_eq!(encoded, "#\n\t!suspect\n");
-    arena! {
-        $crate = crate;
-        let mut arena = <1dict>;
+mod alloc_tests {
+    use tindalwic::{Comment, File, arena};
+
+    #[cfg(feature = "serde")]
+    mod serde_tests {
+        use bumpalo::Bump;
+        use tindalwic::alloc::Arena;
+        use tindalwic::serde::Neutered;
+        use tindalwic::{File, json};
+        #[test]
+        fn deserialize_file_from_json() {
+            let bump = Bump::new();
+            let arena = Arena::new(&bump);
+
+            let mut de = serde_json::Deserializer::from_str(r#"{ "key":"one\ntwo" }"#);
+            let file: File = Neutered::deserialize(&arena, &mut de).unwrap();
+
+            json! {
+                let expected = {"key":"one\ntwo"}.unwrap();
+            }
+            assert_eq!(file, File::wrap(expected.cells));
+        }
     }
-    let parsed = arena.parse_or_panic(&encoded).unwrap();
-    assert!(parsed.hashbang.is_none());
-    assert_eq!(
-        Vec::from_iter(parsed.prolog.unwrap().lines()),
-        vec!["!suspect"]
-    );
+
+    #[test]
+    fn hashbang_avoidance() {
+        let nothing = [];
+        let mut file = File::wrap(&nothing);
+        file.prolog = Comment::some("!suspect");
+        let encoded = file.to_string();
+        assert_eq!(encoded, "#\n\t!suspect\n");
+        arena! {
+            let mut arena = <1dict>;
+        }
+        let parsed = arena.parse_or_panic(&encoded).unwrap();
+        assert!(parsed.hashbang.is_none());
+        assert_eq!(
+            Vec::from_iter(parsed.prolog.unwrap().lines()),
+            vec!["!suspect"]
+        );
+    }
 }
+
 #[test]
 fn three_blank_comments() {
     let nothing = [];
@@ -35,7 +59,7 @@ fn three_blank_comments() {
         before: Comment::some(""),
         key: "",
     };
-    let entries = [Cell::new(Entry {
+    let entries = [core::cell::Cell::new(Entry {
         name,
         item: Item::Dict(Dict::wrap(&nothing)),
     })];

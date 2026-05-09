@@ -259,10 +259,10 @@ impl<'a> Text<'a> {
 /// [Item::List] wraps a sequence of `Cell<Item>`, and optional prolog and epilog comments.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct List<'a, 'store> {
-    /// The contents of the Item::List.
-    pub cells: &'store [Cell<Item<'a, 'store>>],
     /// A List can have an introductory Comment.
     pub prolog: Option<Comment<'a>>,
+    /// The contents of the Item::List.
+    pub cells: &'store [Cell<Item<'a, 'store>>],
     /// A List can have a Comment after it.
     pub epilog: Option<Comment<'a>>,
 }
@@ -387,10 +387,10 @@ impl<'a, 'store> Entry<'a, 'store> {
 /// [Item::Dict] wraps a sequence of `Cell<Entry>`, and optional prolog and epilog comments.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Dict<'a, 'store> {
-    /// The contents of the Item::Dict.
-    pub cells: &'store [Cell<Entry<'a, 'store>>],
     /// A Dict can have an introductory Comment.
     pub prolog: Option<Comment<'a>>,
+    /// The contents of the Item::Dict.
+    pub cells: &'store [Cell<Entry<'a, 'store>>],
     /// A Dict can have a Comment after it.
     pub epilog: Option<Comment<'a>>,
 }
@@ -501,12 +501,12 @@ impl<'a, 'store> From<Dict<'a, 'store>> for Item<'a, 'store> {
 /// similar to a [Item::Dict], but with different comments.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct File<'a, 'store> {
-    /// The contents of the Item::File.
-    pub cells: &'store [Cell<Entry<'a, 'store>>],
     /// A File can start with a Unix `#!` Comment.
     pub hashbang: Option<Comment<'a>>,
     /// A File can have an introductory Comment.
     pub prolog: Option<Comment<'a>>,
+    /// The contents of the Item::File.
+    pub cells: &'store [Cell<Entry<'a, 'store>>],
 }
 impl<'a, 'store> File<'a, 'store> {
     /// Return a zero-copy instance using the provided cells (and no comments).

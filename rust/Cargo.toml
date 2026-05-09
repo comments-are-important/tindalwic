@@ -23,6 +23,7 @@ assert-json-diff = "2.0.2"
 criterion = { version = "0.8.2", features = ["html_reports"] }
 markdown = "1.0.0"
 rand = "0.10.1"
+serde_json = { version = "1.0.149", features = ["alloc"] }
 trybuild = "1.0.116"
 
 [package.metadata.docs.rs]

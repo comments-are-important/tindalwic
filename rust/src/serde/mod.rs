@@ -1,4 +1,5 @@
 //! adapters for serde
+#![warn(unused)]
 
 mod compact;
 mod neutered;
@@ -11,10 +12,29 @@ pub use verbose::Verbose;
 use crate::alloc::Arena;
 use crate::{Comment, UTF8};
 use core::fmt;
+use serde::Deserialize;
 use serde::de::{DeserializeSeed, Deserializer, Error, Visitor};
 use serde::ser::{Serialize, Serializer};
+use tindalwic_macros::serialize_deserialize_seed_visit;
 
-struct UTF8Ser<'a>(UTF8<'a>);
+serialize_deserialize_seed_visit! {
+    UTF8("a string value")
+    serialize {
+        if this.dedent == 0 || this.dedent == usize::MAX {
+            s.serialize_str(this.slice)
+        } else {
+            s.serialize_str(&this.joined())
+        }
+    }
+    deserialize_str()
+    visit_borrowed_str {
+        Ok(UTF8::wrap(v))
+    }
+    visit_str {
+        Ok(UTF8::wrap(arena.intern(v)))
+    }
+}
+
 impl<'a> UTF8Ser<'a> {
     fn opt(value: Option<Comment<'a>>) -> Option<UTF8Ser<'a>> {
         match value {
@@ -23,34 +43,25 @@ impl<'a> UTF8Ser<'a> {
         }
     }
 }
-impl<'a> Serialize for UTF8Ser<'a> {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        let UTF8Ser(this) = self;
-        if this.dedent == 0 || this.dedent == usize::MAX {
-            s.serialize_str(this.slice)
-        } else {
-            s.serialize_str(&this.joined())
-        }
-    }
+
+#[derive(Deserialize)]
+enum ItemVariants {
+    Text,
+    List,
+    Dict,
+}
+impl ItemVariants {
+    const NAME: &'static str = "Item";
+    const VARIANTS: &'static [&'static str] = &["Text", "List", "Dict"];
 }
 
-struct UTF8De<'de, 'a, 'bump>(&'de Arena<'a, 'bump>);
-impl<'de: 'a + 'bump, 'a, 'bump> Visitor<'de> for UTF8De<'de, 'a, 'bump> {
-    type Value = UTF8<'a>;
-    fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-        out.write_str("a string")
-    }
-    fn visit_borrowed_str<E: Error>(self, v: &'de str) -> Result<Self::Value, E> {
-        Ok(UTF8::wrap(v))
-    }
-    fn visit_str<E: Error>(self, v: &str) -> Result<Self::Value, E> {
-        let UTF8De(arena) = self;
-        Ok(UTF8::wrap(arena.intern(v)))
-    }
+#[derive(Deserialize)]
+#[serde(field_identifier, rename_all = "lowercase")]
+enum TextFields {
+    UTF8,
+    Epilog,
 }
-impl<'de: 'a + 'bump, 'a, 'bump> DeserializeSeed<'de> for UTF8De<'de, 'a, 'bump> {
-    type Value = UTF8<'a>;
-    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
-        d.deserialize_str(self)
-    }
+impl TextFields {
+    const NAME: &'static str = "Text";
+    const FIELDS: &'static [&'static str] = &["utf8", "epilog"];
 }

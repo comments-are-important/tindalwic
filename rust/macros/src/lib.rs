@@ -14,15 +14,307 @@
 //!     }
 
 use proc_macro::TokenStream as RawStream;
-use proc_macro2::{Span, TokenStream, TokenTree};
+use proc_macro2::{Delimiter, Span, TokenStream, TokenTree};
 use quote::{ToTokens, TokenStreamExt, quote};
 use std::cell::RefCell;
-use syn::parse::{Nothing, Parse, ParseStream};
+use std::collections::HashMap;
+use std::collections::hash_map::Entry as HashMapEntry;
+use syn::parse::{Nothing, Parse, ParseStream, Parser};
 use syn::punctuated::Punctuated;
+use syn::spanned::Spanned;
 use syn::token::{Brace, Bracket, Paren};
-use syn::{
-    Error, Ident, LitInt, Result, Token, braced, bracketed, parenthesized, parse_macro_input,
-};
+use syn::{Error, Ident, LitInt, Result};
+use syn::{Token, braced, bracketed, parenthesized, parse_macro_input};
+
+struct Group(proc_macro2::Group);
+impl Group {
+    fn not_empty(self, message: &'static str) -> Result<TokenStream> {
+        if self.0.stream().is_empty() {
+            Err(Error::new(self.0.span(), message))
+        } else {
+            Ok(self.0.stream())
+        }
+    }
+    fn span(&self) -> Span {
+        self.0.span()
+    }
+    fn stream(&self) -> TokenStream {
+        self.0.stream()
+    }
+    fn punctuated<T: Parse, P: Parse>(self) -> Result<Punctuated<T, P>> {
+        Ok(Punctuated::<T, P>::parse_terminated.parse2(self.stream())?)
+    }
+    fn required_braced(input: ParseStream) -> Result<Self> {
+        let content;
+        let delim = braced!(content in input);
+        let mut group = proc_macro2::Group::new(Delimiter::Brace, content.parse()?);
+        group.set_span(delim.span.span());
+        Ok(Group(group))
+    }
+    fn optional_braced(input: ParseStream) -> Result<Option<Self>> {
+        Ok(if input.peek(Brace) {
+            Some(Group::required_braced(input)?)
+        } else {
+            None
+        })
+    }
+    fn required_bracketed(input: ParseStream) -> Result<Self> {
+        let content;
+        let delim = bracketed!(content in input);
+        let mut group = proc_macro2::Group::new(Delimiter::Bracket, content.parse()?);
+        group.set_span(delim.span.span());
+        Ok(Group(group))
+    }
+    fn optional_bracketed(input: ParseStream) -> Result<Option<Self>> {
+        Ok(if input.peek(Bracket) {
+            Some(Group::required_bracketed(input)?)
+        } else {
+            None
+        })
+    }
+    fn required_parenthesized(input: ParseStream) -> Result<Self> {
+        let content;
+        let delim = parenthesized!(content in input);
+        let mut group = proc_macro2::Group::new(Delimiter::Parenthesis, content.parse()?);
+        group.set_span(delim.span.span());
+        Ok(Group(group))
+    }
+    fn optional_parenthesized(input: ParseStream) -> Result<Option<Self>> {
+        Ok(if input.peek(Paren) {
+            Some(Group::required_parenthesized(input)?)
+        } else {
+            None
+        })
+    }
+    fn required_angled(input: ParseStream) -> Result<Self> {
+        let open = input.parse::<Token![<]>()?;
+        let mut stream = TokenStream::new();
+        let mut depth = 1usize;
+        while depth != 0 {
+            if input.is_empty() {
+                let span = open.span.join(input.span()).unwrap_or(open.span);
+                return Err(Error::new(span, "unbalanced <> brackets"));
+            }
+            stream.append(input.parse::<TokenTree>()?);
+            if input.peek(Token![<]) {
+                depth += 1;
+            } else if input.peek(Token![>]) {
+                depth -= 1;
+            }
+        }
+        let close = input.parse::<Token![>]>()?;
+        let mut group = proc_macro2::Group::new(Delimiter::None, stream);
+        group.set_span(open.span.join(close.span).unwrap_or(open.span));
+        Ok(Group(group))
+    }
+    fn optional_angled(input: ParseStream) -> Result<Option<Self>> {
+        Ok(if input.peek(Token![<]) {
+            Some(Group::required_angled(input)?)
+        } else {
+            None
+        })
+    }
+}
+
+struct FunctionVaguely {
+    name: Ident,
+    args: Option<Group>,
+    body: Option<Group>,
+}
+impl Parse for FunctionVaguely {
+    fn parse(input: ParseStream) -> Result<Self> {
+        Ok(FunctionVaguely {
+            name: input.parse()?,
+            args: Group::optional_parenthesized(input)?,
+            body: Group::optional_braced(input)?,
+        })
+    }
+}
+impl FunctionVaguely {
+    fn name_eq(&self, name: &'static str) -> Result<&Self> {
+        if self.name.to_string() == name {
+            return Ok(self);
+        }
+        Err(Error::new_spanned(
+            self.name.clone(),
+            format!("expected `{name}` here"),
+        ))
+    }
+    fn name_starts(&self, prefix: &'static str) -> Result<&Self> {
+        if self.name.to_string().starts_with(prefix) {
+            return Ok(self);
+        }
+        Err(Error::new_spanned(
+            self.name.clone(),
+            format!("expected `{prefix}*` here"),
+        ))
+    }
+    fn args_some(&self) -> Result<&Self> {
+        if self.args.is_some() {
+            return Ok(self);
+        }
+        Err(Error::new_spanned(self.name.clone(), "requires (args)"))
+    }
+    fn args_none(&self) -> Result<&Self> {
+        if let Some(group) = &self.args {
+            Err(Error::new(group.span(), "unexpected (args)"))
+        } else {
+            Ok(self)
+        }
+    }
+    fn body_some(&self) -> Result<&Self> {
+        if self.body.is_some() {
+            return Ok(self);
+        }
+        Err(Error::new_spanned(self.name.clone(), "requires {body}"))
+    }
+    fn body_none(&self) -> Result<&Self> {
+        if let Some(group) = &self.body {
+            Err(Error::new(group.span(), "unexpected {body}"))
+        } else {
+            Ok(self)
+        }
+    }
+}
+
+// ======================================================================= serde helper
+
+struct SerDe {
+    inner: FunctionVaguely,
+    serialize: FunctionVaguely,
+    deserialize: FunctionVaguely,
+    visitors: HashMap<String, FunctionVaguely>,
+}
+impl Parse for SerDe {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let inner: FunctionVaguely = input.parse()?;
+        inner.args_some()?.body_none()?;
+        let serialize: FunctionVaguely = input.parse()?;
+        serialize.name_eq("serialize")?.args_none()?.body_some()?;
+        let deserialize: FunctionVaguely = input.parse()?;
+        deserialize
+            .name_starts("deserialize_")?
+            .args_some()?
+            .body_none()?;
+        let mut visitors = HashMap::new();
+        while !input.is_empty() {
+            let visitor: FunctionVaguely = input.parse()?;
+            visitor.name_starts("visit_")?.args_none()?.body_some()?;
+            match visitors.entry(visitor.name.to_string()) {
+                HashMapEntry::Occupied(_) => {
+                    return Err(Error::new_spanned(visitor.name, "duplicate method name"));
+                }
+                HashMapEntry::Vacant(entry) => {
+                    entry.insert(visitor);
+                }
+            }
+        }
+        Ok(SerDe {
+            inner,
+            serialize,
+            deserialize,
+            visitors,
+        })
+    }
+}
+impl ToTokens for SerDe {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let SerDe {
+            inner,
+            serialize,
+            deserialize,
+            visitors,
+        } = self;
+        let name = &inner.name;
+        let name_str = name.to_string();
+        let ser = Ident::new(&format!("{name_str}Ser"), Span::call_site());
+        let (ser_params, inner_params) = match &name_str[..] {
+            "UTF8" | "Text" => (quote!(<'a>), quote!(<'a>)),
+            _ => (quote!(<'a,'store>), quote!(<'a,'store>)),
+        };
+        let serialize = serialize.body.as_ref().expect("serialized body").stream();
+        tokens.extend(quote! {
+            struct #ser #ser_params (#name #inner_params );
+            impl #ser_params Serialize for #ser #ser_params {
+                fn serialize<S:Serializer>(&self,s:S)->Result<S::Ok,S::Error> {
+                    let #ser(this) = self;
+                    #serialize
+                }
+            }
+        });
+        if visitors.is_empty() {
+            return;
+        }
+        let de = Ident::new(&format!("{name_str}De"), Span::call_site());
+        let expecting = inner.args.as_ref().expect("inner args").stream();
+        let mut methods = TokenStream::new();
+        for (name_str, vaguely) in visitors {
+            let name = vaguely.name.clone();
+            let signature = match &name_str[..] {
+                "visit_str" => quote! {
+                    <E:Error>(self,v:&str)->Result<Self::Value,E>
+                },
+                "visit_borrowed_str" => quote! {
+                    <E:Error>(self,v:&'de str)->Result<Self::Value,E>
+                },
+                "visit_seq" => quote! {
+                    <A:SeqAccess<'de>>(self,mut seq:A)->Result<Self::Value,A::Error>
+                },
+                "visit_map" => quote! {
+                    <A:MapAccess<'de>>(self,mut map:A)->Result<Self::Value,A::Error>
+                },
+                "visit_enum" => quote! {
+                    <A:EnumAccess<'de>>(self,data:A)->Result<Self::Value,A::Error>
+                },
+                _ => quote!(()),
+            };
+            let body = vaguely.body.as_ref().expect("visitor body").stream();
+            methods.extend(quote! {
+                fn #name #signature {
+                    #[allow(unused)]
+                    let #de(arena) = self;
+                    #body
+                }
+            });
+        }
+        let mut arguments = deserialize
+            .args
+            .as_ref()
+            .expect("deserialize args")
+            .stream();
+        if !arguments.is_empty() {
+            arguments.extend(quote![,])
+        }
+        let deserialize = &deserialize.name;
+        tokens.extend(quote! {
+            struct #de<'de, 'a, 'store>(&'de Arena<'a, 'store>);
+            impl<'de:'a+'store,'a,'store> DeserializeSeed<'de> for #de<'de,'a,'store> {
+                type Value = #name #inner_params ;
+                fn deserialize<D:Deserializer<'de>>(self,d:D)->Result<Self::Value,D::Error>{
+                    d.#deserialize(#arguments self)
+                }
+            }
+            impl<'de: 'a + 'store, 'a, 'store> Visitor<'de> for #de<'de, 'a, 'store> {
+                type Value = #name #inner_params ;
+                fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
+                    out.write_str(#expecting)
+                }
+                #methods
+            }
+        });
+    }
+}
+
+/// this is too tailored to the way tindalwic implements serde to be useful outside.
+/// it has to be a proc_macro, so it has to be over here, so it has to be accessible,
+/// but it isn't reexported from the lib crate, and isn't intended for public use.
+/// the input syntax is weird, but it helps clarity by hiding boilerplate, and helps
+/// prevent bugs via a predictable pattern that works with DeserializeSeed.
+#[proc_macro]
+pub fn serialize_deserialize_seed_visit(input: RawStream) -> RawStream {
+    let output = parse_macro_input!(input as SerDe);
+    quote!(#output).into()
+}
 
 // ================================================================== dependency rename
 // a thread_local is better than spreading the handling all over the place.
@@ -286,14 +578,12 @@ impl Parse for Walk {
     fn parse(input: ParseStream) -> Result<Self> {
         input.parse::<Token![let]>()?;
         let mut binds: Punctuated<Variable, Token![,]>;
-        if input.peek(Paren) {
-            let content;
-            let delims = parenthesized!(content in input).span;
-            binds = content.parse_terminated(Variable::parse, Token![,])?;
+        if let Some(stream) = Group::optional_parenthesized(input)? {
+            binds = stream.punctuated()?;
             if binds.is_empty() {
-                return Err(Error::new(delims.join(), "missing binding inside ()"));
+                return Err(Error::new_spanned(binds, "missing binding inside ()"));
             } else if binds.len() == 1 {
-                return Err(Error::new(delims.join(), "remove unnecessary parens"));
+                return Err(Error::new_spanned(binds, "remove unnecessary parens"));
             }
         } else {
             binds = Punctuated::new();
@@ -301,78 +591,31 @@ impl Parse for Walk {
         }
         input.parse::<Token![=]>()?;
         let mut list = false;
-        let origin;
-        if input.peek(Bracket) {
+        let origin = if let Some(stream) = Group::optional_bracketed(input)? {
             list = true;
-            let content;
-            let delims = bracketed!(content in input).span;
-            if content.is_empty() {
-                return Err(Error::new(delims.join(), "missing list inside []"));
-            }
-            origin = content.parse()?;
-        } else if input.peek(Brace) {
-            let content;
-            let delims = braced!(content in input).span;
-            if content.is_empty() {
-                return Err(Error::new(delims.join(), "missing dict inside {}"));
-            }
-            origin = content.parse()?;
-        } else if input.peek(Paren) {
-            let content;
-            let delims = parenthesized!(content in input).span;
-            if content.is_empty() {
-                return Err(Error::new(delims.join(), "missing file inside ()"));
-            }
-            let content: TokenStream = content.parse()?;
+            stream.not_empty("missing list inside []")?
+        } else if let Some(stream) = Group::optional_braced(input)? {
+            stream.not_empty("missing dict inside {}")?
+        } else if let Some(stream) = Group::optional_parenthesized(input)? {
+            let stream = stream.not_empty("missing file inside ()")?;
             let tindalwic = tindalwic();
-            origin = quote!(#tindalwic::Dict::wrap((#content).cells));
+            quote!(#tindalwic::Dict::wrap((#stream).cells))
         } else {
-            return Err(input.error("must start with [origin] or {origin}"));
-        }
+            return Err(input.error("must start with [List], {Dict} or (File)"));
+        };
         let mut text = false;
         let mut steps = Vec::new();
         while !input.is_empty() {
-            if input.peek(Bracket) {
-                let content;
-                let delims = bracketed!(content in input).span;
-                if content.is_empty() {
-                    return Err(Error::new(delims.join(), "missing expr inside []"));
-                }
-                let expr = content.parse()?;
+            if let Some(stream) = Group::optional_bracketed(input)? {
+                let expr = stream.not_empty("missing expr inside []")?;
                 steps.push(Branch { expr, list });
                 list = true;
-            } else if input.peek(Brace) {
-                let content;
-                let delims = braced!(content in input).span;
-                if content.is_empty() {
-                    return Err(Error::new(delims.join(), "missing expr inside {}"));
-                }
-                let expr = content.parse()?;
+            } else if let Some(stream) = Group::optional_braced(input)? {
+                let expr = stream.not_empty("missing expr inside {}")?;
                 steps.push(Branch { expr, list });
                 list = false;
-            } else if input.peek(Token![<]) {
-                let open = input.parse::<Token![<]>()?;
-                let mut expr = TokenStream::new();
-                if !input.peek(Token![>]) {
-                    let mut depth = 1usize;
-                    while depth != 0 {
-                        if input.is_empty() {
-                            let span = open.span.join(input.span()).unwrap_or(open.span);
-                            return Err(Error::new(span, "unbalanced <> brackets"));
-                        }
-                        expr.append(input.parse::<TokenTree>()?);
-                        if input.peek(Token![<]) {
-                            depth += 1;
-                        } else if input.peek(Token![>]) {
-                            depth -= 1;
-                        }
-                    }
-                }
-                let close = input.parse::<Token![>]>()?;
-                if expr.is_empty() {
-                    let span = open.span.join(close.span).unwrap_or(open.span);
-                    return Err(Error::new(span, "missing expr inside <>"));
-                }
+            } else if let Some(stream) = Group::optional_angled(input)? {
+                let expr = stream.not_empty("missing expr inside <>")?;
                 steps.push(Branch { expr, list });
                 text = true;
                 break;
@@ -499,16 +742,10 @@ enum Root {
 }
 impl Parse for Root {
     fn parse(input: ParseStream) -> Result<Self> {
-        if input.peek(Bracket) {
-            let content;
-            bracketed!(content in input); // empty is fine
-            let commas = content.parse_terminated(Item::parse, Token![,])?;
-            Ok(Root::List(commas))
-        } else if input.peek(Brace) {
-            let content;
-            braced!(content in input); // empty is fine
-            let commas = content.parse_terminated(Entry::parse, Token![,])?;
-            Ok(Root::Dict(commas))
+        if let Some(stream) = Group::optional_bracketed(input)? {
+            Ok(Root::List(stream.punctuated()?))
+        } else if let Some(stream) = Group::optional_braced(input)? {
+            Ok(Root::Dict(stream.punctuated()?))
         } else {
             Err(input.error("root item must be [] or {}"))
         }
@@ -532,23 +769,12 @@ enum Item {
 }
 impl Parse for Item {
     fn parse(input: ParseStream) -> Result<Self> {
-        if input.peek(Bracket) {
-            let content;
-            bracketed!(content in input); // empty is fine
-            let commas = content.parse_terminated(Item::parse, Token![,])?;
-            Ok(Item::List(commas))
-        } else if input.peek(Brace) {
-            let content;
-            braced!(content in input); // empty is fine
-            let commas = content.parse_terminated(Entry::parse, Token![,])?;
-            Ok(Item::Dict(commas))
-        } else if input.peek(Paren) {
-            let content;
-            let delims = parenthesized!(content in input).span;
-            if content.is_empty() {
-                return Err(Error::new(delims.join(), "missing expr inside ()"));
-            }
-            Ok(Item::Expr(content.parse()?))
+        if let Some(stream) = Group::optional_bracketed(input)? {
+            Ok(Item::List(stream.punctuated()?))
+        } else if let Some(stream) = Group::optional_braced(input)? {
+            Ok(Item::Dict(stream.punctuated()?))
+        } else if let Some(stream) = Group::optional_parenthesized(input)? {
+            Ok(Item::Expr(stream.not_empty("missing expr inside ()")?))
         } else {
             let mut text = TokenStream::new();
             while !input.is_empty() && !input.peek(Token![,]) && !input.peek(Token![;]) {

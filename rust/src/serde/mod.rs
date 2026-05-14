@@ -26,7 +26,7 @@ serialize_deserialize_seed_visit! {
             s.serialize_str(&this.joined())
         }
     }
-    deserialize_str()
+    deserialize_str
     visit_borrowed_str {
         Ok(UTF8::wrap(v))
     }

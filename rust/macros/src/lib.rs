@@ -17,8 +17,6 @@ use proc_macro::TokenStream as RawStream;
 use proc_macro2::{Delimiter, Span, TokenStream, TokenTree};
 use quote::{ToTokens, TokenStreamExt, quote};
 use std::cell::RefCell;
-use std::collections::HashMap;
-use std::collections::hash_map::Entry as HashMapEntry;
 use syn::parse::{Nothing, Parse, ParseStream, Parser};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
@@ -34,9 +32,6 @@ impl Group {
         } else {
             Ok(self.0.stream())
         }
-    }
-    fn span(&self) -> Span {
-        self.0.span()
     }
     fn stream(&self) -> TokenStream {
         self.0.stream()
@@ -118,16 +113,15 @@ impl Group {
 
 struct FunctionVaguely {
     name: Ident,
-    args: Option<Group>,
-    body: Option<Group>,
+    args: Option<TokenStream>,
+    body: Option<TokenStream>,
 }
 impl Parse for FunctionVaguely {
     fn parse(input: ParseStream) -> Result<Self> {
-        Ok(FunctionVaguely {
-            name: input.parse()?,
-            args: Group::optional_parenthesized(input)?,
-            body: Group::optional_braced(input)?,
-        })
+        let name = input.parse()?;
+        let args = Group::optional_parenthesized(input)?.map(|it| it.stream());
+        let body = Group::optional_braced(input)?.map(|it| it.stream());
+        Ok(FunctionVaguely { name, args, body })
     }
 }
 impl FunctionVaguely {
@@ -140,33 +134,12 @@ impl FunctionVaguely {
             format!("expected `{name}` here"),
         ))
     }
-    fn name_starts(&self, prefix: &'static str) -> Result<&Self> {
-        if self.name.to_string().starts_with(prefix) {
-            return Ok(self);
-        }
-        Err(Error::new_spanned(
-            self.name.clone(),
-            format!("expected `{prefix}*` here"),
-        ))
-    }
-    fn args_some(&self) -> Result<&Self> {
-        if self.args.is_some() {
-            return Ok(self);
-        }
-        Err(Error::new_spanned(self.name.clone(), "requires (args)"))
-    }
     fn args_none(&self) -> Result<&Self> {
         if let Some(group) = &self.args {
             Err(Error::new(group.span(), "unexpected (args)"))
         } else {
             Ok(self)
         }
-    }
-    fn body_some(&self) -> Result<&Self> {
-        if self.body.is_some() {
-            return Ok(self);
-        }
-        Err(Error::new_spanned(self.name.clone(), "requires {body}"))
     }
     fn body_none(&self) -> Result<&Self> {
         if let Some(group) = &self.body {
@@ -180,77 +153,46 @@ impl FunctionVaguely {
 // ======================================================================= serde helper
 
 struct SerDe {
-    inner: FunctionVaguely,
-    serialize: FunctionVaguely,
-    deserialize: FunctionVaguely,
-    visitors: HashMap<String, FunctionVaguely>,
+    kind: Ident,
+    expecting: TokenStream,
+    generics: TokenStream,
+    value: TokenStream,
+    serialize: TokenStream,
+    de_name: Ident,
+    de_args: TokenStream,
+    visitors: TokenStream,
 }
 impl Parse for SerDe {
     fn parse(input: ParseStream) -> Result<Self> {
-        let inner: FunctionVaguely = input.parse()?;
-        inner.args_some()?.body_none()?;
-        let serialize: FunctionVaguely = input.parse()?;
-        serialize.name_eq("serialize")?.args_none()?.body_some()?;
-        let deserialize: FunctionVaguely = input.parse()?;
-        deserialize
-            .name_starts("deserialize_")?
-            .args_some()?
-            .body_none()?;
-        let mut visitors = HashMap::new();
-        while !input.is_empty() {
-            let visitor: FunctionVaguely = input.parse()?;
-            visitor.name_starts("visit_")?.args_none()?.body_some()?;
-            match visitors.entry(visitor.name.to_string()) {
-                HashMapEntry::Occupied(_) => {
-                    return Err(Error::new_spanned(visitor.name, "duplicate method name"));
-                }
-                HashMapEntry::Vacant(entry) => {
-                    entry.insert(visitor);
-                }
-            }
-        }
-        Ok(SerDe {
-            inner,
-            serialize,
-            deserialize,
-            visitors,
-        })
-    }
-}
-impl ToTokens for SerDe {
-    fn to_tokens(&self, tokens: &mut TokenStream) {
-        let SerDe {
-            inner,
-            serialize,
-            deserialize,
-            visitors,
-        } = self;
-        let name = &inner.name;
-        let name_str = name.to_string();
-        let ser = Ident::new(&format!("{name_str}Ser"), Span::call_site());
-        let (ser_params, inner_params) = match &name_str[..] {
-            "UTF8" | "Text" => (quote!(<'a>), quote!(<'a>)),
-            _ => (quote!(<'a,'store>), quote!(<'a,'store>)),
+        let about: FunctionVaguely = input.parse()?;
+        let kind = about.body_none()?.name.clone();
+        let Some(expecting) = about.args else {
+            return Err(Error::new_spanned(about.name, r#"needs: ("expecting")"#));
         };
-        let serialize = serialize.body.as_ref().expect("serialized body").stream();
-        tokens.extend(quote! {
-            struct #ser #ser_params (#name #inner_params );
-            impl #ser_params Serialize for #ser #ser_params {
-                fn serialize<S:Serializer>(&self,s:S)->Result<S::Ok,S::Error> {
-                    let #ser(this) = self;
-                    #serialize
-                }
-            }
-        });
-        if visitors.is_empty() {
-            return;
+        let (generics, value) = match &kind.to_string()[..] {
+            "UTF8" | "Text" => (quote!(<'a>), quote!(#kind<'a>)),
+            _ => (quote!(<'a,'store>), quote!(#kind<'a,'store>)),
+        };
+        let serialize: FunctionVaguely = input.parse()?;
+        serialize.name_eq("serialize")?.args_none()?;
+        let Some(serialize) = serialize.body else {
+            return Err(Error::new_spanned(serialize.name, "needs: {body}"));
+        };
+        let de = Ident::new(&format!("{kind}De"), Span::call_site());
+        let deserialize: FunctionVaguely = input.parse()?;
+        let de_name = deserialize.body_none()?.name.clone();
+        let mut de_args = deserialize.args.unwrap_or_else(TokenStream::new);
+        if !de_args.is_empty() {
+            de_args.extend(quote![,]);
         }
-        let de = Ident::new(&format!("{name_str}De"), Span::call_site());
-        let expecting = inner.args.as_ref().expect("inner args").stream();
-        let mut methods = TokenStream::new();
-        for (name_str, vaguely) in visitors {
-            let name = vaguely.name.clone();
-            let signature = match &name_str[..] {
+        let mut visitors = TokenStream::new();
+        while !input.is_empty() {
+            let vaguely: FunctionVaguely = input.parse()?;
+            let name = vaguely.args_none()?.name.clone();
+            let Some(body) = vaguely.body else {
+                return Err(Error::new_spanned(name, "needs: {body}"));
+            };
+            let signature = match &name.to_string()[..] {
                 "visit_str" => quote! {
                     <E:Error>(self,v:&str)->Result<Self::Value,E>
                 },
@@ -268,8 +210,7 @@ impl ToTokens for SerDe {
                 },
                 _ => quote!(()),
             };
-            let body = vaguely.body.as_ref().expect("visitor body").stream();
-            methods.extend(quote! {
+            visitors.extend(quote! {
                 fn #name #signature {
                     #[allow(unused)]
                     let #de(arena) = self;
@@ -277,29 +218,53 @@ impl ToTokens for SerDe {
                 }
             });
         }
-        let mut arguments = deserialize
-            .args
-            .as_ref()
-            .expect("deserialize args")
-            .stream();
-        if !arguments.is_empty() {
-            arguments.extend(quote![,])
-        }
-        let deserialize = &deserialize.name;
+        Ok(SerDe {
+            kind,
+            expecting,
+            generics,
+            value,
+            serialize,
+            de_name,
+            de_args,
+            visitors,
+        })
+    }
+}
+impl ToTokens for SerDe {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let SerDe {
+            kind,
+            expecting,
+            generics,
+            value,
+            serialize,
+            de_name,
+            de_args,
+            visitors,
+        } = self;
+        let ser = Ident::new(&format!("{kind}Ser"), Span::call_site());
+        let de = Ident::new(&format!("{kind}De"), Span::call_site());
         tokens.extend(quote! {
+            struct #ser #generics(#value);
+            impl #generics Serialize for #ser #generics {
+                fn serialize<S:Serializer>(&self,s:S)->Result<S::Ok,S::Error> {
+                    let #ser(this) = self;
+                    #serialize
+                }
+            }
             struct #de<'de, 'a, 'store>(&'de Arena<'a, 'store>);
             impl<'de:'a+'store,'a,'store> DeserializeSeed<'de> for #de<'de,'a,'store> {
-                type Value = #name #inner_params ;
+                type Value = #value ;
                 fn deserialize<D:Deserializer<'de>>(self,d:D)->Result<Self::Value,D::Error>{
-                    d.#deserialize(#arguments self)
+                    d.#de_name(#de_args self)
                 }
             }
             impl<'de: 'a + 'store, 'a, 'store> Visitor<'de> for #de<'de, 'a, 'store> {
-                type Value = #name #inner_params ;
+                type Value = #value ;
                 fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
                     out.write_str(#expecting)
                 }
-                #methods
+                #visitors
             }
         });
     }

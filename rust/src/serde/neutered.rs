@@ -16,7 +16,7 @@ super::serialize_deserialize_seed_visit! {
             Item::Dict(dict) => DictSer(*dict).serialize(s),
         }
     }
-    deserialize_any()
+    deserialize_any
     visit_borrowed_str {
         let utf8 = UTF8De(arena).visit_borrowed_str(v)?;
         Ok(Item::Text(Text { utf8, epilog: None }))
@@ -44,7 +44,7 @@ super::serialize_deserialize_seed_visit! {
         }
         seq.end()
     }
-    deserialize_seq()
+    deserialize_seq
     visit_seq {
         let mut count = 0usize;
         while let Some(item) = seq.next_element_seed(ItemDe(arena))? {
@@ -66,7 +66,7 @@ super::serialize_deserialize_seed_visit! {
         }
         map.end()
     }
-    deserialize_map()
+    deserialize_map
     visit_map {
         let mut count = 0usize;
         while let Some((key, item)) = map.next_entry_seed(UTF8De(arena), ItemDe(arena))? {

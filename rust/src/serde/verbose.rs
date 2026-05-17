@@ -1,118 +1,165 @@
-use super::{ItemVariants, TextFields, UTF8De, UTF8Ser};
+use super::{CommentDe, CommentSer, UTF8De, UTF8Ser};
+use super::{ItemVariants, ListFields, TextFields};
 use crate::alloc::Arena;
 use crate::internals::Builder;
 use crate::{Comment, Dict, Entry, File, Item, List, Text};
 use core::cell::Cell;
 use core::fmt;
 use serde::de::{DeserializeSeed, Deserializer, Error};
-use serde::de::{EnumAccess, MapAccess, SeqAccess, VariantAccess, Visitor};
+use serde::de::{MapAccess, VariantAccess, Visitor};
 use serde::ser::{Serialize, SerializeSeq, SerializeStruct, Serializer};
 
 super::serialize_deserialize_seed_visit! {
-    Item("a verbose Item (Text, List, or Dict)")
-    serialize {
-        match this {
-            Item::Text(text) => s.serialize_newtype_variant("Item", 0, "Text", &TextSer(*text)),
-            Item::List(list) => s.serialize_newtype_variant("Item", 1, "List", &ListSer(*list)),
-            Item::Dict(dict) => s.serialize_newtype_variant("Item", 2, "Dict", &DictSer(*dict)),
+    #[expecting = "a verbose Item (Text, List, or Dict)"]
+    #[deserialize_enum]
+    impl Item {
+        fn serialize() {
+            match this {
+                Item::Text(text) => s.serialize_newtype_variant("Item", 0, "Text", &TextSer(*text)),
+                Item::List(list) => s.serialize_newtype_variant("Item", 1, "List", &ListSer(*list)),
+                Item::Dict(dict) => s.serialize_newtype_variant("Item", 2, "Dict", &DictSer(*dict)),
+            }
         }
-    }
-    deserialize_enum(ItemVariants::NAME, ItemVariants::VARIANTS)
-    visit_enum {
-        let (this, access) = data.variant::<ItemVariants>()?;
-        Ok(match this {
-            ItemVariants::Text => Item::Text(access.newtype_variant_seed(TextDe(arena))?),
-            ItemVariants::List => Item::List(access.newtype_variant_seed(ListDe(arena))?),
-            ItemVariants::Dict => Item::Dict(access.newtype_variant_seed(DictDe(arena))?),
-        })
+        fn visit_enum() {
+            let (this, access) = data.variant::<ItemVariants>()?;
+            Ok(match this {
+                ItemVariants::Text => Item::Text(access.newtype_variant_seed(TextDe(arena))?),
+                ItemVariants::List => Item::List(access.newtype_variant_seed(ListDe(arena))?),
+                ItemVariants::Dict => Item::Dict(access.newtype_variant_seed(DictDe(arena))?),
+            })
+        }
     }
 }
 
 super::serialize_deserialize_seed_visit! {
-    Text("a verbose Text (string and optional epilog comment")
-    serialize {
-        let mut fields = s.serialize_struct("Text", 2)?;
-        fields.serialize_field("utf8", &UTF8Ser(this.utf8))?;
-        fields.serialize_field("epilog", &UTF8Ser::opt(this.epilog))?;
-        fields.end()
-    }
-    deserialize_struct(TextFields::NAME, TextFields::FIELDS)
-    visit_map {
-        let mut utf8 = None;
-        let mut epilog = None;
-        while let Some(key) = map.next_key()? {
-            match key {
-            TextFields::UTF8 => {
-                if utf8.is_some() {
-                    return Err(Error::duplicate_field("utf8"));
-                }
-                utf8 = Some(map.next_value_seed(UTF8De(arena))?);
-            }
-            TextFields::Epilog => {
-                if epilog.is_some() {
-                    return Err(Error::duplicate_field("epilog"));
-                }
-                epilog = Some(map.next_value_seed(UTF8De(arena))?);
-            }
+    #[expecting = "a verbose Text (string + epilog comment)"]
+    #[deserialize_struct]
+    impl Text {
+        fn serialize() {
+            let mut fields = s.serialize_struct("Text", 2)?;
+            fields.serialize_field("value", &UTF8Ser(this.utf8))?;
+            fields.serialize_field("epilog", &CommentSer(this.epilog))?;
+            fields.end()
         }
+        fn visit_seq() {
+            let utf8 = seq
+                .next_element_seed(UTF8De(arena))?
+                .ok_or_else(|| Error::invalid_length(0, &self))?;
+            let epilog = seq
+                .next_element_seed(CommentDe(arena))?
+                .ok_or_else(|| Error::invalid_length(1, &self))?;
+            Ok(Text { utf8, epilog })
         }
-        let utf8 = utf8.ok_or_else(|| Error::missing_field("utf8"))?;
-        let epilog = epilog.map(|utf8|Comment{utf8});
-        Ok(Text { utf8, epilog })
-    }
-    visit_seq {
-        let utf8 = seq.next_element_seed(UTF8De(arena))?
-            .ok_or_else(|| Error::invalid_length(0, &self))?;
-        let epilog = seq.next_element_seed(UTF8De(arena))?
-            .ok_or_else(|| Error::invalid_length(1, &self))?;
-        Ok(Text { utf8, epilog: Some(Comment{utf8:epilog})})
+        fn visit_map() {
+            let mut utf8 = None;
+            let mut epilog = None;
+            while let Some(key) = map.next_key()? {
+                match key {
+                    TextFields::UTF8 => {
+                        if utf8.is_some() {
+                            return Err(Error::duplicate_field("utf8"));
+                        }
+                        utf8 = Some(map.next_value_seed(UTF8De(arena))?);
+                    }
+                    TextFields::Epilog => {
+                        if epilog.is_some() {
+                            return Err(Error::duplicate_field("epilog"));
+                        }
+                        epilog = Some(map.next_value_seed(UTF8De(arena))?);
+                    }
+                }
+            }
+            let utf8 = utf8.ok_or_else(|| Error::missing_field("utf8"))?;
+            let epilog = epilog.map(|utf8| Comment { utf8 });
+            Ok(Text { utf8, epilog })
+        }
     }
 }
 
-struct ItemsSer<'w, 'a: 'w, 's: 'w>(&'w [Cell<Item<'a, 's>>]);
-impl<'w, 'a: 'w, 's: 'w> Serialize for ItemsSer<'w, 'a, 's> {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        let ItemsSer(this) = self;
-        let mut seq = s.serialize_seq(Some(this.len()))?;
-        for cell in this.iter() {
-            seq.serialize_element(&ItemSer(cell.get()))?;
+super::serialize_deserialize_seed_visit! {
+    #[expecting = "sequence of verbose Item"]
+    #[deserialize_seq]
+    impl Items {
+        fn serialize() {
+            let mut seq = s.serialize_seq(Some(this.len()))?;
+            for cell in this.iter() {
+                seq.serialize_element(&ItemSer(cell.get()))?;
+            }
+            seq.end()
         }
-        seq.end()
+        fn visit_seq() {
+            let mut count = 0usize;
+            while let Some(item) = seq.next_element_seed(ItemDe(arena))? {
+                arena.item(item);
+                count += 1;
+            }
+            Ok(arena.list(count).unwrap().cells)
+        }
     }
 }
 
-struct ListSer<'a, 'store>(List<'a, 'store>);
-impl<'a, 'store> Serialize for ListSer<'a, 'store> {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        let ListSer(this) = self;
-        let mut fields = s.serialize_struct("List", 3)?;
-        fields.serialize_field("prolog", &UTF8Ser::opt(this.prolog))?;
-        fields.serialize_field("cells", &ItemsSer(this.cells))?;
-        fields.serialize_field("epilog", &UTF8Ser::opt(this.epilog))?;
-        fields.end()
-    }
-}
-struct ListDe<'de, 'a, 'bump>(&'de Arena<'a, 'bump>);
-impl<'de: 'a, 'a, 'bump> DeserializeSeed<'de> for ListDe<'de, 'a, 'bump> {
-    type Value = List<'a, 'bump>;
-    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
-        d.deserialize_seq(self)
-    }
-}
-impl<'de: 'a, 'a, 'bump> Visitor<'de> for ListDe<'de, 'a, 'bump> {
-    type Value = List<'a, 'bump>;
-    fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-        out.write_str("a list of items")
-    }
-    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let ListDe(arena) = self;
-        let mut count = 0usize;
-        while let Some(item) = seq.next_element_seed(ItemDe(arena))? {
-            arena.item(item);
-            count += 1;
+super::serialize_deserialize_seed_visit! {
+    #[expecting = "a verbose List (prolog, items, epilog)"]
+    #[deserialize_struct]
+    impl List {
+        fn serialize() {
+            let mut fields = s.serialize_struct("List", 3)?;
+            fields.serialize_field("prolog", &CommentSer(this.prolog))?;
+            fields.serialize_field("items", &ItemsSer(this.cells))?;
+            fields.serialize_field("epilog", &CommentSer(this.epilog))?;
+            fields.end()
         }
-        let list = arena.list(count).ok_or(Error::custom("out of memory"))?;
-        Ok(list)
+        fn visit_seq() {
+            let prolog = seq
+                .next_element_seed(CommentDe(arena))?
+                .ok_or_else(|| Error::invalid_length(1, &self))?;
+            let cells = seq
+                .next_element_seed(ItemsDe(arena))?
+                .ok_or_else(|| Error::invalid_length(0, &self))?;
+            let epilog = seq
+                .next_element_seed(CommentDe(arena))?
+                .ok_or_else(|| Error::invalid_length(1, &self))?;
+            Ok(List {
+                prolog,
+                cells,
+                epilog,
+            })
+        }
+        fn visit_map() {
+            let mut prolog = None;
+            let mut items = None;
+            let mut epilog = None;
+            while let Some(key) = map.next_key()? {
+                match key {
+                    ListFields::Prolog => {
+                        if prolog.is_some() {
+                            return Err(Error::duplicate_field("prolog"));
+                        }
+                        prolog = Some(map.next_value_seed(CommentDe(arena))?);
+                    }
+                    ListFields::Items => {
+                        if items.is_some() {
+                            return Err(Error::duplicate_field("value"));
+                        }
+                        items = Some(map.next_value_seed(ItemsDe(arena))?);
+                    }
+                    ListFields::Epilog => {
+                        if epilog.is_some() {
+                            return Err(Error::duplicate_field("epilog"));
+                        }
+                        epilog = Some(map.next_value_seed(CommentDe(arena))?);
+                    }
+                }
+            }
+            let prolog = prolog.ok_or_else(|| Error::missing_field("prolog"))?;
+            let cells = items.ok_or_else(|| Error::missing_field("items"))?;
+            let epilog = epilog.ok_or_else(|| Error::missing_field("epilog"))?;
+            Ok(List {
+                prolog,
+                cells,
+                epilog,
+            })
+        }
     }
 }
 
@@ -122,7 +169,7 @@ impl<'a, 'store> Serialize for EntrySer<'a, 'store> {
         let EntrySer(this) = self;
         let mut fields = s.serialize_struct("Entry", 4)?;
         fields.serialize_field("gap", &this.name.gap)?;
-        fields.serialize_field("before", &UTF8Ser::opt(this.name.before))?;
+        fields.serialize_field("before", &CommentSer(this.name.before))?;
         fields.serialize_field("key", this.name.key)?;
         fields.serialize_field("item", &ItemSer(this.item))?;
         fields.end()
@@ -146,9 +193,9 @@ impl<'a, 'store> Serialize for DictSer<'a, 'store> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let DictSer(this) = self;
         let mut fields = s.serialize_struct("Dict", 3)?;
-        fields.serialize_field("prolog", &UTF8Ser::opt(this.prolog))?;
+        fields.serialize_field("prolog", &CommentSer(this.prolog))?;
         fields.serialize_field("cells", &EntriesSer(this.cells))?;
-        fields.serialize_field("epilog", &UTF8Ser::opt(this.epilog))?;
+        fields.serialize_field("epilog", &CommentSer(this.epilog))?;
         fields.end()
     }
 }
@@ -182,8 +229,8 @@ impl<'a, 'store> Serialize for FileSer<'a, 'store> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let FileSer(this) = self;
         let mut fields = s.serialize_struct("File", 3)?;
-        fields.serialize_field("hashbang", &UTF8Ser::opt(this.hashbang))?;
-        fields.serialize_field("prolog", &UTF8Ser::opt(this.prolog))?;
+        fields.serialize_field("hashbang", &CommentSer(this.hashbang))?;
+        fields.serialize_field("prolog", &CommentSer(this.prolog))?;
         fields.serialize_field("cells", &EntriesSer(this.cells))?;
         fields.end()
     }

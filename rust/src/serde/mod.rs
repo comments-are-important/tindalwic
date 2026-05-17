@@ -1,5 +1,4 @@
-//! adapters for serde
-#![warn(unused)]
+//! implementations of the serde features
 
 mod compact;
 mod neutered;
@@ -11,48 +10,51 @@ pub use verbose::Verbose;
 
 use crate::alloc::Arena;
 use crate::{Comment, UTF8};
-use core::fmt;
 use serde::Deserialize;
-use serde::de::{DeserializeSeed, Deserializer, Error, Visitor};
-use serde::ser::{Serialize, Serializer};
 use tindalwic_macros::serialize_deserialize_seed_visit;
 
 serialize_deserialize_seed_visit! {
-    UTF8("a string value")
-    serialize {
-        if this.dedent == 0 || this.dedent == usize::MAX {
-            s.serialize_str(this.slice)
-        } else {
-            s.serialize_str(&this.joined())
+    #[expecting = "a string value"]
+    #[deserialize_str]
+    impl UTF8 {
+        fn serialize() {
+            if this.dedent == 0 || this.dedent == usize::MAX {
+                s.serialize_str(this.slice)
+            } else {
+                s.serialize_str(&this.joined())
+            }
         }
-    }
-    deserialize_str
-    visit_borrowed_str {
-        Ok(UTF8::wrap(v))
-    }
-    visit_str {
-        Ok(UTF8::wrap(arena.intern(v)))
+        fn visit_borrowed_str() {
+            Ok(UTF8::wrap(v))
+        }
+        fn visit_str() {
+            Ok(UTF8::wrap(arena.intern(v)))
+        }
     }
 }
 
-impl<'a> UTF8Ser<'a> {
-    fn opt(value: Option<Comment<'a>>) -> Option<UTF8Ser<'a>> {
-        match value {
-            None => None,
-            Some(comment) => Some(UTF8Ser(comment.utf8)),
+serialize_deserialize_seed_visit! {
+    #[expecting = "a comment (or null)"]
+    #[deserialize_option]
+    impl Comment {
+        fn serialize() {
+            match this {
+                None => s.serialize_none(),
+                Some(comment) => UTF8Ser(comment.utf8).serialize(s),
+            }
+        }
+        fn visit_none() {
+            Ok(None)
         }
     }
 }
 
 #[derive(Deserialize)]
+#[serde(variant_identifier)]
 enum ItemVariants {
     Text,
     List,
     Dict,
-}
-impl ItemVariants {
-    const NAME: &'static str = "Item";
-    const VARIANTS: &'static [&'static str] = &["Text", "List", "Dict"];
 }
 
 #[derive(Deserialize)]
@@ -61,7 +63,19 @@ enum TextFields {
     UTF8,
     Epilog,
 }
-impl TextFields {
-    const NAME: &'static str = "Text";
-    const FIELDS: &'static [&'static str] = &["utf8", "epilog"];
+
+#[derive(Deserialize)]
+#[serde(field_identifier, rename_all = "lowercase")]
+enum ListFields {
+    Prolog,
+    Items,
+    Epilog,
 }
+
+// #[derive(Deserialize)]
+// #[serde(field_identifier, rename_all = "lowercase")]
+// enum DictFields {
+//     Prolog,
+//     Items,
+//     Epilog,
+// }

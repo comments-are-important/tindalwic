@@ -21,7 +21,8 @@ use syn::parse::{Nothing, Parse, ParseStream, Parser};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::token::{Brace, Bracket, Paren};
-use syn::{Error, Ident, LitInt, Result};
+use syn::{Block, ImplItem, ItemImpl, Meta, ReturnType, Type};
+use syn::{Error, Ident, ImplItemFn, LitInt, Result, Visibility};
 use syn::{Token, braced, bracketed, parenthesized, parse_macro_input};
 
 struct Group(proc_macro2::Group);
@@ -111,157 +112,247 @@ impl Group {
     }
 }
 
-struct FunctionVaguely {
-    name: Ident,
-    args: Option<TokenStream>,
-    body: Option<TokenStream>,
-}
-impl Parse for FunctionVaguely {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let name = input.parse()?;
-        let args = Group::optional_parenthesized(input)?.map(|it| it.stream());
-        let body = Group::optional_braced(input)?.map(|it| it.stream());
-        Ok(FunctionVaguely { name, args, body })
-    }
-}
-impl FunctionVaguely {
-    fn name_eq(&self, name: &'static str) -> Result<&Self> {
-        if self.name.to_string() == name {
-            return Ok(self);
-        }
-        Err(Error::new_spanned(
-            self.name.clone(),
-            format!("expected `{name}` here"),
-        ))
-    }
-    fn args_none(&self) -> Result<&Self> {
-        if let Some(group) = &self.args {
-            Err(Error::new(group.span(), "unexpected (args)"))
-        } else {
-            Ok(self)
-        }
-    }
-    fn body_none(&self) -> Result<&Self> {
-        if let Some(group) = &self.body {
-            Err(Error::new(group.span(), "unexpected {body}"))
-        } else {
-            Ok(self)
-        }
-    }
-}
-
 // ======================================================================= serde helper
 
 struct SerDe {
-    kind: Ident,
-    expecting: TokenStream,
+    ser: Ident,
+    de: Ident,
     generics: TokenStream,
     value: TokenStream,
+    expecting: TokenStream,
+    deserialize: TokenStream,
     serialize: TokenStream,
-    de_name: Ident,
-    de_args: TokenStream,
     visitors: TokenStream,
 }
 impl Parse for SerDe {
     fn parse(input: ParseStream) -> Result<Self> {
-        let about: FunctionVaguely = input.parse()?;
-        let kind = about.body_none()?.name.clone();
-        let Some(expecting) = about.args else {
-            return Err(Error::new_spanned(about.name, r#"needs: ("expecting")"#));
-        };
-        let (generics, value) = match &kind.to_string()[..] {
+        let ii: ItemImpl = input.parse()?;
+        let kind = SerDe::validate_parse(&ii)?;
+        let kind_str = kind.to_string();
+        let ser = Ident::new(&format!("{kind_str}Ser"), Span::call_site());
+        let de = Ident::new(&format!("{kind_str}De"), Span::call_site());
+        let (generics, value) = match &kind_str[..] {
             "UTF8" | "Text" => (quote!(<'a>), quote!(#kind<'a>)),
+            "Comment" => (quote!(<'a>), quote!(Option<Comment<'a>>)),
+            "Items" => (
+                quote!(<'a,'store>),
+                quote!(&'store [Cell<Item<'a, 'store>>]),
+            ),
             _ => (quote!(<'a,'store>), quote!(#kind<'a,'store>)),
         };
-        let serialize: FunctionVaguely = input.parse()?;
-        serialize.name_eq("serialize")?.args_none()?;
-        let Some(serialize) = serialize.body else {
-            return Err(Error::new_spanned(serialize.name, "needs: {body}"));
-        };
-        let de = Ident::new(&format!("{kind}De"), Span::call_site());
-        let deserialize: FunctionVaguely = input.parse()?;
-        let de_name = deserialize.body_none()?.name.clone();
-        let mut de_args = deserialize.args.unwrap_or_else(TokenStream::new);
-        if !de_args.is_empty() {
-            de_args.extend(quote![,]);
-        }
-        let mut visitors = TokenStream::new();
-        while !input.is_empty() {
-            let vaguely: FunctionVaguely = input.parse()?;
-            let name = vaguely.args_none()?.name.clone();
-            let Some(body) = vaguely.body else {
-                return Err(Error::new_spanned(name, "needs: {body}"));
-            };
-            let signature = match &name.to_string()[..] {
-                "visit_str" => quote! {
-                    <E:Error>(self,v:&str)->Result<Self::Value,E>
-                },
-                "visit_borrowed_str" => quote! {
-                    <E:Error>(self,v:&'de str)->Result<Self::Value,E>
-                },
-                "visit_seq" => quote! {
-                    <A:SeqAccess<'de>>(self,mut seq:A)->Result<Self::Value,A::Error>
-                },
-                "visit_map" => quote! {
-                    <A:MapAccess<'de>>(self,mut map:A)->Result<Self::Value,A::Error>
-                },
-                "visit_enum" => quote! {
-                    <A:EnumAccess<'de>>(self,data:A)->Result<Self::Value,A::Error>
-                },
-                _ => quote!(()),
-            };
-            visitors.extend(quote! {
-                fn #name #signature {
-                    #[allow(unused)]
-                    let #de(arena) = self;
-                    #body
+        let mut expecting = None;
+        let mut deserialize = None;
+        for attr in &ii.attrs {
+            let message = "only: #[expecting=\"...\"] or #[deserialize_*]";
+            match &attr.meta {
+                Meta::List(list) => {
+                    return Err(Error::new_spanned(list, message));
                 }
-            });
+                Meta::NameValue(assign) => {
+                    if !assign.path.is_ident("expecting") {
+                        return Err(Error::new_spanned(&assign.path, message));
+                    }
+                    if expecting.is_some() {
+                        return Err(Error::new_spanned(&assign.path, "too many expecting"));
+                    }
+                    expecting = Some(assign.value.to_token_stream());
+                }
+                Meta::Path(path) => {
+                    let Some(ident) = path.get_ident() else {
+                        return Err(Error::new_spanned(path, message));
+                    };
+                    if !ident.to_string().starts_with("deserialize_") {
+                        return Err(Error::new_spanned(path, message));
+                    }
+                    if deserialize.is_some() {
+                        return Err(Error::new_spanned(path, "too many deserialize"));
+                    }
+                    deserialize = Some(match &ident.to_string()[..] {
+                        "deserialize_enum" | "deserialize_struct" => match &kind_str[..] {
+                            "Item" => quote!(#ident("Item",&["Text","List","Dict"],self)),
+                            "Text" => quote!(#ident("Text",&["value","epilog"],self)),
+                            "List" => quote!(#ident("List",&["prolog","items","epilog"],self)),
+                            "Dict" => quote!(#ident("Dict",&["prolog","entries","epilog"],self)),
+                            _ => quote!(#ident(self)),
+                        },
+                        _ => quote! {
+                            #ident(self)
+                        },
+                    });
+                }
+            }
         }
-        Ok(SerDe {
-            kind,
-            expecting,
+        let Some(expecting) = expecting else {
+            return Err(Error::new_spanned(
+                ii.impl_token,
+                "need: #[expecting=\"...\"]",
+            ));
+        };
+        let Some(deserialize) = deserialize else {
+            return Err(Error::new_spanned(ii.impl_token, "need: #[deserialize_*]"));
+        };
+        let mut serialize = None;
+        let mut visitors = TokenStream::new();
+        for item in &ii.items {
+            let ImplItem::Fn(f) = item else {
+                return Err(Error::new_spanned(item, "not allowed"));
+            };
+            match &f.sig.ident.to_string()[..] {
+                "serialize" => {
+                    if serialize.is_some() {
+                        return Err(Error::new_spanned(f, "duplicate"));
+                    }
+                    serialize = Some(SerDe::validate_func(&f)?.into_token_stream());
+                }
+                name if name.starts_with("visit_") => {
+                    let ident = &f.sig.ident;
+                    let signature = SerDe::visitor_sig(&f);
+                    let body = SerDe::validate_func(&f)?;
+                    visitors.extend(quote! {
+                        fn #ident #signature {
+                            #[allow(unused)]
+                            let #de(arena) = self;
+                            #body
+                        }
+                    });
+                }
+                _ => {
+                    return Err(Error::new_spanned(
+                        &f.sig.ident,
+                        "allowed fns: serialize, visit_*",
+                    ));
+                }
+            }
+        }
+        let Some(serialize) = serialize else {
+            let missing = ii.brace_token.span.close();
+            return Err(Error::new(missing, "need: fn serialize() {...}"));
+        };
+        return Ok(SerDe {
+            ser,
+            de,
             generics,
             value,
+            expecting,
+            deserialize,
             serialize,
-            de_name,
-            de_args,
             visitors,
-        })
+        });
+    }
+}
+impl SerDe {
+    fn validate_parse(t: &ItemImpl) -> Result<Ident> {
+        if let Some(token) = &t.defaultness {
+            Err(Error::new_spanned(token, "default not allowed"))
+        } else if let Some(token) = &t.unsafety {
+            Err(Error::new_spanned(token, "unsafe not allowed"))
+        } else if let Some(token) = &t.generics.lt_token {
+            Err(Error::new_spanned(token, "generics not allowed"))
+        } else if let Some(clause) = &t.generics.where_clause {
+            Err(Error::new_spanned(clause, "where clause not allowed"))
+        } else if let Some(tr) = &t.trait_ {
+            Err(Error::new_spanned(tr.2, "trait not allowed"))
+        } else {
+            let message = "must be identifier";
+            let Type::Path(path) = t.self_ty.as_ref() else {
+                return Err(Error::new_spanned(t.self_ty.clone(), message));
+            };
+            if let Some(qual) = &path.qself {
+                return Err(Error::new_spanned(qual.lt_token, message));
+            }
+            let Some(ident) = path.path.get_ident() else {
+                return Err(Error::new_spanned(path, message));
+            };
+            Ok(ident.clone())
+        }
+    }
+    fn validate_func(f: &ImplItemFn) -> Result<Block> {
+        if let Some(first) = &f.attrs.first() {
+            Err(Error::new_spanned(first, "attributes not allowed"))
+        } else if !matches!(&f.vis, Visibility::Inherited) {
+            Err(Error::new_spanned(&f.vis, "visibility not allowed"))
+        } else if let Some(token) = &f.defaultness {
+            Err(Error::new_spanned(token, "default not allowed"))
+        } else if let Some(token) = &f.sig.constness {
+            Err(Error::new_spanned(token, "const not allowed"))
+        } else if let Some(token) = &f.sig.asyncness {
+            Err(Error::new_spanned(token, "async not allowed"))
+        } else if let Some(token) = &f.sig.unsafety {
+            Err(Error::new_spanned(token, "unsafe not allowed"))
+        } else if let Some(abi) = &f.sig.abi {
+            Err(Error::new_spanned(abi, "ABI not allowed"))
+        } else if let Some(token) = &f.sig.generics.lt_token {
+            Err(Error::new_spanned(token, "generics not allowed"))
+        } else if let Some(clause) = &f.sig.generics.where_clause {
+            Err(Error::new_spanned(clause, "where clause not allowed"))
+        } else if !f.sig.inputs.is_empty() {
+            return Err(Error::new_spanned(&f.sig.inputs, "params not allowed"));
+        } else if let Some(variadic) = &f.sig.variadic {
+            Err(Error::new_spanned(variadic, "variadic not allowed"))
+        } else if !matches!(&f.sig.output, ReturnType::Default) {
+            Err(Error::new_spanned(&f.sig.output, "return type not allowed"))
+        } else {
+            Ok(f.block.clone())
+        }
+    }
+    fn visitor_sig(visitor: &ImplItemFn) -> TokenStream {
+        let name = &visitor.sig.ident;
+        match &name.to_string()[..] {
+            "visit_str" => quote! {
+                <E: ::serde::de::Error>(self,v:&str)->Result<Self::Value,E>
+            },
+            "visit_borrowed_str" => quote! {
+                <E: ::serde::de::Error>(self,v:&'de str)->Result<Self::Value,E>
+            },
+            "visit_seq" => quote! {
+                <A: ::serde::de::SeqAccess<'de>>(self,mut seq:A)->Result<Self::Value,A::Error>
+            },
+            "visit_map" => quote! {
+                <A: ::serde::de::MapAccess<'de>>(self,mut map:A)->Result<Self::Value,A::Error>
+            },
+            "visit_enum" => quote! {
+                <A: ::serde::de::EnumAccess<'de>>(self,data:A)->Result<Self::Value,A::Error>
+            },
+            "visit_none" => quote! {
+                <E: ::serde::de::Error>(self)->Result<Self::Value,E>
+            },
+            "visit_some" => quote! {
+                <D: ::serde::de::Deserializer<'de>>(self,d:D)->Result<Self::Value,D::Error>
+            },
+            _ => quote!(()),
+        }
     }
 }
 impl ToTokens for SerDe {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let SerDe {
-            kind,
-            expecting,
+            ser,
+            de,
             generics,
             value,
+            expecting,
             serialize,
-            de_name,
-            de_args,
+            deserialize,
             visitors,
         } = self;
-        let ser = Ident::new(&format!("{kind}Ser"), Span::call_site());
-        let de = Ident::new(&format!("{kind}De"), Span::call_site());
         tokens.extend(quote! {
             struct #ser #generics(#value);
-            impl #generics Serialize for #ser #generics {
-                fn serialize<S:Serializer>(&self,s:S)->Result<S::Ok,S::Error> {
+            impl #generics ::serde::ser::Serialize for #ser #generics {
+                fn serialize<S: ::serde::ser::Serializer>(&self,s:S)->Result<S::Ok,S::Error> {
                     let #ser(this) = self;
                     #serialize
                 }
             }
             struct #de<'de, 'a, 'store>(&'de Arena<'a, 'store>);
-            impl<'de:'a+'store,'a,'store> DeserializeSeed<'de> for #de<'de,'a,'store> {
+            impl<'de:'a+'store,'a,'store> ::serde::de::DeserializeSeed<'de> for #de<'de,'a,'store> {
                 type Value = #value ;
-                fn deserialize<D:Deserializer<'de>>(self,d:D)->Result<Self::Value,D::Error>{
-                    d.#de_name(#de_args self)
+                fn deserialize<D: ::serde::de::Deserializer<'de>>(self,d:D)->Result<Self::Value,D::Error>{
+                    d.#deserialize
                 }
             }
-            impl<'de: 'a + 'store, 'a, 'store> Visitor<'de> for #de<'de, 'a, 'store> {
+            impl<'de: 'a + 'store, 'a, 'store> ::serde::de::Visitor<'de> for #de<'de, 'a, 'store> {
                 type Value = #value ;
-                fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
+                fn expecting(&self, out: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
                     out.write_str(#expecting)
                 }
                 #visitors
@@ -613,7 +704,7 @@ impl Parse for Walk {
             result,
         };
         if let Some(excess) = variables.next() {
-            return Err(Error::new(excess.ident.span(), "too many bindings"));
+            return Err(Error::new_spanned(excess.ident, "too many bindings"));
         }
         // derived variables can't clash with each other or `result` by construction,
         // but testing them anyway is cheap and keeps this code straight-line...

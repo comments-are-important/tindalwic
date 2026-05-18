@@ -138,6 +138,10 @@ impl Parse for SerDe {
                 quote!(<'a,'store>),
                 quote!(&'store [Cell<Item<'a, 'store>>]),
             ),
+            "Entries" => (
+                quote!(<'a,'store>),
+                quote!(&'store [Cell<Entry<'a, 'store>>]),
+            ),
             _ => (quote!(<'a,'store>), quote!(#kind<'a,'store>)),
         };
         let mut expecting = None;
@@ -173,6 +177,8 @@ impl Parse for SerDe {
                             "Text" => quote!(#ident("Text",&["value","epilog"],self)),
                             "List" => quote!(#ident("List",&["prolog","items","epilog"],self)),
                             "Dict" => quote!(#ident("Dict",&["prolog","entries","epilog"],self)),
+                            "Entry" => quote!(#ident("Entry",&["gap","before","key","item"],self)),
+                            "File" => quote!(#ident("File",&["hashbang","prolog","entries"],self)),
                             _ => quote!(#ident(self)),
                         },
                         _ => quote! {
@@ -202,17 +208,18 @@ impl Parse for SerDe {
                     if serialize.is_some() {
                         return Err(Error::new_spanned(f, "duplicate"));
                     }
-                    serialize = Some(SerDe::validate_func(&f)?.into_token_stream());
+                    let body = SerDe::validate_func(&f)?.stmts;
+                    serialize = Some(quote!(#(#body)*));
                 }
                 name if name.starts_with("visit_") => {
                     let ident = &f.sig.ident;
                     let signature = SerDe::visitor_sig(&f);
-                    let body = SerDe::validate_func(&f)?;
+                    let body = SerDe::validate_func(&f)?.stmts;
                     visitors.extend(quote! {
                         fn #ident #signature {
                             #[allow(unused)]
                             let #de(arena) = self;
-                            #body
+                            #(#body)*
                         }
                     });
                 }

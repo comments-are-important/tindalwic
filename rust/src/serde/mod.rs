@@ -51,6 +51,7 @@ serialize_deserialize_seed_visit! {
 
 #[derive(Deserialize)]
 #[serde(variant_identifier)]
+#[expect(dead_code)] // because emitted has #[automatically_derived]
 enum ItemVariants {
     Text,
     List,
@@ -59,6 +60,7 @@ enum ItemVariants {
 
 #[derive(Deserialize)]
 #[serde(field_identifier, rename_all = "lowercase")]
+#[expect(dead_code)] // because emitted has #[automatically_derived]
 enum TextFields {
     UTF8,
     Epilog,
@@ -66,6 +68,7 @@ enum TextFields {
 
 #[derive(Deserialize)]
 #[serde(field_identifier, rename_all = "lowercase")]
+#[expect(dead_code)] // because emitted has #[automatically_derived]
 enum ListFields {
     Prolog,
     Items,
@@ -74,8 +77,19 @@ enum ListFields {
 
 // #[derive(Deserialize)]
 // #[serde(field_identifier, rename_all = "lowercase")]
-// enum DictFields {
-//     Prolog,
-//     Items,
-//     Epilog,
+// #[expect(dead_code)] // because emitted has #[automatically_derived]
+// enum EntryFields {
+//     Gap,
+//     Before,
+//     Key,
+//     Item,
 // }
+
+#[derive(Deserialize)]
+#[serde(field_identifier, rename_all = "lowercase")]
+#[expect(dead_code)] // because emitted has #[automatically_derived]
+enum DictFields {
+    Prolog,
+    Entries,
+    Epilog,
+}

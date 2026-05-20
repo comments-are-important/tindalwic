@@ -115,8 +115,17 @@ rust/llvm-lines: must-run-inside
 
 rust/fmt: rust/nightly
 	cd rust
+	# see comment near top of rust/src/serde/mod.rs
+	sed -i \
+	  -e 's|^seeded! {$$|const _: () = {|' \
+	  -e 's|^} // !seeded$$|}; // !seeded|' \
+	  src/serde/*.rs
 	SRC=$$(find src macros/src -name '*.rs')
 	rustfmt +nightly $$SRC tests/*.rs
+	sed -i \
+	  -e 's|^const _: () = {$$|seeded! {|' \
+	  -e 's|^}; // !seeded$$|} // !seeded|' \
+	  src/serde/*.rs
 .PHONY: rust/fmt
 
 # =====================================================================================

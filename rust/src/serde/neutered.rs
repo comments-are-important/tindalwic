@@ -1,12 +1,12 @@
-use super::{UTF8De, UTF8Ser};
+use super::{UTF8De, UTF8Ser, seeded};
 use crate::alloc::Arena;
 use crate::internals::Builder;
 use crate::{Dict, Entry, File, Item, List, Text};
 use serde::de::{Deserializer, Error};
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
-super::serialize_deserialize_seed_visit! {
-    #[expecting = "an item (string, list, or dictionary)"]
+seeded! {
+    #[expecting = "a neutered item (string value, list, or dictionary)"]
     #[deserialize_any]
     impl Item {
         fn serialize() {
@@ -33,10 +33,10 @@ super::serialize_deserialize_seed_visit! {
             Ok(Item::Dict(dict))
         }
     }
-}
+} // !seeded
 
-super::serialize_deserialize_seed_visit! {
-    #[expecting = "a list of items"]
+seeded! {
+    #[expecting = "a list of neutered items"]
     #[deserialize_seq]
     impl List {
         fn serialize() {
@@ -56,32 +56,32 @@ super::serialize_deserialize_seed_visit! {
             Ok(list)
         }
     }
-}
+} // !seeded
 
-super::serialize_deserialize_seed_visit! {
-   #[expecting = "a dictionary of entries (string keys, item values"]
-   #[deserialize_map]
-   impl Dict {
-       fn serialize() {
-           let mut map = s.serialize_map(Some(this.cells.len()))?;
-           for cell in this.cells.iter() {
-               let Entry { name, item } = cell.get();
-               map.serialize_entry(name.key, &ItemSer(item))?;
-           }
-           map.end()
-       }
-       fn visit_map() {
-           let mut count = 0usize;
-           while let Some((key, item)) = map.next_entry_seed(UTF8De(arena), ItemDe(arena))? {
-               assert!(key.dedent == 0 || key.dedent == usize::MAX);
-               arena.entry(Entry::wrap(key.slice, item));
-               count += 1;
-           }
-           let dict = arena.dict(count).ok_or(Error::custom("out of memory"))?;
-           Ok(dict)
-       }
-   }
-}
+seeded! {
+    #[expecting = "a dictionary (string keys, neutered item values"]
+    #[deserialize_map]
+    impl Dict {
+        fn serialize() {
+            let mut map = s.serialize_map(Some(this.cells.len()))?;
+            for cell in this.cells.iter() {
+                let Entry { name, item } = cell.get();
+                map.serialize_entry(name.key, &ItemSer(item))?;
+            }
+            map.end()
+        }
+        fn visit_map() {
+            let mut count = 0usize;
+            while let Some((key, item)) = map.next_entry_seed(UTF8De(arena), ItemDe(arena))? {
+                assert!(key.dedent == 0 || key.dedent == usize::MAX);
+                arena.entry(Entry::wrap(key.slice, item));
+                count += 1;
+            }
+            let dict = arena.dict(count).ok_or(Error::custom("out of memory"))?;
+            Ok(dict)
+        }
+    }
+} // !seeded
 
 /// serialize to a format that can't remember comments.
 pub struct Neutered<'a, 'store>(pub File<'a, 'store>);

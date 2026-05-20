@@ -1,13 +1,13 @@
-use super::{CommentDe, CommentSer, UTF8De, UTF8Ser};
-use super::{DictFields, ItemVariants, ListFields, TextFields};
+use super::{CommentDe, CommentSer, UTF8De, UTF8Ser, seeded};
+use super::{DictFields, EntryFields, FileFields, ItemVariants, ListFields, TextFields};
 use crate::alloc::Arena;
 use crate::internals::Builder;
-use crate::{Comment, Dict, Entry, File, Item, List, Text};
+use crate::{Dict, Entry, File, Item, List, Name, Text};
 use core::cell::Cell;
 use serde::de::{DeserializeSeed, Deserializer, Error, VariantAccess};
 use serde::ser::{Serialize, SerializeSeq, SerializeStruct, Serializer};
 
-super::serialize_deserialize_seed_visit! {
+seeded! {
     #[expecting = "a verbose Item (Text, List, or Dict)"]
     #[deserialize_enum]
     impl Item {
@@ -27,10 +27,54 @@ super::serialize_deserialize_seed_visit! {
             })
         }
     }
-}
+} // !seeded
 
-super::serialize_deserialize_seed_visit! {
-    #[expecting = "sequence of verbose Item"]
+seeded! {
+    #[expecting = "a verbose Text: string value + epilog comment"]
+    #[deserialize_struct]
+    impl Text {
+        fn serialize() {
+            let mut fields = s.serialize_struct("Text", 2)?;
+            fields.serialize_field("value", &UTF8Ser(this.utf8))?;
+            fields.serialize_field("epilog", &CommentSer(this.epilog))?;
+            fields.end()
+        }
+        fn visit_seq() {
+            let err = || Error::invalid_length(2, &self);
+            Ok(Text {
+                utf8: seq.next_element_seed(UTF8De(arena))?.ok_or_else(err)?,
+                epilog: seq.next_element_seed(CommentDe(arena))?.ok_or_else(err)?,
+            })
+        }
+        fn visit_map() {
+            let mut value = None;
+            let mut epilog = None;
+            while let Some(field) = map.next_key()? {
+                match field {
+                    TextFields::UTF8 => {
+                        if value.is_some() {
+                            return Err(Error::duplicate_field("value"));
+                        }
+                        value = Some(map.next_value_seed(UTF8De(arena))?);
+                    }
+                    TextFields::Epilog => {
+                        if epilog.is_some() {
+                            return Err(Error::duplicate_field("epilog"));
+                        }
+                        epilog = Some(map.next_value_seed(CommentDe(arena))?);
+                    }
+                }
+            }
+            Ok(Text {
+                utf8: value.ok_or_else(|| Error::missing_field("value"))?,
+                epilog: epilog.ok_or_else(|| Error::missing_field("epilog"))?,
+            })
+        }
+    }
+} // !seeded
+
+seeded! {
+    #[expecting = "sequence of verbose Items"]
     #[deserialize_seq]
     impl Items {
         fn serialize() {
@@ -49,86 +93,33 @@ super::serialize_deserialize_seed_visit! {
             Ok(arena.list(count).unwrap().cells)
         }
     }
-}
+} // !seeded
 
-super::serialize_deserialize_seed_visit! {
-    #[expecting = "a verbose Text (string + epilog comment)"]
-    #[deserialize_struct]
-    impl Text {
-        fn serialize() {
-            let mut fields = s.serialize_struct("Text", 2)?;
-            fields.serialize_field("value", &UTF8Ser(this.utf8))?;
-            fields.serialize_field("epilog", &CommentSer(this.epilog))?;
-            fields.end()
-        }
-        fn visit_seq() {
-            let utf8 = seq
-                .next_element_seed(UTF8De(arena))?
-                .ok_or_else(|| Error::invalid_length(0, &self))?;
-            let epilog = seq
-                .next_element_seed(CommentDe(arena))?
-                .ok_or_else(|| Error::invalid_length(1, &self))?;
-            Ok(Text { utf8, epilog })
-        }
-        fn visit_map() {
-            let mut utf8 = None;
-            let mut epilog = None;
-            while let Some(key) = map.next_key()? {
-                match key {
-                    TextFields::UTF8 => {
-                        if utf8.is_some() {
-                            return Err(Error::duplicate_field("utf8"));
-                        }
-                        utf8 = Some(map.next_value_seed(UTF8De(arena))?);
-                    }
-                    TextFields::Epilog => {
-                        if epilog.is_some() {
-                            return Err(Error::duplicate_field("epilog"));
-                        }
-                        epilog = Some(map.next_value_seed(UTF8De(arena))?);
-                    }
-                }
-            }
-            let utf8 = utf8.ok_or_else(|| Error::missing_field("utf8"))?;
-            let epilog = epilog.map(|utf8| Comment { utf8 });
-            Ok(Text { utf8, epilog })
-        }
-    }
-}
-
-super::serialize_deserialize_seed_visit! {
-    #[expecting = "a verbose List (prolog, items, epilog)"]
+seeded! {
+    #[expecting = "a verbose List: prolog + array of items + epilog"]
     #[deserialize_struct]
     impl List {
         fn serialize() {
             let mut fields = s.serialize_struct("List", 3)?;
             fields.serialize_field("prolog", &CommentSer(this.prolog))?;
-            fields.serialize_field("items", &ItemsSer(this.cells))?;
+            fields.serialize_field("array", &ItemsSer(this.cells))?;
             fields.serialize_field("epilog", &CommentSer(this.epilog))?;
             fields.end()
         }
         fn visit_seq() {
-            let prolog = seq
-                .next_element_seed(CommentDe(arena))?
-                .ok_or_else(|| Error::invalid_length(1, &self))?;
-            let cells = seq
-                .next_element_seed(ItemsDe(arena))?
-                .ok_or_else(|| Error::invalid_length(0, &self))?;
-            let epilog = seq
-                .next_element_seed(CommentDe(arena))?
-                .ok_or_else(|| Error::invalid_length(1, &self))?;
+            let err = || Error::invalid_length(3, &self);
             Ok(List {
-                prolog,
-                cells,
-                epilog,
+                prolog: seq.next_element_seed(CommentDe(arena))?.ok_or_else(err)?,
+                cells: seq.next_element_seed(ItemsDe(arena))?.ok_or_else(err)?,
+                epilog: seq.next_element_seed(CommentDe(arena))?.ok_or_else(err)?,
             })
         }
         fn visit_map() {
             let mut prolog = None;
-            let mut items = None;
+            let mut array = None;
             let mut epilog = None;
-            while let Some(key) = map.next_key()? {
-                match key {
+            while let Some(field) = map.next_key()? {
+                match field {
                     ListFields::Prolog => {
                         if prolog.is_some() {
                             return Err(Error::duplicate_field("prolog"));
@@ -136,10 +127,10 @@ super::serialize_deserialize_seed_visit! {
                         prolog = Some(map.next_value_seed(CommentDe(arena))?);
                     }
                     ListFields::Items => {
-                        if items.is_some() {
-                            return Err(Error::duplicate_field("value"));
+                        if array.is_some() {
+                            return Err(Error::duplicate_field("array"));
                         }
-                        items = Some(map.next_value_seed(ItemsDe(arena))?);
+                        array = Some(map.next_value_seed(ItemsDe(arena))?);
                     }
                     ListFields::Epilog => {
                         if epilog.is_some() {
@@ -149,20 +140,17 @@ super::serialize_deserialize_seed_visit! {
                     }
                 }
             }
-            let prolog = prolog.ok_or_else(|| Error::missing_field("prolog"))?;
-            let cells = items.ok_or_else(|| Error::missing_field("items"))?;
-            let epilog = epilog.ok_or_else(|| Error::missing_field("epilog"))?;
             Ok(List {
-                prolog,
-                cells,
-                epilog,
+                prolog: prolog.ok_or_else(|| Error::missing_field("prolog"))?,
+                cells: array.ok_or_else(|| Error::missing_field("array"))?,
+                epilog: epilog.ok_or_else(|| Error::missing_field("epilog"))?,
             })
         }
     }
-}
+} // !seeded
 
-super::serialize_deserialize_seed_visit! {
-    #[expecting="a verbose entry in a dictionary"]
+seeded! {
+    #[expecting = "a verbose entry in a dictionary: gap + before + key + item"]
     #[deserialize_struct]
     impl Entry {
         fn serialize() {
@@ -173,10 +161,63 @@ super::serialize_deserialize_seed_visit! {
             fields.serialize_field("item", &ItemSer(this.item))?;
             fields.end()
         }
+        fn visit_seq() {
+            let err = || Error::invalid_length(4, &self);
+            Ok(Entry {
+                name: Name {
+                    gap: seq.next_element()?.ok_or_else(err)?,
+                    before: seq.next_element_seed(CommentDe(arena))?.ok_or_else(err)?,
+                    key: seq.next_element()?.ok_or_else(err)?,
+                },
+                item: seq.next_element_seed(ItemDe(arena))?.ok_or_else(err)?,
+            })
+        }
+        fn visit_map() {
+            let mut gap = None;
+            let mut before = None;
+            let mut key = None;
+            let mut item = None;
+            while let Some(field) = map.next_key()? {
+                match field {
+                    EntryFields::Gap => {
+                        if gap.is_some() {
+                            return Err(Error::duplicate_field("gap"));
+                        }
+                        gap = Some(map.next_value()?);
+                    }
+                    EntryFields::Before => {
+                        if before.is_some() {
+                            return Err(Error::duplicate_field("before"));
+                        }
+                        before = Some(map.next_value_seed(CommentDe(arena))?);
+                    }
+                    EntryFields::Key => {
+                        if key.is_some() {
+                            return Err(Error::duplicate_field("key"));
+                        }
+                        key = Some(map.next_value()?);
+                    }
+                    EntryFields::Item => {
+                        if item.is_some() {
+                            return Err(Error::duplicate_field("item"));
+                        }
+                        item = Some(map.next_value_seed(ItemDe(arena))?);
+                    }
+                }
+            }
+            Ok(Entry {
+                name: Name {
+                    gap: gap.ok_or_else(|| Error::missing_field("gap"))?,
+                    before: before.ok_or_else(|| Error::missing_field("before"))?,
+                    key: key.ok_or_else(|| Error::missing_field("key"))?,
+                },
+                item: item.ok_or_else(|| Error::missing_field("item"))?,
+            })
+        }
     }
-}
+} // !seeded
 
-super::serialize_deserialize_seed_visit! {
+seeded! {
     #[expecting = "sequence of verbose Entry"]
     #[deserialize_seq]
     impl Entries {
@@ -196,41 +237,25 @@ super::serialize_deserialize_seed_visit! {
             Ok(arena.dict(count).unwrap().cells)
         }
     }
-}
+} // !seeded
 
-super::serialize_deserialize_seed_visit! {
-    #[expecting = "a verbose Dict (prolog, entries, epilog)"]
+seeded! {
+    #[expecting = "a verbose Dict: prolog + array of entries + epilog"]
     #[deserialize_struct]
     impl Dict {
         fn serialize() {
             let mut fields = s.serialize_struct("Dict", 3)?;
             fields.serialize_field("prolog", &CommentSer(this.prolog))?;
-            fields.serialize_field("entries", &EntriesSer(this.cells))?;
+            fields.serialize_field("array", &EntriesSer(this.cells))?;
             fields.serialize_field("epilog", &CommentSer(this.epilog))?;
             fields.end()
-        }
-        fn visit_seq() {
-            let prolog = seq
-                .next_element_seed(CommentDe(arena))?
-                .ok_or_else(|| Error::invalid_length(1, &self))?;
-            let cells = seq
-                .next_element_seed(EntriesDe(arena))?
-                .ok_or_else(|| Error::invalid_length(0, &self))?;
-            let epilog = seq
-                .next_element_seed(CommentDe(arena))?
-                .ok_or_else(|| Error::invalid_length(1, &self))?;
-            Ok(Dict {
-                prolog,
-                cells,
-                epilog,
-            })
         }
         fn visit_map() {
             let mut prolog = None;
             let mut entries = None;
             let mut epilog = None;
-            while let Some(key) = map.next_key()? {
-                match key {
+            while let Some(field) = map.next_key()? {
+                match field {
                     DictFields::Prolog => {
                         if prolog.is_some() {
                             return Err(Error::duplicate_field("prolog"));
@@ -239,7 +264,7 @@ super::serialize_deserialize_seed_visit! {
                     }
                     DictFields::Entries => {
                         if entries.is_some() {
-                            return Err(Error::duplicate_field("value"));
+                            return Err(Error::duplicate_field("array"));
                         }
                         entries = Some(map.next_value_seed(EntriesDe(arena))?);
                     }
@@ -251,31 +276,76 @@ super::serialize_deserialize_seed_visit! {
                     }
                 }
             }
-            let prolog = prolog.ok_or_else(|| Error::missing_field("prolog"))?;
-            let cells = entries.ok_or_else(|| Error::missing_field("items"))?;
-            let epilog = epilog.ok_or_else(|| Error::missing_field("epilog"))?;
             Ok(Dict {
-                prolog,
-                cells,
-                epilog,
+                prolog: prolog.ok_or_else(|| Error::missing_field("prolog"))?,
+                cells: entries.ok_or_else(|| Error::missing_field("array"))?,
+                epilog: epilog.ok_or_else(|| Error::missing_field("epilog"))?,
+            })
+        }
+        fn visit_seq() {
+            let err = || Error::invalid_length(3, &self);
+            Ok(Dict {
+                prolog: seq.next_element_seed(CommentDe(arena))?.ok_or_else(err)?,
+                cells: seq.next_element_seed(EntriesDe(arena))?.ok_or_else(err)?,
+                epilog: seq.next_element_seed(CommentDe(arena))?.ok_or_else(err)?,
             })
         }
     }
-}
+} // !seeded
 
-super::serialize_deserialize_seed_visit! {
-    #[expecting="a verbose File (hashbang, prolog, entries"]
+seeded! {
+    #[expecting = "a verbose File: hashbang + prolog + array of entries"]
     #[deserialize_struct]
     impl File {
         fn serialize() {
             let mut fields = s.serialize_struct("File", 3)?;
             fields.serialize_field("hashbang", &CommentSer(this.hashbang))?;
             fields.serialize_field("prolog", &CommentSer(this.prolog))?;
-            fields.serialize_field("entries", &EntriesSer(this.cells))?;
+            fields.serialize_field("array", &EntriesSer(this.cells))?;
             fields.end()
         }
+        fn visit_map() {
+            let mut hashbang = None;
+            let mut prolog = None;
+            let mut entries = None;
+            while let Some(field) = map.next_key()? {
+                match field {
+                    FileFields::Hashbang => {
+                        if hashbang.is_some() {
+                            return Err(Error::duplicate_field("hashbang"));
+                        }
+                        hashbang = Some(map.next_value_seed(CommentDe(arena))?);
+                    }
+                    FileFields::Prolog => {
+                        if prolog.is_some() {
+                            return Err(Error::duplicate_field("prolog"));
+                        }
+                        prolog = Some(map.next_value_seed(CommentDe(arena))?);
+                    }
+                    FileFields::Entries => {
+                        if entries.is_some() {
+                            return Err(Error::duplicate_field("array"));
+                        }
+                        entries = Some(map.next_value_seed(EntriesDe(arena))?);
+                    }
+                }
+            }
+            Ok(File {
+                hashbang: hashbang.ok_or_else(|| Error::missing_field("hashbang"))?,
+                prolog: prolog.ok_or_else(|| Error::missing_field("prolog"))?,
+                cells: entries.ok_or_else(|| Error::missing_field("array"))?,
+            })
+        }
+        fn visit_seq() {
+            let err = || Error::invalid_length(3, &self);
+            Ok(File {
+                hashbang: seq.next_element_seed(CommentDe(arena))?.ok_or_else(err)?,
+                prolog: seq.next_element_seed(CommentDe(arena))?.ok_or_else(err)?,
+                cells: seq.next_element_seed(EntriesDe(arena))?.ok_or_else(err)?,
+            })
+        }
     }
-}
+} // !seeded
 
 /// serialize all fields, avoiding "skip_serializing_if"
 pub struct Verbose<'a, 'store>(pub File<'a, 'store>);
@@ -291,7 +361,6 @@ impl<'de: 'a + 'store, 'a, 'store> Verbose<'a, 'store> {
         arena: &'de Arena<'a, 'store>,
         d: D,
     ) -> Result<File<'a, 'store>, D::Error> {
-        let dict = FileDe(arena).deserialize(d)?;
-        Ok(File::wrap(dict.cells))
+        FileDe(arena).deserialize(d)
     }
 }

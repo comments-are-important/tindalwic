@@ -11,9 +11,16 @@ pub use verbose::Verbose;
 use crate::alloc::Arena;
 use crate::{Comment, UTF8};
 use serde::Deserialize;
-use tindalwic_macros::serialize_deserialize_seed_visit;
+use serde::de::DeserializeSeed;
+use tindalwic_macros::serialize_deserialize_seed_visit as seeded;
+// normally rustfmt would skip over everything inside the macro invocation,
+// so the GNUmakefile rust/fmt target uses `sed` to swap the calls for
+// `const _: () = {...};` blocks which are formatted. rustfmt is very picky
+// about the opening line - adding a comment marker causes it to be skipped.
+// so nobody can use that "const" trick because `sed` will alter it.
+// the end curly is marked `// !seeded` because `sed` alters it (semicolon).
 
-serialize_deserialize_seed_visit! {
+seeded! {
     #[expecting = "a string value"]
     #[deserialize_str]
     impl UTF8 {
@@ -31,27 +38,31 @@ serialize_deserialize_seed_visit! {
             Ok(UTF8::wrap(arena.intern(v)))
         }
     }
-}
+} // !seeded
 
-serialize_deserialize_seed_visit! {
+seeded! {
     #[expecting = "a comment (or null)"]
     #[deserialize_option]
     impl Comment {
         fn serialize() {
             match this {
                 None => s.serialize_none(),
-                Some(comment) => UTF8Ser(comment.utf8).serialize(s),
+                Some(comment) => s.serialize_some(&UTF8Ser(comment.utf8)),
             }
         }
         fn visit_none() {
             Ok(None)
         }
+        fn visit_some() {
+            UTF8De(arena)
+                .deserialize(d)
+                .map(|utf8| Some(Comment { utf8 }))
+        }
     }
-}
+} // !seeded
 
 #[derive(Deserialize)]
 #[serde(variant_identifier)]
-#[expect(dead_code)] // because emitted has #[automatically_derived]
 enum ItemVariants {
     Text,
     List,
@@ -60,7 +71,6 @@ enum ItemVariants {
 
 #[derive(Deserialize)]
 #[serde(field_identifier, rename_all = "lowercase")]
-#[expect(dead_code)] // because emitted has #[automatically_derived]
 enum TextFields {
     UTF8,
     Epilog,
@@ -68,28 +78,33 @@ enum TextFields {
 
 #[derive(Deserialize)]
 #[serde(field_identifier, rename_all = "lowercase")]
-#[expect(dead_code)] // because emitted has #[automatically_derived]
 enum ListFields {
     Prolog,
     Items,
     Epilog,
 }
 
-// #[derive(Deserialize)]
-// #[serde(field_identifier, rename_all = "lowercase")]
-// #[expect(dead_code)] // because emitted has #[automatically_derived]
-// enum EntryFields {
-//     Gap,
-//     Before,
-//     Key,
-//     Item,
-// }
+#[derive(Deserialize)]
+#[serde(field_identifier, rename_all = "lowercase")]
+enum EntryFields {
+    Gap,
+    Before,
+    Key,
+    Item,
+}
 
 #[derive(Deserialize)]
 #[serde(field_identifier, rename_all = "lowercase")]
-#[expect(dead_code)] // because emitted has #[automatically_derived]
 enum DictFields {
     Prolog,
     Entries,
     Epilog,
+}
+
+#[derive(Deserialize)]
+#[serde(field_identifier, rename_all = "lowercase")]
+enum FileFields {
+    Hashbang,
+    Prolog,
+    Entries,
 }

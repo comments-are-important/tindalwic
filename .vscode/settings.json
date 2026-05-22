@@ -2,7 +2,9 @@
     "cSpell.words": [
         "abnf",
         "asyncness",
+        "bindgen",
         "bumpalo",
+        "cdylib",
         "charliermarsh",
         "constness",
         "deepdiff",

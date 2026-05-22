@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta content="text/html;charset=utf-8" http-equiv="Content-Type" />
+    <style>
+        textarea {
+            tab-size: 4;
+            display:block;
+            width: 90vw;
+            height: 45vh;
+        }
+    </style>
+</head>
+
+<body>
+    <textarea id="input"></textarea>
+    <textarea id="output" readonly></textarea>
+
+    <script src='./pkg/tindalwic_webapp.js'></script>
+    <script>
+        const { convert } = wasm_bindgen;
+
+        async function run() {
+            await wasm_bindgen();
+
+            const input = document.getElementById('input');
+            input.addEventListener('keydown', function (e) {
+                if (e.key === 'Tab') {
+                    e.preventDefault(); // Prevent focus change
+
+                    const start = this.selectionStart;
+                    const end = this.selectionEnd;
+
+                    // Set textarea value: text before + tab + text after
+                    this.value = this.value.substring(0, start) + "\t" + this.value.substring(end);
+
+                    // Put caret back in the right position
+                    this.selectionStart = this.selectionEnd = start + 1;
+                }
+            });
+
+            const output = document.getElementById('output');
+            input.addEventListener('input', function () {
+                const errors = [];
+                try {
+                    output.value = convert(input.value, "JSON", errors).content;
+                    if (errors.length) {
+                        console.log(errors);
+                    }
+                } catch (e) {
+                    console.log(e, errors);
+                }
+            });
+        }
+
+        run();
+    </script>
+
+</body>
+
+</html>

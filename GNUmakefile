@@ -90,6 +90,12 @@ rust/doc: must-run-inside
 	uv run -- python -m http.server >&http.server.log
 .PHONY: rust/doc
 
+rust/webapp: must-run-inside
+	cd rust/webapp
+	cargo install --list | grep -q wasm-pack || cargo install wasm-pack
+	wasm-pack build --target no-modules
+.PHONY: rust/webapp
+
 rust/nightly: must-run-inside
 	cd rust
 	rustup toolchain list | grep -q nightly || rustup toolchain install nightly
@@ -115,13 +121,12 @@ rust/llvm-lines: must-run-inside
 
 rust/fmt: rust/nightly
 	cd rust
-	# see comment near top of rust/src/serde/mod.rs
+	: see comment near top of rust/src/serde/mod.rs
 	sed -i \
 	  -e 's|^seeded! {$$|const _: () = {|' \
 	  -e 's|^} // !seeded$$|}; // !seeded|' \
 	  src/serde/*.rs
-	SRC=$$(find src macros/src -name '*.rs')
-	rustfmt +nightly $$SRC tests/*.rs
+	rustfmt +nightly $$(find src macros/src webapp/src -name '*.rs') tests/*.rs
 	sed -i \
 	  -e 's|^const _: () = {$$|seeded! {|' \
 	  -e 's|^}; // !seeded$$|} // !seeded|' \

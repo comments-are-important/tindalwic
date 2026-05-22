@@ -1,13 +1,22 @@
 [workspace]
-members = ["macros"]
+members = [".", "macros","webapp"]
+default-members = [".", "macros"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Comments Are Important <comments.are.important@gmail.com>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/comments-are-important/tindalwic"
 
 [package]
 name = "tindalwic"
-version = "0.1.0"
-edition = "2024"
 description = "tindalwic data format and tools"
-license = "MIT OR Apache-2.0"
-authors = ["Comments Are Important <comments.are.important@gmail.com>"]
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+license.workspace = true
 
 [features]
 alloc = ["dep:bumpalo"]

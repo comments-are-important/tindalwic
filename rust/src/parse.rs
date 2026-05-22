@@ -375,7 +375,8 @@ where
                 }
                 _ => {
                     if self.assign == usize::MAX {
-                        (self.report)(ParseError::at(self.line, "missing `=` in dict"))
+                        (self.report)(ParseError::at(self.line, "missing `=` in dict"));
+                        self.next(indent);
                     } else {
                         key = &self.utf8[self.first..self.assign];
                         item = Some(self.text(indent, self.assign + 1).into());

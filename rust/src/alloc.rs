@@ -3,7 +3,7 @@
 extern crate alloc;
 
 use super::internals::Builder;
-use crate::{Comment, Dict, Entry, File, Item, List, Text, UTF8};
+use crate::{Comment, Dict, Entry, File, Item, List, ParseError, Text, UTF8};
 use alloc::string::String;
 use alloc::vec::Vec;
 use bumpalo::Bump;
@@ -75,7 +75,15 @@ impl<'a, 'bump> Arena<'a, 'bump> {
     }
     /// call the parser on the provided content, panic if the content isn't legit.
     pub fn parse_or_panic(&self, content: &'a str) -> Option<File<'a, 'bump>> {
-        crate::parse::Input::parse(self, content, |error| panic!("{error}"))
+        self.parse(content, |error| panic!("{error}"))
+    }
+    /// call the parser on the provided content, with a callback for errors.
+    pub fn parse<F: FnMut(ParseError)>(
+        &self,
+        content: &'a str,
+        report: F,
+    ) -> Option<File<'a, 'bump>> {
+        crate::parse::Input::parse(self, content, report)
     }
 }
 

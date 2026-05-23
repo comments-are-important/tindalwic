@@ -1,8 +1,11 @@
+extern crate alloc;
+
 use super::{ArenaSeed, CommentDe, CommentSer, UTF8De, UTF8Ser, seeded};
 use super::{DictFields, EntryFields, FileFields, ItemVariants, ListFields, TextFields};
 use crate::alloc::Arena;
 use crate::internals::Builder;
 use crate::{Dict, Entry, File, Item, List, Name, Text, UTF8};
+use alloc::string::String;
 use core::cell::Cell;
 use serde::de::{DeserializeSeed, Error, VariantAccess};
 use serde::ser::{Serialize, SerializeSeq, SerializeStruct, Serializer};
@@ -208,7 +211,7 @@ seeded! {
                         if key.is_some() {
                             return Err(Error::duplicate_field("key"));
                         }
-                        key = Some(arena.intern(map.next_value::<&str>()?));
+                        key = Some(arena.intern(&map.next_value::<String>()?));
                     }
                     EntryFields::Item => {
                         if item.is_some() {

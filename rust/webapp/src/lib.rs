@@ -54,25 +54,25 @@ pub fn from_tindalwic(
 }
 
 fn from_json<'de, 'a>(
-    input: &str,
+    input: &'de str,
     seed: impl DeserializeSeed<'de, Value = File<'a>>,
 ) -> Result<File<'a>, String> {
-    let value: serde_json::Value = serde_json::from_str(input).map_err(|e| e.to_string())?;
-    seed.deserialize(value).map_err(|e| e.to_string())
+    let mut de = serde_json::Deserializer::from_str(input);
+    seed.deserialize(&mut de).map_err(|e| e.to_string())
 }
 fn from_toml<'de, 'a>(
-    input: &str,
+    input: &'de str,
     seed: impl DeserializeSeed<'de, Value = File<'a>>,
 ) -> Result<File<'a>, String> {
-    let value: toml::Value = toml::from_str(input).map_err(|e| e.to_string())?;
-    seed.deserialize(value).map_err(|e| e.to_string())
+    let de = toml::de::Deserializer::parse(input).map_err(|e| e.to_string())?;
+    seed.deserialize(de).map_err(|e| e.to_string())
 }
 fn from_yaml<'de, 'a>(
-    input: &str,
+    input: &'de str,
     seed: impl DeserializeSeed<'de, Value = File<'a>>,
 ) -> Result<File<'a>, String> {
-    let value: yaml_serde::Value = yaml_serde::from_str(input).map_err(|e| e.to_string())?;
-    seed.deserialize(value).map_err(|e| e.to_string())
+    let de = yaml_serde::Deserializer::from_str(input);
+    seed.deserialize(de).map_err(|e| e.to_string())
 }
 
 #[wasm_bindgen]

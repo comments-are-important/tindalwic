@@ -48,23 +48,33 @@
             display: flex;
             flex-direction: column;
         }
+
+        .err {
+            font-family: monospace;
+            font-size: smaller;
+            padding: 5px;
+        }
     </style>
 </head>
 
 <body>
-    <div id="ours" class="data">
+    <div class="data">
         <select id="mode">
             <option value="Neutered">Tindalwic - neutered</option>
             <option value="Compact">Tindalwic - compact</option>
             <option value="Verbose">Tindalwic - verbose</option>
         </select>
+        <div id="theirErr" class="err" style="display:none"></div>
+        <div id="ours" style="display:block"></div>
     </div>
-    <div id="theirs" class="data">
+    <div class="data">
         <select id="format">
             <option value="JSON">JSON</option>
             <option value="TOML">TOML</option>
             <option value="YAML">YAML</option>
         </select>
+        <div id="ourErr" class="err" style="display:none"></div>
+        <div id="theirs" style="display:block"></div>
     </div>
 
     <script type="module">
@@ -79,14 +89,16 @@
         import { json } from "@codemirror/lang-json";
         import { yaml } from "@codemirror/lang-yaml";
         import { toml } from "@codemirror/legacy-modes/mode/toml";
+        const ourDiv = document.getElementById('ours');
         const ourView = new EditorView({
-            parent: document.getElementById('ours'),
+            parent: ourDiv,
             extensions: [
                 basicSetup,
                 indentUnit.of("\t"),
                 keymap.of([indentWithTab])
             ]
         });
+        const theirDiv = document.getElementById('theirs');
         const languageConf = new Compartment();
         const languageExtensions = {
             JSON: json(),
@@ -94,18 +106,37 @@
             TOML: StreamLanguage.define(toml)
         };
         const theirView = new EditorView({
-            parent: document.getElementById('theirs'),
+            parent: theirDiv,
             extensions: [
                 basicSetup,
                 keymap.of([indentWithTab]),
                 languageConf.of(languageExtensions.JSON)
             ]
         });
+        const ourErr = document.getElementById('ourErr');
+        const theirErr = document.getElementById('theirErr');
+        function reset() {
+            ourDiv.style.display = 'block';
+            ourErr.style.display = 'none';
+            ourErr.textContent = '';
+            theirDiv.style.display = 'block';
+            theirErr.style.display = 'none';
+            theirErr.textContent = '';
+        }
         function oursToTheirs() {
             const input = ourView.state.doc.toString();
             const mode = document.getElementById('mode').value;
             const format = document.getElementById('format').value;
-            const output = from_tindalwic(input, mode, format);
+            let output;
+            try {
+                reset();
+                output = from_tindalwic(input, mode, format);
+            } catch (e) {
+                theirDiv.style.display = 'none';
+                ourErr.style.display = 'block';
+                ourErr.textContent = e;
+                return;
+            }
             theirView.dispatch({
                 changes: {
                     from: 0,
@@ -120,7 +151,16 @@
             const input = theirView.state.doc.toString();
             const mode = document.getElementById('mode').value;
             const format = document.getElementById('format').value;
-            const output = into_tindalwic(input, mode, format);
+            let output;
+            try {
+                reset();
+                output = into_tindalwic(input, mode, format);
+            } catch (e) {
+                ourDiv.style.display = 'none';
+                theirErr.style.display = 'block';
+                theirErr.textContent = e;
+                return;
+            }
             ourView.dispatch({
                 changes: {
                     from: 0,

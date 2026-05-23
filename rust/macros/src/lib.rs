@@ -303,6 +303,30 @@ impl SerDe {
             "visit_borrowed_str" => quote! {
                 <E: ::serde::de::Error>(self,v:&'de str)->Result<Self::Value,E>
             },
+            "visit_string" => quote! {
+                <E: ::serde::de::Error>(self,v: ::alloc::string::String)->Result<Self::Value,E>
+            },
+            "visit_bytes" => quote! {
+                <E: ::serde::de::Error>(self,v:&[u8])->Result<Self::Value,E>
+            },
+            "visit_borrowed_bytes" => quote! {
+                <E: ::serde::de::Error>(self,v:&'de [u8])->Result<Self::Value,E>
+            },
+            "visit_byte_buf" => quote! {
+                <E: ::serde::de::Error>(self,v: ::alloc::vec::Vec<u8>)->Result<Self::Value,E>
+            },
+            "visit_none" => quote! {
+                <E: ::serde::de::Error>(self)->Result<Self::Value,E>
+            },
+            "visit_some" => quote! {
+                <D: ::serde::de::Deserializer<'de>>(self,d:D)->Result<Self::Value,D::Error>
+            },
+            "visit_unit" => quote! {
+                <E: ::serde::de::Error>(self)->Result<Self::Value,E>
+            },
+            "visit_newtype_struct" => quote! {
+                <D: ::serde::de::Deserializer<'de>>(self,d:D)->Result<Self::Value,D::Error>
+            },
             "visit_seq" => quote! {
                 <A: ::serde::de::SeqAccess<'de>>(self,mut seq:A)->Result<Self::Value,A::Error>
             },
@@ -312,13 +336,16 @@ impl SerDe {
             "visit_enum" => quote! {
                 <A: ::serde::de::EnumAccess<'de>>(self,data:A)->Result<Self::Value,A::Error>
             },
-            "visit_none" => quote! {
-                <E: ::serde::de::Error>(self)->Result<Self::Value,E>
-            },
-            "visit_some" => quote! {
-                <D: ::serde::de::Deserializer<'de>>(self,d:D)->Result<Self::Value,D::Error>
-            },
-            _ => quote!(()),
+            other => {
+                assert!(
+                    other.starts_with("visit_"),
+                    "caller asked for sig of non-visitor"
+                );
+                let kind = Ident::new(&other[6..], name.span());
+                quote! {
+                    <E: ::serde::de::Error>(self,v:#kind)->Result<Self::Value,E>
+                }
+            }
         }
     }
 }

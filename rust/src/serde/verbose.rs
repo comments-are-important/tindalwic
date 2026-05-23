@@ -1,8 +1,11 @@
+extern crate alloc;
+
 use super::{ArenaSeed, CommentDe, CommentSer, UTF8De, UTF8Ser, seeded};
 use super::{DictFields, EntryFields, FileFields, ItemVariants, ListFields, TextFields};
 use crate::alloc::Arena;
 use crate::internals::Builder;
 use crate::{Dict, Entry, File, Item, List, Name, Text};
+use alloc::string::String;
 use core::cell::Cell;
 use serde::de::{DeserializeSeed, Error, VariantAccess};
 use serde::ser::{Serialize, SerializeSeq, SerializeStruct, Serializer};
@@ -167,7 +170,7 @@ seeded! {
                 name: Name {
                     gap: seq.next_element()?.ok_or_else(err)?,
                     before: seq.next_element_seed(CommentDe(arena))?.ok_or_else(err)?,
-                    key: arena.intern(seq.next_element::<&str>()?.ok_or_else(err)?),
+                    key: arena.intern(&seq.next_element::<String>()?.ok_or_else(err)?),
                 },
                 item: seq.next_element_seed(ItemDe(arena))?.ok_or_else(err)?,
             })
@@ -195,7 +198,7 @@ seeded! {
                         if key.is_some() {
                             return Err(Error::duplicate_field("key"));
                         }
-                        key = Some(map.next_value::<&str>()?);
+                        key = Some(arena.intern(&map.next_value::<String>()?));
                     }
                     EntryFields::Item => {
                         if item.is_some() {
@@ -209,7 +212,7 @@ seeded! {
                 name: Name {
                     gap: gap.ok_or_else(|| Error::missing_field("gap"))?,
                     before: before.ok_or_else(|| Error::missing_field("before"))?,
-                    key: arena.intern(key.ok_or_else(|| Error::missing_field("key"))?),
+                    key: key.ok_or_else(|| Error::missing_field("key"))?,
                 },
                 item: item.ok_or_else(|| Error::missing_field("item"))?,
             })

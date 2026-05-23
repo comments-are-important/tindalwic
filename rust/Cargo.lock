@@ -733,6 +733,7 @@ dependencies = [
  "bumpalo",
  "console_error_panic_hook",
  "js-sys",
+ "serde",
  "serde_json",
  "tindalwic",
  "toml",

@@ -1,10 +1,10 @@
-use super::{CommentDe, CommentSer, UTF8De, UTF8Ser, seeded};
+use super::{ArenaSeed, CommentDe, CommentSer, UTF8De, UTF8Ser, seeded};
 use super::{DictFields, EntryFields, FileFields, ItemVariants, ListFields, TextFields};
 use crate::alloc::Arena;
 use crate::internals::Builder;
 use crate::{Dict, Entry, File, Item, List, Name, Text};
 use core::cell::Cell;
-use serde::de::{DeserializeSeed, Deserializer, Error, VariantAccess};
+use serde::de::{DeserializeSeed, Error, VariantAccess};
 use serde::ser::{Serialize, SerializeSeq, SerializeStruct, Serializer};
 
 seeded! {
@@ -51,7 +51,7 @@ seeded! {
             let mut epilog = None;
             while let Some(field) = map.next_key()? {
                 match field {
-                    TextFields::UTF8 => {
+                    TextFields::Value => {
                         if value.is_some() {
                             return Err(Error::duplicate_field("value"));
                         }
@@ -126,7 +126,7 @@ seeded! {
                         }
                         prolog = Some(map.next_value_seed(CommentDe(arena))?);
                     }
-                    ListFields::Items => {
+                    ListFields::Array => {
                         if array.is_some() {
                             return Err(Error::duplicate_field("array"));
                         }
@@ -167,7 +167,7 @@ seeded! {
                 name: Name {
                     gap: seq.next_element()?.ok_or_else(err)?,
                     before: seq.next_element_seed(CommentDe(arena))?.ok_or_else(err)?,
-                    key: seq.next_element()?.ok_or_else(err)?,
+                    key: arena.intern(seq.next_element::<&str>()?.ok_or_else(err)?),
                 },
                 item: seq.next_element_seed(ItemDe(arena))?.ok_or_else(err)?,
             })
@@ -195,7 +195,7 @@ seeded! {
                         if key.is_some() {
                             return Err(Error::duplicate_field("key"));
                         }
-                        key = Some(map.next_value()?);
+                        key = Some(map.next_value::<&str>()?);
                     }
                     EntryFields::Item => {
                         if item.is_some() {
@@ -209,7 +209,7 @@ seeded! {
                 name: Name {
                     gap: gap.ok_or_else(|| Error::missing_field("gap"))?,
                     before: before.ok_or_else(|| Error::missing_field("before"))?,
-                    key: key.ok_or_else(|| Error::missing_field("key"))?,
+                    key: arena.intern(key.ok_or_else(|| Error::missing_field("key"))?),
                 },
                 item: item.ok_or_else(|| Error::missing_field("item"))?,
             })
@@ -252,7 +252,7 @@ seeded! {
         }
         fn visit_map() {
             let mut prolog = None;
-            let mut entries = None;
+            let mut array = None;
             let mut epilog = None;
             while let Some(field) = map.next_key()? {
                 match field {
@@ -262,11 +262,11 @@ seeded! {
                         }
                         prolog = Some(map.next_value_seed(CommentDe(arena))?);
                     }
-                    DictFields::Entries => {
-                        if entries.is_some() {
+                    DictFields::Array => {
+                        if array.is_some() {
                             return Err(Error::duplicate_field("array"));
                         }
-                        entries = Some(map.next_value_seed(EntriesDe(arena))?);
+                        array = Some(map.next_value_seed(EntriesDe(arena))?);
                     }
                     DictFields::Epilog => {
                         if epilog.is_some() {
@@ -278,7 +278,7 @@ seeded! {
             }
             Ok(Dict {
                 prolog: prolog.ok_or_else(|| Error::missing_field("prolog"))?,
-                cells: entries.ok_or_else(|| Error::missing_field("array"))?,
+                cells: array.ok_or_else(|| Error::missing_field("array"))?,
                 epilog: epilog.ok_or_else(|| Error::missing_field("epilog"))?,
             })
         }
@@ -307,7 +307,7 @@ seeded! {
         fn visit_map() {
             let mut hashbang = None;
             let mut prolog = None;
-            let mut entries = None;
+            let mut array = None;
             while let Some(field) = map.next_key()? {
                 match field {
                     FileFields::Hashbang => {
@@ -322,18 +322,18 @@ seeded! {
                         }
                         prolog = Some(map.next_value_seed(CommentDe(arena))?);
                     }
-                    FileFields::Entries => {
-                        if entries.is_some() {
+                    FileFields::Array => {
+                        if array.is_some() {
                             return Err(Error::duplicate_field("array"));
                         }
-                        entries = Some(map.next_value_seed(EntriesDe(arena))?);
+                        array = Some(map.next_value_seed(EntriesDe(arena))?);
                     }
                 }
             }
             Ok(File {
                 hashbang: hashbang.ok_or_else(|| Error::missing_field("hashbang"))?,
                 prolog: prolog.ok_or_else(|| Error::missing_field("prolog"))?,
-                cells: entries.ok_or_else(|| Error::missing_field("array"))?,
+                cells: array.ok_or_else(|| Error::missing_field("array"))?,
             })
         }
         fn visit_seq() {
@@ -348,19 +348,15 @@ seeded! {
 } // !seeded
 
 /// serialize all fields, avoiding "skip_serializing_if"
-pub struct Verbose<'a, 'store>(pub File<'a, 'store>);
-impl<'a, 'store> Serialize for Verbose<'a, 'store> {
+pub struct Verbose<'a>(pub File<'a>);
+impl<'a> Serialize for Verbose<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let Verbose(this) = self;
         FileSer(*this).serialize(s)
     }
 }
-impl<'de: 'a + 'store, 'a, 'store> Verbose<'a, 'store> {
-    /// deserialize from a format lacking comments
-    pub fn deserialize<D: Deserializer<'de>>(
-        arena: &'de Arena<'a, 'store>,
-        d: D,
-    ) -> Result<File<'a, 'store>, D::Error> {
-        FileDe(arena).deserialize(d)
+impl<'de, 'a: 'de> ArenaSeed<'de, 'a> for Verbose<'a> {
+    fn seed(arena: &'de Arena<'a>) -> impl DeserializeSeed<'de, Value = File<'a>> {
+        FileDe(arena)
     }
 }

@@ -18,11 +18,7 @@ where
     F: FnMut(ParseError),
 {
     /// None means the arena is too small (or the UTF-8 is way too big).
-    pub(crate) fn parse<'store>(
-        arena: &dyn Builder<'a, 'store>,
-        utf8: &'a str,
-        report: F,
-    ) -> Option<File<'a, 'store>> {
+    pub(crate) fn parse(arena: &dyn Builder<'a>, utf8: &'a str, report: F) -> Option<File<'a>> {
         if utf8.len() >= usize::MAX {
             // MAX is a sentinel, so it also can't be a len. the wrap-around that could
             // maybe happen without this check will almost certainly never actually
@@ -201,16 +197,12 @@ where
 
     /// previous line opened a list context, so parse all the items in it.
     /// None means insufficient space in Arena.
-    fn items<'store>(
-        &mut self,
-        indent: usize,
-        arena: &dyn Builder<'a, 'store>,
-    ) -> Option<List<'a, 'store>> {
+    fn items(&mut self, indent: usize, arena: &dyn Builder<'a>) -> Option<List<'a>> {
         let bytes = self.utf8.as_bytes();
         let prolog = self.comment(indent, b"#");
         let mut count = 0usize;
         while self.start != usize::MAX {
-            let mut item: Option<Item<'a, 'store>> = None;
+            let mut item: Option<Item<'a>> = None;
             if self.start == self.end || self.tabs != indent {
                 break;
             } else if self.first >= self.end {
@@ -291,16 +283,12 @@ where
 
     /// previous line opened a dict context, so parse all the entries in it.
     /// None means insufficient space in Arena.
-    fn entries<'store>(
-        &mut self,
-        indent: usize,
-        arena: &dyn Builder<'a, 'store>,
-    ) -> Option<Dict<'a, 'store>> {
+    fn entries(&mut self, indent: usize, arena: &dyn Builder<'a>) -> Option<Dict<'a>> {
         let bytes = self.utf8.as_bytes();
         let prolog = self.comment(indent, b"#");
         let mut count = 0usize;
         while self.start != usize::MAX {
-            let mut item: Option<Item<'a, 'store>> = None;
+            let mut item: Option<Item<'a>> = None;
             let gap = self.tabs == indent && self.first == self.end;
             if gap {
                 self.next(indent);

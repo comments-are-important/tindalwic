@@ -1,10 +1,10 @@
-use super::{CommentDe, CommentSer, UTF8De, UTF8Ser, seeded};
+use super::{ArenaSeed, CommentDe, CommentSer, UTF8De, UTF8Ser, seeded};
 use super::{DictFields, EntryFields, FileFields, ItemVariants, ListFields, TextFields};
 use crate::alloc::Arena;
 use crate::internals::Builder;
 use crate::{Dict, Entry, File, Item, List, Name, Text, UTF8};
 use core::cell::Cell;
-use serde::de::{DeserializeSeed, Deserializer, Error, VariantAccess};
+use serde::de::{DeserializeSeed, Error, VariantAccess};
 use serde::ser::{Serialize, SerializeSeq, SerializeStruct, Serializer};
 
 seeded! {
@@ -53,7 +53,7 @@ seeded! {
             let mut epilog = None;
             while let Some(field) = map.next_key()? {
                 match field {
-                    TextFields::UTF8 => {
+                    TextFields::Value => {
                         if value.is_some() {
                             return Err(Error::duplicate_field("value"));
                         }
@@ -132,7 +132,7 @@ seeded! {
                         }
                         prolog = Some(map.next_value_seed(CommentDe(arena))?);
                     }
-                    ListFields::Items => {
+                    ListFields::Array => {
                         if array.is_some() {
                             return Err(Error::duplicate_field("array"));
                         }
@@ -208,7 +208,7 @@ seeded! {
                         if key.is_some() {
                             return Err(Error::duplicate_field("key"));
                         }
-                        key = Some(map.next_value()?);
+                        key = Some(arena.intern(map.next_value::<&str>()?));
                     }
                     EntryFields::Item => {
                         if item.is_some() {
@@ -274,7 +274,7 @@ seeded! {
         }
         fn visit_map() {
             let mut prolog = None;
-            let mut entries = None;
+            let mut array = None;
             let mut epilog = None;
             while let Some(field) = map.next_key()? {
                 match field {
@@ -284,11 +284,11 @@ seeded! {
                         }
                         prolog = Some(map.next_value_seed(CommentDe(arena))?);
                     }
-                    DictFields::Entries => {
-                        if entries.is_some() {
+                    DictFields::Array => {
+                        if array.is_some() {
                             return Err(Error::duplicate_field("array"));
                         }
-                        entries = Some(map.next_value_seed(EntriesDe(arena))?);
+                        array = Some(map.next_value_seed(EntriesDe(arena))?);
                     }
                     DictFields::Epilog => {
                         if epilog.is_some() {
@@ -300,7 +300,7 @@ seeded! {
             }
             Ok(Dict {
                 prolog: prolog.unwrap_or(None),
-                cells: entries.unwrap_or(&[]),
+                cells: array.unwrap_or(&[]),
                 epilog: epilog.unwrap_or(None),
             })
         }
@@ -333,7 +333,7 @@ seeded! {
         fn visit_map() {
             let mut hashbang = None;
             let mut prolog = None;
-            let mut entries = None;
+            let mut array = None;
             while let Some(field) = map.next_key()? {
                 match field {
                     FileFields::Hashbang => {
@@ -348,18 +348,18 @@ seeded! {
                         }
                         prolog = Some(map.next_value_seed(CommentDe(arena))?);
                     }
-                    FileFields::Entries => {
-                        if entries.is_some() {
+                    FileFields::Array => {
+                        if array.is_some() {
                             return Err(Error::duplicate_field("array"));
                         }
-                        entries = Some(map.next_value_seed(EntriesDe(arena))?);
+                        array = Some(map.next_value_seed(EntriesDe(arena))?);
                     }
                 }
             }
             Ok(File {
                 hashbang: hashbang.unwrap_or(None),
                 prolog: prolog.unwrap_or(None),
-                cells: entries.unwrap_or(&[]),
+                cells: array.unwrap_or(&[]),
             })
         }
         fn visit_seq() {
@@ -369,19 +369,15 @@ seeded! {
 } // !seeded
 
 /// serialize only used fields, ala "skip_serializing_if"
-pub struct Compact<'a, 'store>(pub File<'a, 'store>);
-impl<'a, 'store> Serialize for Compact<'a, 'store> {
+pub struct Compact<'a>(pub File<'a>);
+impl<'a> Serialize for Compact<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let Compact(this) = self;
         FileSer(*this).serialize(s)
     }
 }
-impl<'de: 'a + 'store, 'a, 'store> Compact<'a, 'store> {
-    /// deserialize from a format lacking comments
-    pub fn deserialize<D: Deserializer<'de>>(
-        arena: &'de Arena<'a, 'store>,
-        d: D,
-    ) -> Result<File<'a, 'store>, D::Error> {
-        FileDe(arena).deserialize(d)
+impl<'de, 'a: 'de> ArenaSeed<'de, 'a> for Compact<'a> {
+    fn seed(arena: &'de Arena<'a>) -> impl DeserializeSeed<'de, Value = File<'a>> {
+        FileDe(arena)
     }
 }

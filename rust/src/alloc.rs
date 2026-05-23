@@ -38,31 +38,31 @@ impl<T: Copy> CellVec<T> {
 
 /// a flavor of Arena that uses bumpalo to put things in the heap.
 /// TODO think about fleshing this out with more convenient methods.
-pub struct Arena<'a, 'bump> {
-    items: CellVec<Item<'a, 'bump>>,
-    entries: CellVec<Entry<'a, 'bump>>,
-    bump: &'bump Bump,
+pub struct Arena<'a> {
+    items: CellVec<Item<'a>>,
+    entries: CellVec<Entry<'a>>,
+    bump: &'a Bump,
 }
-impl<'a, 'bump> Builder<'a, 'bump> for Arena<'a, 'bump> {
-    fn list(&self, count: usize) -> Option<List<'a, 'bump>> {
+impl<'a> Builder<'a> for Arena<'a> {
+    fn list(&self, count: usize) -> Option<List<'a>> {
         Some(List::wrap(self.items.finish(count, self.bump)?))
     }
 
-    fn dict(&self, count: usize) -> Option<Dict<'a, 'bump>> {
+    fn dict(&self, count: usize) -> Option<Dict<'a>> {
         Some(Dict::wrap(self.entries.finish(count, self.bump)?))
     }
 
-    fn item(&self, item: Item<'a, 'bump>) -> Option<()> {
+    fn item(&self, item: Item<'a>) -> Option<()> {
         self.items.push(item)
     }
 
-    fn entry(&self, entry: Entry<'a, 'bump>) -> Option<()> {
+    fn entry(&self, entry: Entry<'a>) -> Option<()> {
         self.entries.push(entry)
     }
 }
-impl<'a, 'bump> Arena<'a, 'bump> {
+impl<'a> Arena<'a> {
     /// the Bump needs an outside let binding so it lives long enough.
-    pub fn new(bump: &'bump Bump) -> Self {
+    pub fn new(bump: &'a Bump) -> Self {
         Arena {
             items: CellVec::new(),
             entries: CellVec::new(),
@@ -70,19 +70,15 @@ impl<'a, 'bump> Arena<'a, 'bump> {
         }
     }
     /// copy a str into the bump
-    pub fn intern(&self, value: &'_ str) -> &'bump str {
+    pub fn intern(&self, value: &'_ str) -> &'a str {
         self.bump.alloc_str(value)
     }
     /// call the parser on the provided content, panic if the content isn't legit.
-    pub fn parse_or_panic(&self, content: &'a str) -> Option<File<'a, 'bump>> {
+    pub fn parse_or_panic(&self, content: &'a str) -> Option<File<'a>> {
         self.parse(content, |error| panic!("{error}"))
     }
     /// call the parser on the provided content, with a callback for errors.
-    pub fn parse<F: FnMut(ParseError)>(
-        &self,
-        content: &'a str,
-        report: F,
-    ) -> Option<File<'a, 'bump>> {
+    pub fn parse<F: FnMut(ParseError)>(&self, content: &'a str, report: F) -> Option<File<'a>> {
         crate::parse::Input::parse(self, content, report)
     }
 }

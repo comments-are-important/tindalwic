@@ -3,11 +3,11 @@
 use super::*;
 
 /// TODO return Results, not Options, here and in Arenas.
-pub trait Builder<'a, 'store> {
-    fn list(&self, count: usize) -> Option<List<'a, 'store>>;
-    fn dict(&self, count: usize) -> Option<Dict<'a, 'store>>;
-    fn item(&self, item: Item<'a, 'store>) -> Option<()>;
-    fn entry(&self, entry: Entry<'a, 'store>) -> Option<()>;
+pub trait Builder<'a> {
+    fn list(&self, count: usize) -> Option<List<'a>>;
+    fn dict(&self, count: usize) -> Option<Dict<'a>>;
+    fn item(&self, item: Item<'a>) -> Option<()>;
+    fn entry(&self, entry: Entry<'a>) -> Option<()>;
 }
 
 /// push T into stack on low side of array, finish them into high side.
@@ -17,13 +17,13 @@ pub trait Builder<'a, 'store> {
 /// total O(n) moves, zero extra space, caller only needs to track child count.
 /// basically two-stacks-in-one-array (Knuth, TAOCP Vol. 1, §2.2.2 p.246),
 /// but keep siblings together by transferring, as group, from low to high.
-struct LowToHigh<'store, T> {
-    cells: &'store [Cell<T>],
+struct LowToHigh<'a, T> {
+    cells: &'a [Cell<T>],
     next: Cell<usize>,
     done: Cell<usize>,
 }
-impl<'store, T> LowToHigh<'store, T> {
-    fn wrap(cells: &'store [Cell<T>]) -> Self {
+impl<'a, T> LowToHigh<'a, T> {
+    fn wrap(cells: &'a [Cell<T>]) -> Self {
         LowToHigh {
             cells,
             next: 0.into(),
@@ -39,7 +39,7 @@ impl<'store, T> LowToHigh<'store, T> {
         self.next.set(next + 1);
         Some(())
     }
-    fn finish(&self, count: usize) -> Option<&'store [Cell<T>]> {
+    fn finish(&self, count: usize) -> Option<&'a [Cell<T>]> {
         let next = self.next.get();
         let done = self.done.get();
         if next < count || next > done {
@@ -62,29 +62,26 @@ impl<'store, T> LowToHigh<'store, T> {
     }
 }
 
-pub struct Arena<'a, 'store> {
-    items: LowToHigh<'store, Item<'a, 'store>>,
-    entries: LowToHigh<'store, Entry<'a, 'store>>,
+pub struct Arena<'a> {
+    items: LowToHigh<'a, Item<'a>>,
+    entries: LowToHigh<'a, Entry<'a>>,
 }
-impl<'a, 'store> Builder<'a, 'store> for Arena<'a, 'store> {
-    fn list(&self, count: usize) -> Option<List<'a, 'store>> {
+impl<'a> Builder<'a> for Arena<'a> {
+    fn list(&self, count: usize) -> Option<List<'a>> {
         Some(List::wrap(self.items.finish(count)?))
     }
-    fn dict(&self, count: usize) -> Option<Dict<'a, 'store>> {
+    fn dict(&self, count: usize) -> Option<Dict<'a>> {
         Some(Dict::wrap(self.entries.finish(count)?))
     }
-    fn item(&self, item: Item<'a, 'store>) -> Option<()> {
+    fn item(&self, item: Item<'a>) -> Option<()> {
         self.items.push(item)
     }
-    fn entry(&self, entry: Entry<'a, 'store>) -> Option<()> {
+    fn entry(&self, entry: Entry<'a>) -> Option<()> {
         self.entries.push(entry)
     }
 }
-impl<'a, 'store> Arena<'a, 'store> {
-    pub fn wrap(
-        items: &'store [Cell<Item<'a, 'store>>],
-        entries: &'store [Cell<Entry<'a, 'store>>],
-    ) -> Self {
+impl<'a> Arena<'a> {
+    pub fn wrap(items: &'a [Cell<Item<'a>>], entries: &'a [Cell<Entry<'a>>]) -> Self {
         let items = LowToHigh::wrap(items);
         let entries = LowToHigh::wrap(entries);
         Arena { items, entries }
@@ -102,7 +99,7 @@ impl<'a, 'store> Arena<'a, 'store> {
             None
         }
     }
-    pub fn keyed(&self, key: &'a str, item: Item<'a, 'store>) -> Option<()> {
+    pub fn keyed(&self, key: &'a str, item: Item<'a>) -> Option<()> {
         self.entry(Entry::wrap(key, item))
     }
     pub fn text_item(&self, utf8: &'a str) -> Option<()> {
@@ -127,7 +124,7 @@ impl<'a, 'store> Arena<'a, 'store> {
         let dict = self.dict(count)?;
         self.keyed(key, dict.into())
     }
-    pub fn parse_or_panic(&self, content: &'a str) -> Option<File<'a, 'store>> {
+    pub fn parse_or_panic(&self, content: &'a str) -> Option<File<'a>> {
         parse::Input::parse(self, content, |error| panic!("{error}"))
     }
 }
@@ -188,28 +185,25 @@ impl<'p> Path<'p> {
             message,
         }
     }
-    pub fn text<'a, 'store>(&self, item: &Item<'a, 'store>) -> Result<Text<'a>, Error<'p>> {
+    pub fn text<'a>(&self, item: &Item<'a>) -> Result<Text<'a>, Error<'p>> {
         let Item::Text(text) = item else {
             return Err(self.error_full("path does not end at Text"));
         };
         Ok(*text)
     }
-    pub fn list<'a, 'store>(&self, item: &Item<'a, 'store>) -> Result<List<'a, 'store>, Error<'p>> {
+    pub fn list<'a>(&self, item: &Item<'a>) -> Result<List<'a>, Error<'p>> {
         let Item::List(list) = item else {
             return Err(self.error_full("path does not end at List"));
         };
         Ok(*list)
     }
-    pub fn dict<'a, 'store>(&self, item: &Item<'a, 'store>) -> Result<Dict<'a, 'store>, Error<'p>> {
+    pub fn dict<'a>(&self, item: &Item<'a>) -> Result<Dict<'a>, Error<'p>> {
         let Item::Dict(dict) = item else {
             return Err(self.error_full("path does not end at Dict"));
         };
         Ok(*dict)
     }
-    pub fn item_cell<'a, 'store>(
-        &self,
-        item: &Item<'a, 'store>,
-    ) -> Result<&'a Cell<Item<'a, 'store>>, Error<'p>> {
+    pub fn item_cell<'a>(&self, item: &Item<'a>) -> Result<&'a Cell<Item<'a>>, Error<'p>> {
         if self.branches.is_empty() {
             return Err(self.error_full("empty path can't be resolved"));
         }
@@ -250,10 +244,7 @@ impl<'p> Path<'p> {
         }
         Err(self.error_full("path did not end at an item inside a list"))
     }
-    pub fn entry_cell<'a, 'store>(
-        &self,
-        item: &Item<'a, 'store>,
-    ) -> Result<&'a Cell<Entry<'a, 'store>>, Error<'p>> {
+    pub fn entry_cell<'a>(&self, item: &Item<'a>) -> Result<&'a Cell<Entry<'a>>, Error<'p>> {
         if self.branches.is_empty() {
             return Err(self.error_full("empty path can't be resolved"));
         }

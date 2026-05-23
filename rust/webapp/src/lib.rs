@@ -1,9 +1,9 @@
 use bumpalo::Bump;
-use js_sys::{Array, Object, Reflect};
+use serde::Serialize;
+use serde::de::DeserializeSeed;
 use tindalwic::File;
 use tindalwic::alloc::Arena;
-use tindalwic::serde::Neutered;
-use wasm_bindgen::JsValue;
+use tindalwic::serde::{ArenaSeed, Compact, Neutered, Verbose};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(start)]
@@ -11,73 +11,89 @@ fn initialize() {
     console_error_panic_hook::set_once();
 }
 
-fn output(tindalwic: bool, content: String) -> Result<JsValue, String> {
-    let obj = Object::new();
-    Reflect::set(&obj, &"tindalwic".into(), &tindalwic.into()).map_err(|e| format!("{:?}", e))?;
-    Reflect::set(&obj, &"content".into(), &content.into()).map_err(|e| format!("{:?}", e))?;
-    Ok(obj.into())
+fn into_json<T: ?Sized + Serialize>(value: &T) -> Result<String, String> {
+    serde_json::to_string_pretty(value).map_err(|e| e.to_string())
 }
-
-fn json_pretty(file: File) -> Result<JsValue, String> {
-    serde_json::to_string_pretty(&Neutered(file))
-        .map_or_else(|e| Err(e.to_string()), |c| output(false, c))
+fn into_toml<T: ?Sized + Serialize>(value: &T) -> Result<String, String> {
+    toml::to_string_pretty(value).map_err(|e| e.to_string())
 }
-fn json_value(input: &str) -> Option<serde_json::Value> {
-    serde_json::from_str(input).ok()
-}
-
-fn toml_pretty(file: File) -> Result<JsValue, String> {
-    toml::to_string_pretty(&Neutered(file))
-        .map_or_else(|e| Err(e.to_string()), |c| output(false, c))
-}
-fn toml_value(input: &str) -> Option<toml::Value> {
-    toml::from_str(input).ok()
-}
-
-fn yaml_pretty(file: File) -> Result<JsValue, String> {
-    yaml_serde::to_string(&Neutered(file)).map_or_else(|e| Err(e.to_string()), |c| output(false, c))
-}
-fn yaml_value(input: &str) -> Option<yaml_serde::Value> {
-    yaml_serde::from_str(input).ok()
+fn into_yaml<T: ?Sized + Serialize>(value: &T) -> Result<String, String> {
+    yaml_serde::to_string(value).map_err(|e| e.to_string())
 }
 
 #[wasm_bindgen]
-pub fn convert(input: String, hint: String, errors: Array) -> Result<JsValue, String> {
+pub fn from_tindalwic(
+    input: String,  // the tindalwic data
+    mode: String,   // Neutered | Compact | Verbose
+    format: String, // JSON | TOML | YAML
+) -> Result<String, String> {
     let bump = Bump::new();
     let arena = Arena::new(&bump);
-    let parsed = arena.parse(&input, |err| {
-        errors.push(&JsValue::from_str(&format!("{:?}", err)));
-        if errors.length() >= 10 {
-            panic!("too many errors");
-        }
+    let mut error = false; // our codemirror lang provides feedback
+    let parsed = arena.parse(&input, |_| {
+        error = true;
     });
-    if errors.length() == 0 {
-        if let Some(file) = parsed {
-            return match &hint[..] {
-                "JSON" => json_pretty(file),
-                "TOML" => toml_pretty(file),
-                "YAML" => yaml_pretty(file),
-                _ => Err(String::from("hint must be one of: JSON, TOML, YAML")),
-            };
-        }
+    if error {
+        return Err("bad Tindalwic".to_string());
     }
-    if let Some(value) = json_value(&input) {
-        return match Neutered::deserialize(&arena, &value) {
-            Ok(out) => output(true, out.to_string()),
-            Err(err) => Err(format!("JSON conversion failed: {err}")),
-        };
+    let Some(file) = parsed else {
+        return Err("arena failure".to_string());
+    };
+    match (&mode[..], &format[..]) {
+        ("Neutered", "JSON") => into_json(&Neutered(file)),
+        ("Neutered", "TOML") => into_toml(&Neutered(file)),
+        ("Neutered", "YAML") => into_yaml(&Neutered(file)),
+        ("Compact", "JSON") => into_json(&Compact(file)),
+        ("Compact", "TOML") => into_toml(&Compact(file)),
+        ("Compact", "YAML") => into_yaml(&Compact(file)),
+        ("Verbose", "JSON") => into_json(&Verbose(file)),
+        ("Verbose", "TOML") => into_toml(&Verbose(file)),
+        ("Verbose", "YAML") => into_yaml(&Verbose(file)),
+        _ => Err("bad parameters".to_string()),
     }
-    if let Some(value) = toml_value(&input) {
-        return match Neutered::deserialize(&arena, value) {
-            Ok(out) => output(true, out.to_string()),
-            Err(err) => Err(format!("TOML conversion failed: {err}")),
-        };
+}
+
+fn from_json<'de, 'a>(
+    input: &str,
+    seed: impl DeserializeSeed<'de, Value = File<'a>>,
+) -> Result<File<'a>, String> {
+    let value: serde_json::Value = serde_json::from_str(input).map_err(|e| e.to_string())?;
+    seed.deserialize(value).map_err(|e| e.to_string())
+}
+fn from_toml<'de, 'a>(
+    input: &str,
+    seed: impl DeserializeSeed<'de, Value = File<'a>>,
+) -> Result<File<'a>, String> {
+    let value: toml::Value = toml::from_str(input).map_err(|e| e.to_string())?;
+    seed.deserialize(value).map_err(|e| e.to_string())
+}
+fn from_yaml<'de, 'a>(
+    input: &str,
+    seed: impl DeserializeSeed<'de, Value = File<'a>>,
+) -> Result<File<'a>, String> {
+    let value: yaml_serde::Value = yaml_serde::from_str(input).map_err(|e| e.to_string())?;
+    seed.deserialize(value).map_err(|e| e.to_string())
+}
+
+#[wasm_bindgen]
+pub fn into_tindalwic(
+    input: String,  // the data in their format
+    mode: String,   // Neutered | Compact | Verbose
+    format: String, // JSON | TOML | YAML
+) -> Result<String, String> {
+    let bump = Bump::new();
+    let arena = Arena::new(&bump);
+    match (&mode[..], &format[..]) {
+        ("Neutered", "JSON") => from_json(&input, Neutered::seed(&arena)),
+        ("Neutered", "TOML") => from_toml(&input, Neutered::seed(&arena)),
+        ("Neutered", "YAML") => from_yaml(&input, Neutered::seed(&arena)),
+        ("Compact", "JSON") => from_json(&input, Compact::seed(&arena)),
+        ("Compact", "TOML") => from_toml(&input, Compact::seed(&arena)),
+        ("Compact", "YAML") => from_yaml(&input, Compact::seed(&arena)),
+        ("Verbose", "JSON") => from_json(&input, Verbose::seed(&arena)),
+        ("Verbose", "TOML") => from_toml(&input, Verbose::seed(&arena)),
+        ("Verbose", "YAML") => from_yaml(&input, Verbose::seed(&arena)),
+        _ => Err("bad parameters".to_string()),
     }
-    if let Some(value) = yaml_value(&input) {
-        return match Neutered::deserialize(&arena, &value) {
-            Ok(out) => output(true, out.to_string()),
-            Err(err) => Err(format!("YAML conversion failed: {err}")),
-        };
-    }
-    Err("unable to parse input (errors pushed)".to_string())
+    .map(|f| f.to_string())
 }

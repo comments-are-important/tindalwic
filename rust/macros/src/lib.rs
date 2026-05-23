@@ -117,7 +117,6 @@ impl Group {
 struct SerDe {
     ser: Ident,
     de: Ident,
-    generics: TokenStream,
     value: TokenStream,
     expecting: TokenStream,
     deserialize: TokenStream,
@@ -131,18 +130,12 @@ impl Parse for SerDe {
         let kind_str = kind.to_string();
         let ser = Ident::new(&format!("{kind_str}Ser"), Span::call_site());
         let de = Ident::new(&format!("{kind_str}De"), Span::call_site());
-        let (generics, value) = match &kind_str[..] {
-            "UTF8" | "Text" => (quote!(<'a>), quote!(#kind<'a>)),
-            "Comment" => (quote!(<'a>), quote!(Option<Comment<'a>>)),
-            "Items" => (
-                quote!(<'a,'store>),
-                quote!(&'store [Cell<Item<'a, 'store>>]),
-            ),
-            "Entries" => (
-                quote!(<'a,'store>),
-                quote!(&'store [Cell<Entry<'a, 'store>>]),
-            ),
-            _ => (quote!(<'a,'store>), quote!(#kind<'a,'store>)),
+        let value = match &kind_str[..] {
+            "UTF8" | "Text" => quote!(#kind<'a>),
+            "Comment" => quote!(Option<Comment<'a>>),
+            "Items" => quote!(&'a [Cell<Item<'a>>]),
+            "Entries" => quote!(&'a [Cell<Entry<'a>>]),
+            _ => quote!(#kind<'a>),
         };
         let mut expecting = None;
         let mut deserialize = None;
@@ -238,7 +231,6 @@ impl Parse for SerDe {
         return Ok(SerDe {
             ser,
             de,
-            generics,
             value,
             expecting,
             deserialize,
@@ -335,7 +327,6 @@ impl ToTokens for SerDe {
         let SerDe {
             ser,
             de,
-            generics,
             value,
             expecting,
             serialize,
@@ -343,21 +334,21 @@ impl ToTokens for SerDe {
             visitors,
         } = self;
         tokens.extend(quote! {
-            struct #ser #generics(#value);
-            impl #generics ::serde::ser::Serialize for #ser #generics {
+            struct #ser <'a>(#value);
+            impl <'a> ::serde::ser::Serialize for #ser <'a> {
                 fn serialize<S: ::serde::ser::Serializer>(&self,s:S)->Result<S::Ok,S::Error> {
                     let #ser(this) = self;
                     #serialize
                 }
             }
-            struct #de<'de, 'a, 'store>(&'de Arena<'a, 'store>);
-            impl<'de:'a+'store,'a,'store> ::serde::de::DeserializeSeed<'de> for #de<'de,'a,'store> {
+            struct #de<'de, 'a:'de>(&'de Arena<'a>);
+            impl<'de,'a:'de> ::serde::de::DeserializeSeed<'de> for #de<'de,'a> {
                 type Value = #value ;
                 fn deserialize<D: ::serde::de::Deserializer<'de>>(self,d:D)->Result<Self::Value,D::Error>{
                     d.#deserialize
                 }
             }
-            impl<'de: 'a + 'store, 'a, 'store> ::serde::de::Visitor<'de> for #de<'de, 'a, 'store> {
+            impl<'de, 'a:'de> ::serde::de::Visitor<'de> for #de<'de, 'a> {
                 type Value = #value ;
                 fn expecting(&self, out: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
                     out.write_str(#expecting)

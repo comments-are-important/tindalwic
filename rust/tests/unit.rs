@@ -14,8 +14,9 @@ mod alloc_tests {
     #[cfg(feature = "serde")]
     mod serde_tests {
         use bumpalo::Bump;
+        use serde::de::DeserializeSeed;
         use tindalwic::alloc::Arena;
-        use tindalwic::serde::Neutered;
+        use tindalwic::serde::{ArenaSeed, Neutered};
         use tindalwic::{File, json};
         #[test]
         fn deserialize_file_from_json() {
@@ -23,7 +24,7 @@ mod alloc_tests {
             let arena = Arena::new(&bump);
 
             let mut de = serde_json::Deserializer::from_str(r#"{ "key":"one\ntwo" }"#);
-            let file: File = Neutered::deserialize(&arena, &mut de).unwrap();
+            let file: File = Neutered::seed(&arena).deserialize(&mut de).unwrap();
 
             json! {
                 let expected = {"key":"one\ntwo"}.unwrap();

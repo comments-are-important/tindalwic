@@ -88,13 +88,13 @@ impl fmt::Display for Silhouette {
 }
 
 /// generate random files containing the requested number of items.
-pub struct Random<'a, 'store: 'a, 'r, R: Rng + ?Sized> {
-    bump: &'store Bump,
-    arena: &'r mut Arena<'a, 'store>,
+pub struct Random<'a, 'r, R: Rng + ?Sized> {
+    bump: &'a Bump,
+    arena: &'r mut Arena<'a>,
     rng: &'r mut R,
     sample: Vec<char>,
 }
-impl<'a, 'store, 'r, R: Rng + ?Sized> Random<'a, 'store, 'r, R> {
+impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
     fn utf8(&mut self, newline: bool) -> &'a str {
         let mut utf8 = String::new();
         let lines = if !newline {
@@ -128,7 +128,7 @@ impl<'a, 'store, 'r, R: Rng + ?Sized> Random<'a, 'store, 'r, R> {
             None
         }
     }
-    fn item(&mut self, shape: &Option<Silhouette>) -> Option<Item<'a, 'store>> {
+    fn item(&mut self, shape: &Option<Silhouette>) -> Option<Item<'a>> {
         Some(if let Some(parent) = shape {
             if self.rng.random_ratio(1, 2) {
                 Item::Dict(self.dict(parent)?)
@@ -139,7 +139,7 @@ impl<'a, 'store, 'r, R: Rng + ?Sized> Random<'a, 'store, 'r, R> {
             Item::Text(Text::wrap(self.utf8(true)))
         })
     }
-    fn list(&mut self, shape: &Silhouette) -> Option<List<'a, 'store>> {
+    fn list(&mut self, shape: &Silhouette) -> Option<List<'a>> {
         for kid in &shape.children {
             let item = self.item(kid)?;
             self.arena.item(item)?;
@@ -149,7 +149,7 @@ impl<'a, 'store, 'r, R: Rng + ?Sized> Random<'a, 'store, 'r, R> {
         list.epilog = self.comment();
         Some(list)
     }
-    fn dict(&mut self, shape: &Silhouette) -> Option<Dict<'a, 'store>> {
+    fn dict(&mut self, shape: &Silhouette) -> Option<Dict<'a>> {
         for kid in &shape.children {
             let item = self.item(kid)?;
             let gap = self.rng.random_bool(0.2);
@@ -165,7 +165,7 @@ impl<'a, 'store, 'r, R: Rng + ?Sized> Random<'a, 'store, 'r, R> {
         dict.epilog = self.comment();
         Some(dict)
     }
-    pub fn file(&mut self, size: usize) -> File<'a, 'store> {
+    pub fn file(&mut self, size: usize) -> File<'a> {
         let shape = Silhouette::random(size, self.rng);
         let dict = self.dict(&shape).unwrap();
         File {

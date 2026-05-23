@@ -93,7 +93,7 @@ rust/doc: must-run-inside
 rust/webapp: must-run-inside
 	cd rust/webapp
 	cargo install --list | grep -q wasm-pack || cargo install wasm-pack
-	wasm-pack build --target no-modules
+	wasm-pack build --target web
 .PHONY: rust/webapp
 
 rust/nightly: must-run-inside

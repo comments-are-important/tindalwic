@@ -104,7 +104,7 @@ impl<'o, 'f> Output<'o, 'f> {
         }
         self.comment("#", &text.epilog)
     }
-    fn list_in_list<'a, 'store>(&mut self, list: &List<'a, 'store>) -> Result {
+    fn list_in_list<'a>(&mut self, list: &List<'a>) -> Result {
         self.indent()?;
         self.out.write_str("[]\n")?;
         self.indent += 1;
@@ -115,7 +115,7 @@ impl<'o, 'f> Output<'o, 'f> {
         self.indent -= 1;
         self.comment("#", &list.epilog)
     }
-    fn list_in_dict<'a, 'store>(&mut self, key: &'a str, list: &List<'a, 'store>) -> Result {
+    fn list_in_dict<'a>(&mut self, key: &'a str, list: &List<'a>) -> Result {
         self.indent()?;
         self.out.write_char('[')?;
         self.out.write_str(key)?;
@@ -128,7 +128,7 @@ impl<'o, 'f> Output<'o, 'f> {
         self.indent -= 1;
         self.comment("#", &list.epilog)
     }
-    fn dict_in_list<'a, 'store>(&mut self, dict: &Dict<'a, 'store>) -> Result {
+    fn dict_in_list<'a>(&mut self, dict: &Dict<'a>) -> Result {
         self.indent()?;
         self.out.write_str("{}\n")?;
         self.indent += 1;
@@ -139,7 +139,7 @@ impl<'o, 'f> Output<'o, 'f> {
         self.indent -= 1;
         self.comment("#", &dict.epilog)
     }
-    fn dict_in_dict<'a, 'store>(&mut self, key: &'a str, dict: &Dict<'a, 'store>) -> Result {
+    fn dict_in_dict<'a>(&mut self, key: &'a str, dict: &Dict<'a>) -> Result {
         self.indent()?;
         self.out.write_char('{')?;
         self.out.write_str(key)?;
@@ -152,7 +152,7 @@ impl<'o, 'f> Output<'o, 'f> {
         self.indent -= 1;
         self.comment("#", &dict.epilog)
     }
-    fn item_in_list<'a, 'store>(&mut self, cell: &Cell<Item<'a, 'store>>) -> Result {
+    fn item_in_list<'a>(&mut self, cell: &Cell<Item<'a>>) -> Result {
         let item = cell.get();
         match item {
             Item::Text(text) => self.text_in_list(&text),
@@ -160,7 +160,7 @@ impl<'o, 'f> Output<'o, 'f> {
             Item::Dict(dict) => self.dict_in_list(&dict),
         }
     }
-    fn entry_in_dict<'a, 'store>(&mut self, cell: &Cell<Entry<'a, 'store>>) -> Result {
+    fn entry_in_dict<'a>(&mut self, cell: &Cell<Entry<'a>>) -> Result {
         let entry = cell.get();
         if entry.name.gap {
             // TODO be strict? f.write_indent(self.indent)?;
@@ -173,7 +173,7 @@ impl<'o, 'f> Output<'o, 'f> {
             Item::Dict(dict) => self.dict_in_dict(entry.name.key, dict),
         }
     }
-    fn file<'a, 'store>(&mut self, file: &File<'a, 'store>) -> Result {
+    fn file<'a>(&mut self, file: &File<'a>) -> Result {
         self.comment("#!", &file.hashbang)?;
         self.comment("#", &file.prolog)?;
         for cell in file.cells {
@@ -213,19 +213,19 @@ impl<'a> Display for Text<'a> {
     }
 }
 
-impl<'a, 'store> Display for List<'a, 'store> {
+impl<'a> Display for List<'a> {
     fn fmt(&self, out: &mut Formatter<'_>) -> Result {
         Output { out, indent: 0 }.list_in_list(self)
     }
 }
 
-impl<'a, 'store> Display for Dict<'a, 'store> {
+impl<'a> Display for Dict<'a> {
     fn fmt(&self, out: &mut Formatter<'_>) -> Result {
         Output { out, indent: 0 }.dict_in_list(self)
     }
 }
 
-impl<'a, 'store> Display for Item<'a, 'store> {
+impl<'a> Display for Item<'a> {
     fn fmt(&self, out: &mut Formatter<'_>) -> Result {
         let mut out = Output { out, indent: 0 };
         match self {
@@ -236,7 +236,7 @@ impl<'a, 'store> Display for Item<'a, 'store> {
     }
 }
 
-impl<'a, 'store> Display for File<'a, 'store> {
+impl<'a> Display for File<'a> {
     fn fmt(&self, out: &mut Formatter<'_>) -> Result {
         Output { out, indent: 0 }.file(self)
     }

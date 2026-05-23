@@ -2,59 +2,145 @@
 <html>
 
 <head>
-    <meta content="text/html;charset=utf-8" http-equiv="Content-Type" />
+    <script type="importmap">
+        {
+            "imports": {
+                "codemirror": "https://esm.sh/*codemirror",
+                "@codemirror/": "https://esm.sh/*@codemirror/",
+                "crelt": "https://esm.sh/crelt",
+                "@lezer/": "https://esm.sh/*@lezer/",
+                "@marijn/": "https://esm.sh/@marijn/",
+                "style-mod": "https://esm.sh/style-mod",
+                "w3c-keyname": "https://esm.sh/w3c-keyname"
+            }
+        }
+    </script>
     <style>
-        textarea {
-            tab-size: 4;
-            display:block;
-            width: 90vw;
-            height: 45vh;
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            margin: 0;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        body {
+            padding: 10px 20px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        @media (min-aspect-ratio: 1/1) {
+            body {
+                flex-direction: row;
+            }
+        }
+
+        body>div.data {
+            flex: 1;
+            padding: 10px 20px;
+            display: flex;
+            flex-direction: column;
         }
     </style>
 </head>
 
 <body>
-    <textarea id="input"></textarea>
-    <textarea id="output" readonly></textarea>
+    <div id="ours" class="data">
+        <select id="mode">
+            <option value="Neutered">Tindalwic - neutered</option>
+            <option value="Compact">Tindalwic - compact</option>
+            <option value="Verbose">Tindalwic - verbose</option>
+        </select>
+    </div>
+    <div id="theirs" class="data">
+        <select id="format">
+            <option value="JSON">JSON</option>
+            <option value="TOML">TOML</option>
+            <option value="YAML">YAML</option>
+        </select>
+    </div>
 
-    <script src='./pkg/tindalwic_webapp.js'></script>
-    <script>
-        const { convert } = wasm_bindgen;
-
-        async function run() {
-            await wasm_bindgen();
-
-            const input = document.getElementById('input');
-            input.addEventListener('keydown', function (e) {
-                if (e.key === 'Tab') {
-                    e.preventDefault(); // Prevent focus change
-
-                    const start = this.selectionStart;
-                    const end = this.selectionEnd;
-
-                    // Set textarea value: text before + tab + text after
-                    this.value = this.value.substring(0, start) + "\t" + this.value.substring(end);
-
-                    // Put caret back in the right position
-                    this.selectionStart = this.selectionEnd = start + 1;
-                }
+    <script type="module">
+        import init, { from_tindalwic, into_tindalwic } from './pkg/tindalwic_webapp.js';
+        await init();
+        import { basicSetup } from "codemirror";
+        import { EditorView, keymap } from "@codemirror/view";
+        import { EditorState, Compartment } from "@codemirror/state";
+        import { indentWithTab } from "@codemirror/commands";
+        import { indentUnit, StreamLanguage } from "@codemirror/language";
+        import { StateEffect } from "@codemirror/state";
+        import { json } from "@codemirror/lang-json";
+        import { yaml } from "@codemirror/lang-yaml";
+        import { toml } from "@codemirror/legacy-modes/mode/toml";
+        const ourView = new EditorView({
+            parent: document.getElementById('ours'),
+            extensions: [
+                basicSetup,
+                indentUnit.of("\t"),
+                keymap.of([indentWithTab])
+            ]
+        });
+        const languageConf = new Compartment();
+        const languageExtensions = {
+            JSON: json(),
+            YAML: yaml(),
+            TOML: StreamLanguage.define(toml)
+        };
+        const theirView = new EditorView({
+            parent: document.getElementById('theirs'),
+            extensions: [
+                basicSetup,
+                keymap.of([indentWithTab]),
+                languageConf.of(languageExtensions.JSON)
+            ]
+        });
+        function oursToTheirs() {
+            const input = ourView.state.doc.toString();
+            const mode = document.getElementById('mode').value;
+            const format = document.getElementById('format').value;
+            const output = from_tindalwic(input, mode, format);
+            theirView.dispatch({
+                changes: {
+                    from: 0,
+                    to: theirView.state.doc.length,
+                    insert: output
+                },
+                effects: languageConf.reconfigure(languageExtensions[mode]),
+                selection: { anchor: 0 }
             });
-
-            const output = document.getElementById('output');
-            input.addEventListener('input', function () {
-                const errors = [];
-                try {
-                    output.value = convert(input.value, "JSON", errors).content;
-                    if (errors.length) {
-                        console.log(errors);
-                    }
-                } catch (e) {
-                    console.log(e, errors);
+        }
+        function theirsToOurs() {
+            const input = theirView.state.doc.toString();
+            const mode = document.getElementById('mode').value;
+            const format = document.getElementById('format').value;
+            const output = into_tindalwic(input, mode, format);
+            ourView.dispatch({
+                changes: {
+                    from: 0,
+                    to: ourView.state.doc.length,
+                    insert: output
                 }
             });
         }
-
-        run();
+        ourView.dispatch({
+            effects: StateEffect.appendConfig.of(EditorView.updateListener.of((update) => {
+                if (update.view.hasFocus && update.docChanged) oursToTheirs();
+            }))
+        });
+        theirView.dispatch({
+            effects: StateEffect.appendConfig.of(EditorView.updateListener.of((update) => {
+                if (update.view.hasFocus && update.docChanged) theirsToOurs();
+            }))
+        });
+        document.getElementById('format').addEventListener('change', oursToTheirs);
+        document.getElementById('mode').addEventListener('change', oursToTheirs);
     </script>
 
 </body>

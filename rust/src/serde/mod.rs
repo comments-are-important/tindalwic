@@ -9,9 +9,10 @@ pub use neutered::Neutered;
 pub use verbose::Verbose;
 
 use crate::alloc::Arena;
-use crate::{Comment, UTF8};
+use crate::{Comment, File, UTF8};
 use serde::Deserialize;
 use serde::de::DeserializeSeed;
+
 use tindalwic_macros::serialize_deserialize_seed_visit as seeded;
 // normally rustfmt would skip over everything inside the macro invocation,
 // so the GNUmakefile rust/fmt target uses `sed` to swap the calls for
@@ -30,9 +31,6 @@ seeded! {
             } else {
                 s.serialize_str(&this.joined())
             }
-        }
-        fn visit_borrowed_str() {
-            Ok(UTF8::wrap(v))
         }
         fn visit_str() {
             Ok(UTF8::wrap(arena.intern(v)))
@@ -72,7 +70,7 @@ enum ItemVariants {
 #[derive(Deserialize)]
 #[serde(field_identifier, rename_all = "lowercase")]
 enum TextFields {
-    UTF8,
+    Value,
     Epilog,
 }
 
@@ -80,7 +78,7 @@ enum TextFields {
 #[serde(field_identifier, rename_all = "lowercase")]
 enum ListFields {
     Prolog,
-    Items,
+    Array,
     Epilog,
 }
 
@@ -97,7 +95,7 @@ enum EntryFields {
 #[serde(field_identifier, rename_all = "lowercase")]
 enum DictFields {
     Prolog,
-    Entries,
+    Array,
     Epilog,
 }
 
@@ -106,5 +104,11 @@ enum DictFields {
 enum FileFields {
     Hashbang,
     Prolog,
-    Entries,
+    Array,
+}
+
+/// turn a mode into a DeserializeSeed that produces File
+pub trait ArenaSeed<'de, 'a: 'de> {
+    /// call thusly: `.seed(&arena).deserialize()`
+    fn seed(arena: &'de Arena<'a>) -> impl DeserializeSeed<'de, Value = File<'a>>;
 }

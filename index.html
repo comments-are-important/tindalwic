@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <script type="importmap">
+        {
+            "imports": {
+                "codemirror": "https://esm.sh/*codemirror",
+                "@codemirror/": "https://esm.sh/*@codemirror/",
+                "crelt": "https://esm.sh/crelt",
+                "@lezer/": "https://esm.sh/*@lezer/",
+                "@marijn/": "https://esm.sh/@marijn/",
+                "style-mod": "https://esm.sh/style-mod",
+                "w3c-keyname": "https://esm.sh/w3c-keyname"
+            }
+        }
+    </script>
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            margin: 0;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        body {
+            padding: 10px 20px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        @media (min-aspect-ratio: 1/1) {
+            body {
+                flex-direction: row;
+            }
+        }
+
+        body>div.data {
+            flex: 1;
+            padding: 10px 20px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .err {
+            font-family: monospace;
+            font-size: smaller;
+            padding: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="data">
+        <select id="mode">
+            <option value="Neutered">Tindalwic - neutered</option>
+            <option value="Compact">Tindalwic - compact</option>
+            <option value="Verbose">Tindalwic - verbose</option>
+        </select>
+        <div id="theirErr" class="err" style="display:none"></div>
+        <div id="ours" style="display:block"></div>
+    </div>
+    <div class="data">
+        <select id="format">
+            <option value="JSON">JSON</option>
+            <option value="TOML">TOML</option>
+            <option value="YAML">YAML</option>
+        </select>
+        <div id="ourErr" class="err" style="display:none"></div>
+        <div id="theirs" style="display:block"></div>
+    </div>
+
+    <script type="module">
+        import init, { from_tindalwic, into_tindalwic } from './tindalwic_webapp.js';
+        await init();
+        import { basicSetup } from "codemirror";
+        import { EditorView, keymap } from "@codemirror/view";
+        import { EditorState, Compartment } from "@codemirror/state";
+        import { indentWithTab } from "@codemirror/commands";
+        import { indentUnit, StreamLanguage } from "@codemirror/language";
+        import { StateEffect } from "@codemirror/state";
+        import { json } from "@codemirror/lang-json";
+        import { yaml } from "@codemirror/lang-yaml";
+        import { toml } from "@codemirror/legacy-modes/mode/toml";
+        const ourDiv = document.getElementById('ours');
+        const ourView = new EditorView({
+            parent: ourDiv,
+            extensions: [
+                basicSetup,
+                indentUnit.of("\t"),
+                keymap.of([indentWithTab])
+            ]
+        });
+        const theirDiv = document.getElementById('theirs');
+        const languageConf = new Compartment();
+        const languageExtensions = {
+            JSON: json(),
+            YAML: yaml(),
+            TOML: StreamLanguage.define(toml)
+        };
+        const theirView = new EditorView({
+            parent: theirDiv,
+            extensions: [
+                basicSetup,
+                keymap.of([indentWithTab]),
+                languageConf.of(languageExtensions.JSON)
+            ]
+        });
+        const ourErr = document.getElementById('ourErr');
+        const theirErr = document.getElementById('theirErr');
+        function reset() {
+            ourDiv.style.display = 'block';
+            ourErr.style.display = 'none';
+            ourErr.textContent = '';
+            theirDiv.style.display = 'block';
+            theirErr.style.display = 'none';
+            theirErr.textContent = '';
+        }
+        function oursToTheirs() {
+            const input = ourView.state.doc.toString();
+            const mode = document.getElementById('mode').value;
+            const format = document.getElementById('format').value;
+            let output;
+            try {
+                reset();
+                output = from_tindalwic(input, mode, format);
+            } catch (e) {
+                theirDiv.style.display = 'none';
+                ourErr.style.display = 'block';
+                ourErr.textContent = e;
+                return;
+            }
+            theirView.dispatch({
+                changes: {
+                    from: 0,
+                    to: theirView.state.doc.length,
+                    insert: output
+                },
+                effects: languageConf.reconfigure(languageExtensions[mode]),
+                selection: { anchor: 0 }
+            });
+        }
+        function theirsToOurs() {
+            const input = theirView.state.doc.toString();
+            const mode = document.getElementById('mode').value;
+            const format = document.getElementById('format').value;
+            let output;
+            try {
+                reset();
+                output = into_tindalwic(input, mode, format);
+            } catch (e) {
+                ourDiv.style.display = 'none';
+                theirErr.style.display = 'block';
+                theirErr.textContent = e;
+                return;
+            }
+            ourView.dispatch({
+                changes: {
+                    from: 0,
+                    to: ourView.state.doc.length,
+                    insert: output
+                }
+            });
+        }
+        ourView.dispatch({
+            effects: StateEffect.appendConfig.of(EditorView.updateListener.of((update) => {
+                if (update.view.hasFocus && update.docChanged) oursToTheirs();
+            }))
+        });
+        theirView.dispatch({
+            effects: StateEffect.appendConfig.of(EditorView.updateListener.of((update) => {
+                if (update.view.hasFocus && update.docChanged) theirsToOurs();
+            }))
+        });
+        document.getElementById('format').addEventListener('change', oursToTheirs);
+        document.getElementById('mode').addEventListener('change', oursToTheirs);
+    </script>
+
+</body>
+
+</html>

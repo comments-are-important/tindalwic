@@ -8,10 +8,16 @@ ADD --checksum=sha256:20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0
   https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init \
   /home/node/.local/bin/rustup-init
 
+ADD --checksum=sha256:a87972a05b71c697ba811455756cc0a335479f39b9d076e94357ac19484d9f2d \
+  https://github.com/cargo-bins/cargo-binstall/releases/download/v1.19.1/cargo-binstall-x86_64-unknown-linux-gnu.tgz \
+  /home/node/.local/bin/binstall.tgz
+
 RUN set -x \
  && cd /home/node/.local/bin \
  && tar -xf uv.tgz --strip-components=1 && rm uv.tgz \
+ && tar -xf binstall.tgz && rm binstall.tgz \
  && chmod 755 rustup-init \
- && chown -R node.node /home/node/.local
+ && chown -R node.node .. \
+ && mkdir -p ../../.cargo/bin && mv cargo-binstall ../../.cargo/bin
 
 ENV PATH="/home/node/.cargo/bin:${PATH}"

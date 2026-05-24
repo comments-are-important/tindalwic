@@ -16,8 +16,12 @@ console_error_panic_hook = { workspace = true }
 js-sys = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["alloc"] }
-tindalwic = { path = "..", features = ["serde"] }
+tindalwic = { path = "../main", features = ["serde"] }
 toml = { workspace = true }
 wasm-bindgen = { workspace = true }
 web-sys = { workspace = true, features = ["console"] }
 yaml_serde = { workspace = true }
+
+[lints.rust]
+# workspace settings are not right for this member
+unused = "deny"

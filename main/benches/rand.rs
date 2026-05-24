@@ -188,7 +188,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                 bump: &bump,
                 arena: &mut arena,
                 rng: &mut rng,
-                sample: Vec::new(),//"ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars().collect(),
+                sample: Vec::new(), //"ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars().collect(),
             };
             let original: File = random.file(32);
             let encoded = original.to_string();

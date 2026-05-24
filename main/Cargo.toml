@@ -1,0 +1,36 @@
+[package]
+name = "tindalwic"
+description = "tindalwic data format and tools"
+version = { workspace = true }
+edition = { workspace = true }
+authors = { workspace = true }
+repository = { workspace = true }
+license = { workspace = true }
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+alloc = ["dep:bumpalo"]
+serde = ["alloc", "dep:serde"]
+
+[[bench]]
+name = "rand"
+required-features = ["serde"]
+harness = false
+
+[dependencies]
+bumpalo = { workspace = true, optional = true }
+serde = { workspace = true, optional = true, features = ["derive"] }
+tindalwic-macros = { path = "../macros" }
+
+[dev-dependencies]
+assert-json-diff = { workspace = true }
+criterion = { workspace = true, features = ["html_reports"] }
+markdown = { workspace = true }
+rand = { workspace = true }
+serde_json = { workspace = true, features = ["alloc"] }
+trybuild = { workspace = true }
+
+[lints]
+workspace = true

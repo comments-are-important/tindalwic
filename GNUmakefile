@@ -35,11 +35,101 @@ must-run-inside: ;@
 setup: must-run-outside ;@
 	code --install-extension ms-vscode-remote.remote-containers \
 	  | sed -e 's= is already installed[.].*= is already installed.='
+	docker pull mcr.microsoft.com/devcontainers/typescript-node
 .PHONY: setup
 
 down: must-run-outside
 	docker rm -f tindalwic-devcontainer-vscode
+	docker image rm $$(docker image ls -q --filter "reference=vsc-tindalwic*")
 .PHONY: down
+
+httpd: must-run-outside
+	cd target
+	python -m http.server >&http.server.log
+.PHONY: httpd
+
+# =====================================================================================
+
+test: main/test main/rand
+.PHONY: test
+
+main/test: must-run-inside
+	cd main
+	set -e
+	echo ====== default && cargo test
+	echo ====== alloc && cargo test --features alloc
+	echo ====== serde && cargo test --features serde
+.PHONY: main/test
+
+main/rand: must-run-inside
+	cd main
+	cargo bench --all-features --bench rand
+.PHONY: main/rand
+
+doc: must-run-inside
+	cargo doc --all-features --no-deps # --document-private-items
+.PHONY: doc
+
+BINSTALL = binstall --no-confirm --only-signed --disable-telemetry
+
+webapp: must-run-inside
+	set -e
+	cd webapp
+	WASM=wasm32-unknown-unknown
+	rustup target list --installed | grep -q $$WASM || rustup target add $$WASM
+	cargo build --target $$WASM --profile dev
+	cargo build --target $$WASM --profile release-small
+	VER=$$(cargo pkgid -p wasm-bindgen | sed -E -e 's=^[^@]+@([0-9.]+).*$$=\1=')
+	cargo install --list | grep -q "wasm-bindgen-cli v$$VER:" \
+	    || cargo $(BINSTALL) wasm-bindgen-cli --version $$VER
+	cd ../target
+	rm -rf webapp-*
+	NAME=tindalwic_webapp
+	wasm-bindgen --target web --keep-debug \
+	    --out-dir webapp-dev $$WASM/debug/$$NAME.wasm
+	wasm-bindgen --target web --no-typescript --remove-name-section --remove-producers-section \
+	    --out-dir webapp-release $$WASM/release-small/$$NAME.wasm
+	cp ../webapp/{index.html,favicon.ico} webapp-dev/
+	cp ../webapp/{index.html,favicon.ico} webapp-release/
+	cargo install --list | grep -q wasm-opt || cargo $(BINSTALL) wasm-opt
+	cd webapp-release
+	wasm-opt -Oz --enable-bulk-memory -o $${NAME}_bg.wasm $${NAME}_bg.wasm
+.PHONY: webapp
+
+nightly: must-run-inside
+	rustup toolchain list | grep -q nightly || rustup toolchain install nightly
+.PHONY: nightly
+
+main/api: nightly
+	cargo install --list | grep -q cargo-public-api || cargo $(BINSTALL) cargo-public-api
+	mkdir -p target
+	cd main
+	cargo public-api -sss --all-features --target-dir ../target/public-api \
+	  | grep -v '^impl' \
+	  | sed -E -e 's=^#.non_exhaustive. ==' \
+	  | sed -E -e 's=^pub (enum|fn|const fn|mod|struct|use|type) (&?)(.*)=|\3|\2\1|=' \
+	  | sed -E -e 's=^pub (.*)=|\1|property|=' \
+	  | LC_ALL=C sort >../target/public-api/tindalwic.org
+.PHONY: main/api
+
+main/llvm-lines: must-run-inside
+	cd main
+	cargo install --list | grep -q cargo-llvm-lines || cargo $(BINSTALL) cargo-llvm-lines
+	cargo llvm-lines --all-features
+.PHONY: main/llvm-lines
+
+fmt: nightly
+	: see comment near top of main/src/serde/mod.rs
+	sed -i \
+	  -e 's|^seeded! {$$|const _: () = {|' \
+	  -e 's|^} // !seeded$$|}; // !seeded|' \
+	  main/src/serde/*.rs
+	rustfmt +nightly $$(find macros main webapp -name '*.rs')
+	sed -i \
+	  -e 's|^const _: () = {$$|seeded! {|' \
+	  -e 's|^}; // !seeded$$|} // !seeded|' \
+	  main/src/serde/*.rs
+.PHONY: fmt
 
 # =====================================================================================
 
@@ -71,83 +161,5 @@ python/coverage: must-run-inside
 python/build: python/test
 	uv build --sdist
 .PHONY: python/build
-
-# =====================================================================================
-
-rust/test: must-run-inside
-	cd rust
-	set -e
-	echo ====== default && cargo test -q
-	echo ====== alloc && cargo test -q --features alloc
-	echo ====== serde && cargo test -q --features serde
-	echo ====== bench && cargo bench --all-features
-.PHONY: rust/test
-
-rust/doc: must-run-inside
-	cd rust
-	cargo doc --all-features --no-deps # --document-private-items
-	cd target/doc
-	uv run -- python -m http.server >&http.server.log
-.PHONY: rust/doc
-
-rust/webapp: must-run-inside
-	set -e
-	cd rust/webapp
-	WASM=wasm32-unknown-unknown
-	cargo build --target $$WASM --profile dev
-	cargo build --target $$WASM --profile release-small
-	VER=$$(cargo pkgid -p wasm-bindgen | sed -E -e 's=^[^@]+@([0-9.]+).*$$=\1=')
-	cargo install --list | grep -q "wasm-bindgen-cli $$VER:" \
-	    || cargo install wasm-bindgen-cli --version $$VER
-	cd ../target
-	rm -rf webapp-*
-	NAME=tindalwic_webapp
-	wasm-bindgen --target web --keep-debug \
-	    --out-dir webapp-dev $$WASM/debug/$$NAME.wasm
-	wasm-bindgen --target web --no-typescript --remove-name-section --remove-producers-section \
-	    --out-dir webapp-release $$WASM/release-small/$$NAME.wasm
-	cp ../webapp/{index.html,favicon.ico} webapp-dev/
-	cp ../webapp/{index.html,favicon.ico} webapp-release/
-	cargo install --list | grep -q wasm-opt || cargo install wasm-opt
-	cd webapp-release
-	wasm-opt -Oz --enable-bulk-memory -o $${NAME}_bg.wasm $${NAME}_bg.wasm
-.PHONY: rust/webapp
-
-rust/nightly: must-run-inside
-	cd rust
-	rustup toolchain list | grep -q nightly || rustup toolchain install nightly
-.PHONY: rust/nightly
-
-rust/api: rust/nightly
-	cd rust
-	cargo install --list | grep -q cargo-public-api || cargo install cargo-public-api
-	mkdir -p target
-	cargo public-api -sss --all-features --target-dir target/public-api \
-	  | grep -v '^impl' \
-	  | sed -E -e 's=^#.non_exhaustive. ==' \
-	  | sed -E -e 's=^pub (enum|fn|const fn|mod|struct|use|type) (&?)(.*)=|\3|\2\1|=' \
-	  | sed -E -e 's=^pub (.*)=|\1|property|=' \
-	  | LC_ALL=C sort >target/public-api/tindalwic.org
-.PHONY: rust/api
-
-rust/llvm-lines: must-run-inside
-	cd rust
-	cargo install --list | grep -q cargo-llvm-lines || cargo install cargo-llvm-lines
-	cargo llvm-lines --all-features
-.PHONY: rust/llvm-lines
-
-rust/fmt: rust/nightly
-	cd rust
-	: see comment near top of rust/src/serde/mod.rs
-	sed -i \
-	  -e 's|^seeded! {$$|const _: () = {|' \
-	  -e 's|^} // !seeded$$|}; // !seeded|' \
-	  src/serde/*.rs
-	rustfmt +nightly $$(find src macros/src webapp/src -name '*.rs') tests/*.rs
-	sed -i \
-	  -e 's|^const _: () = {$$|seeded! {|' \
-	  -e 's|^}; // !seeded$$|} // !seeded|' \
-	  src/serde/*.rs
-.PHONY: rust/fmt
 
 # =====================================================================================

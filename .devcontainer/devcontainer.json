@@ -19,7 +19,7 @@
         "uv": "test -e /home/node/tindalwic.venv || uv sync"
     },
     "postCreateCommand": {
-        "rs": "test -e /home/node/.cargo || rustup-init -y"
+        "rs": "test -e /home/node/.cargo/bin/rustup || rustup-init -y"
     },
     "customizations": {
         "vscode": {

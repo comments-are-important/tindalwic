@@ -91,9 +91,26 @@ rust/doc: must-run-inside
 .PHONY: rust/doc
 
 rust/webapp: must-run-inside
+	set -e
 	cd rust/webapp
-	cargo install --list | grep -q wasm-pack || cargo install wasm-pack
-	wasm-pack build --target web
+	WASM=wasm32-unknown-unknown
+	cargo build --target $$WASM --profile dev
+	cargo build --target $$WASM --profile release-small
+	VER=$$(cargo pkgid -p wasm-bindgen | sed -E -e 's=^[^@]+@([0-9.]+).*$$=\1=')
+	cargo install --list | grep -q "wasm-bindgen-cli $$VER:" \
+	    || cargo install wasm-bindgen-cli --version $$VER
+	cd ../target
+	rm -rf webapp-*
+	NAME=tindalwic_webapp
+	wasm-bindgen --target web --keep-debug \
+	    --out-dir webapp-dev $$WASM/debug/$$NAME.wasm
+	wasm-bindgen --target web --no-typescript --remove-name-section --remove-producers-section \
+	    --out-dir webapp-release $$WASM/release-small/$$NAME.wasm
+	cp ../webapp/{index.html,favicon.ico} webapp-dev/
+	cp ../webapp/{index.html,favicon.ico} webapp-release/
+	cargo install --list | grep -q wasm-opt || cargo install wasm-opt
+	cd webapp-release
+	wasm-opt -Oz --enable-bulk-memory -o $${NAME}_bg.wasm $${NAME}_bg.wasm
 .PHONY: rust/webapp
 
 rust/nightly: must-run-inside

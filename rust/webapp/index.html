@@ -22,6 +22,10 @@
             box-sizing: border-box;
         }
 
+        .hidden {
+            display: none;
+        }
+
         html,
         body {
             margin: 0;
@@ -42,8 +46,9 @@
             }
         }
 
-        body>div.data {
+        .data {
             flex: 1;
+            min-height: 0;
             padding: 10px 20px;
             display: flex;
             flex-direction: column;
@@ -54,27 +59,39 @@
             font-size: smaller;
             padding: 5px;
         }
+
+        .cm-editor {
+            flex: 1;
+            min-height: 0;
+        }
+
+        .cm-editor.hidden {
+            /* the simple .hidden isn't enough to override CodeMirror's CSS */
+            display: none !important;
+        }
+
+        .cm-scroller {
+            overflow: auto;
+        }
     </style>
 </head>
 
 <body>
-    <div class="data">
+    <div id="ours" class="data">
         <select id="mode">
             <option value="Neutered">Tindalwic - neutered</option>
             <option value="Compact">Tindalwic - compact</option>
             <option value="Verbose">Tindalwic - verbose</option>
         </select>
-        <div id="theirErr" class="err" style="display:none"></div>
-        <div id="ours" style="display:block"></div>
+        <div id="theirErr" class="err hidden"></div>
     </div>
-    <div class="data">
+    <div id="theirs" class="data">
         <select id="format">
             <option value="JSON">JSON</option>
             <option value="TOML">TOML</option>
             <option value="YAML">YAML</option>
         </select>
-        <div id="ourErr" class="err" style="display:none"></div>
-        <div id="theirs" style="display:block"></div>
+        <div id="ourErr" class="err hidden"></div>
     </div>
 
     <script type="module">
@@ -116,11 +133,11 @@
         const ourErr = document.getElementById('ourErr');
         const theirErr = document.getElementById('theirErr');
         function reset() {
-            ourDiv.style.display = 'block';
-            ourErr.style.display = 'none';
+            ourView.dom.classList.remove('hidden');
+            ourErr.classList.add('hidden');
             ourErr.textContent = '';
-            theirDiv.style.display = 'block';
-            theirErr.style.display = 'none';
+            theirView.dom.classList.remove('hidden');
+            theirErr.classList.add('hidden');
             theirErr.textContent = '';
         }
         function oursToTheirs() {
@@ -132,8 +149,8 @@
                 reset();
                 output = from_tindalwic(input, mode, format);
             } catch (e) {
-                theirDiv.style.display = 'none';
-                ourErr.style.display = 'block';
+                theirView.dom.classList.add('hidden');
+                ourErr.classList.remove('hidden');
                 ourErr.textContent = e;
                 return;
             }
@@ -156,8 +173,8 @@
                 reset();
                 output = into_tindalwic(input, mode, format);
             } catch (e) {
-                ourDiv.style.display = 'none';
-                theirErr.style.display = 'block';
+                ourView.dom.classList.add('hidden');
+                theirErr.classList.remove('hidden');
                 theirErr.textContent = e;
                 return;
             }

@@ -1,6 +1,30 @@
+use super::parse::{MemoryError, ParseError, SyntaxError};
 use super::*;
 
 use core::fmt::{Display, Formatter, Result, Write};
+
+impl Display for ParseError {
+    fn fmt(&self, out: &mut Formatter<'_>) -> Result {
+        match self {
+            ParseError::Memory(err) => err.fmt(out),
+            ParseError::Syntax(err) => err.fmt(out),
+        }
+    }
+}
+impl Display for MemoryError {
+    fn fmt(&self, out: &mut Formatter<'_>) -> Result {
+        out.write_str(self.message)
+    }
+}
+impl Display for SyntaxError {
+    fn fmt(&self, out: &mut Formatter<'_>) -> Result {
+        if self.start + 1 == self.end {
+            write!(out, "{}: {}", self.start, self.message)
+        } else {
+            write!(out, "{}-{}: {}", self.start, self.end - 1, self.message)
+        }
+    }
+}
 
 struct Output<'o, 'f> {
     out: &'o mut Formatter<'f>,

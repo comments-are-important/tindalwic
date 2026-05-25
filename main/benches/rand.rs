@@ -16,6 +16,7 @@ use rand::rngs::SmallRng;
 use rand::{Rng, RngExt, SeedableRng};
 use std::fmt::{self, Write};
 use tindalwic::alloc::Arena;
+use tindalwic::parse::ParseError;
 use tindalwic::serde::Verbose;
 use tindalwic::{Comment, Dict, Entry, File, Item, List, Name, Text};
 
@@ -127,8 +128,8 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
             None
         }
     }
-    fn item(&mut self, shape: &Option<Silhouette>) -> Option<Item<'a>> {
-        Some(if let Some(parent) = shape {
+    fn item(&mut self, shape: &Option<Silhouette>) -> Result<Item<'a>, ParseError> {
+        Ok(if let Some(parent) = shape {
             if self.rng.random_ratio(1, 2) {
                 Item::Dict(self.dict(parent)?)
             } else {
@@ -138,7 +139,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
             Item::Text(Text::wrap(self.utf8(true)))
         })
     }
-    fn list(&mut self, shape: &Silhouette) -> Option<List<'a>> {
+    fn list(&mut self, shape: &Silhouette) -> Result<List<'a>, ParseError> {
         for kid in &shape.children {
             let item = self.item(kid)?;
             self.arena.item(item)?;
@@ -146,9 +147,9 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
         let mut list = self.arena.list(shape.children.len())?;
         list.prolog = self.comment();
         list.epilog = self.comment();
-        Some(list)
+        Ok(list)
     }
-    fn dict(&mut self, shape: &Silhouette) -> Option<Dict<'a>> {
+    fn dict(&mut self, shape: &Silhouette) -> Result<Dict<'a>, ParseError> {
         for kid in &shape.children {
             let item = self.item(kid)?;
             let gap = self.rng.random_bool(0.2);
@@ -162,7 +163,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
         let mut dict = self.arena.dict(shape.children.len())?;
         dict.prolog = self.comment();
         dict.epilog = self.comment();
-        Some(dict)
+        Ok(dict)
     }
     pub fn file(&mut self, size: usize) -> File<'a> {
         let shape = Silhouette::random(size, self.rng);

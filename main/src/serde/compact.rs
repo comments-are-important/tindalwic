@@ -4,7 +4,7 @@ use super::{ArenaSeed, CommentDe, CommentSer, UTF8De, UTF8Ser, seeded};
 use super::{DictFields, EntryFields, FileFields, ItemVariants, ListFields, TextFields};
 use crate::alloc::Arena;
 use crate::{Dict, Entry, File, Item, List, Name, Text, UTF8};
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use core::cell::Cell;
 use serde::de::{DeserializeSeed, Error, VariantAccess};
 use serde::ser::{Serialize, SerializeSeq, SerializeStruct, Serializer};
@@ -91,10 +91,15 @@ seeded! {
         fn visit_seq() {
             let mut count = 0usize;
             while let Some(item) = seq.next_element_seed(ItemDe(arena))? {
-                arena.item(item);
+                arena
+                    .item(item)
+                    .map_err(|err| Error::custom(err.to_string()))?;
                 count += 1;
             }
-            Ok(arena.list(count).unwrap().cells)
+            Ok(arena
+                .list(count)
+                .map_err(|err| Error::custom(err.to_string()))?
+                .cells)
         }
     }
 } // !seeded
@@ -246,10 +251,15 @@ seeded! {
         fn visit_seq() {
             let mut count = 0usize;
             while let Some(entry) = seq.next_element_seed(EntryDe(arena))? {
-                arena.entry(entry);
+                arena
+                    .entry(entry)
+                    .map_err(|err| Error::custom(err.to_string()))?;
                 count += 1;
             }
-            Ok(arena.dict(count).unwrap().cells)
+            Ok(arena
+                .dict(count)
+                .map_err(|err| Error::custom(err.to_string()))?
+                .cells)
         }
     }
 } // !seeded

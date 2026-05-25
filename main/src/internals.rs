@@ -1,6 +1,6 @@
 #![doc(hidden)] // only public so macro generated code can access.
 
-use super::parse::Builder;
+use super::parse::{Builder, ParseError};
 use super::*;
 
 /// push T into stack on low side of array, finish them into high side.
@@ -67,17 +67,27 @@ impl<'a> StackBuilder<'a> {
     }
 }
 impl<'a> Builder<'a> for StackBuilder<'a> {
-    fn list(&self, count: usize) -> Option<List<'a>> {
-        Some(List::wrap(self.items.finish(count)?))
+    fn list(&self, count: usize) -> Result<List<'a>, ParseError> {
+        match self.items.finish(count) {
+            Some(list) => Ok(List::wrap(list)),
+            None => Err(ParseError::mem("not enough items to make that list")),
+        }
     }
-    fn dict(&self, count: usize) -> Option<Dict<'a>> {
-        Some(Dict::wrap(self.entries.finish(count)?))
+    fn dict(&self, count: usize) -> Result<Dict<'a>, ParseError> {
+        match self.entries.finish(count) {
+            Some(dict) => Ok(Dict::wrap(dict)),
+            None => Err(ParseError::mem("not enough entries to make that dict")),
+        }
     }
-    fn item(&self, item: Item<'a>) -> Option<()> {
-        self.items.push(item)
+    fn item(&self, item: Item<'a>) -> Result<(), ParseError> {
+        self.items
+            .push(item)
+            .ok_or_else(|| ParseError::mem("no room for item"))
     }
-    fn entry(&self, entry: Entry<'a>) -> Option<()> {
-        self.entries.push(entry)
+    fn entry(&self, entry: Entry<'a>) -> Result<(), ParseError> {
+        self.entries
+            .push(entry)
+            .ok_or_else(|| ParseError::mem("no room for entry"))
     }
 }
 
@@ -102,44 +112,44 @@ impl<'a> Arena<'a> {
             None
         }
     }
-    pub fn list(&self, count: usize) -> Option<List<'a>> {
+    pub fn list(&self, count: usize) -> Result<List<'a>, ParseError> {
         self.builder.list(count)
     }
-    pub fn dict(&self, count: usize) -> Option<Dict<'a>> {
+    pub fn dict(&self, count: usize) -> Result<Dict<'a>, ParseError> {
         self.builder.dict(count)
     }
-    pub fn item(&self, item: Item<'a>) -> Option<()> {
+    pub fn item(&self, item: Item<'a>) -> Result<(), ParseError> {
         self.builder.item(item)
     }
-    pub fn entry(&self, entry: Entry<'a>) -> Option<()> {
+    pub fn entry(&self, entry: Entry<'a>) -> Result<(), ParseError> {
         self.builder.entry(entry)
     }
-    pub fn keyed(&self, key: &'a str, item: Item<'a>) -> Option<()> {
+    pub fn keyed(&self, key: &'a str, item: Item<'a>) -> Result<(), ParseError> {
         self.entry(Entry::wrap(key, item))
     }
-    pub fn text_item(&self, utf8: &'a str) -> Option<()> {
+    pub fn text_item(&self, utf8: &'a str) -> Result<(), ParseError> {
         self.item(Text::wrap(utf8).into())
     }
-    pub fn list_item(&self, count: usize) -> Option<()> {
+    pub fn list_item(&self, count: usize) -> Result<(), ParseError> {
         let list = self.list(count)?;
         self.item(list.into())
     }
-    pub fn dict_item(&self, count: usize) -> Option<()> {
+    pub fn dict_item(&self, count: usize) -> Result<(), ParseError> {
         let dict = self.dict(count)?;
         self.item(dict.into())
     }
-    pub fn text_entry(&self, key: &'a str, utf8: &'a str) -> Option<()> {
+    pub fn text_entry(&self, key: &'a str, utf8: &'a str) -> Result<(), ParseError> {
         self.keyed(key, Text::wrap(utf8).into())
     }
-    pub fn list_entry(&self, key: &'a str, count: usize) -> Option<()> {
+    pub fn list_entry(&self, key: &'a str, count: usize) -> Result<(), ParseError> {
         let list = self.list(count)?;
         self.keyed(key, list.into())
     }
-    pub fn dict_entry(&self, key: &'a str, count: usize) -> Option<()> {
+    pub fn dict_entry(&self, key: &'a str, count: usize) -> Result<(), ParseError> {
         let dict = self.dict(count)?;
         self.keyed(key, dict.into())
     }
-    pub fn parse_or_panic(&self, content: &'a str) -> Option<File<'a>> {
+    pub fn parse_or_panic(&self, content: &'a str) -> Result<File<'a>, ParseError> {
         parse::Input::parse(&self.builder, content, |error| panic!("{error}"))
     }
 }
@@ -176,7 +186,7 @@ pub enum Branch<'p> {
     Dict(Key<'p>),
 }
 #[derive(Debug)]
-pub struct Error<'p> {
+pub struct PathError<'p> {
     pub failed: &'p [Branch<'p>],
     pub message: &'static str,
 }
@@ -188,37 +198,37 @@ impl<'p> Path<'p> {
     pub fn wrap(branches: &'p [Branch<'p>]) -> Self {
         Path { branches }
     }
-    pub fn error_full(&self, message: &'static str) -> Error<'p> {
-        Error {
+    pub fn error_full(&self, message: &'static str) -> PathError<'p> {
+        PathError {
             failed: &self.branches[..],
             message,
         }
     }
-    pub fn error_at(&self, bad: usize, message: &'static str) -> Error<'p> {
-        Error {
+    pub fn error_at(&self, bad: usize, message: &'static str) -> PathError<'p> {
+        PathError {
             failed: &self.branches[..=bad],
             message,
         }
     }
-    pub fn text<'a>(&self, item: &Item<'a>) -> Result<Text<'a>, Error<'p>> {
+    pub fn text<'a>(&self, item: &Item<'a>) -> Result<Text<'a>, PathError<'p>> {
         let Item::Text(text) = item else {
             return Err(self.error_full("path does not end at Text"));
         };
         Ok(*text)
     }
-    pub fn list<'a>(&self, item: &Item<'a>) -> Result<List<'a>, Error<'p>> {
+    pub fn list<'a>(&self, item: &Item<'a>) -> Result<List<'a>, PathError<'p>> {
         let Item::List(list) = item else {
             return Err(self.error_full("path does not end at List"));
         };
         Ok(*list)
     }
-    pub fn dict<'a>(&self, item: &Item<'a>) -> Result<Dict<'a>, Error<'p>> {
+    pub fn dict<'a>(&self, item: &Item<'a>) -> Result<Dict<'a>, PathError<'p>> {
         let Item::Dict(dict) = item else {
             return Err(self.error_full("path does not end at Dict"));
         };
         Ok(*dict)
     }
-    pub fn item_cell<'a>(&self, item: &Item<'a>) -> Result<&'a Cell<Item<'a>>, Error<'p>> {
+    pub fn item_cell<'a>(&self, item: &Item<'a>) -> Result<&'a Cell<Item<'a>>, PathError<'p>> {
         if self.branches.is_empty() {
             return Err(self.error_full("empty path can't be resolved"));
         }
@@ -259,7 +269,7 @@ impl<'p> Path<'p> {
         }
         Err(self.error_full("path did not end at an item inside a list"))
     }
-    pub fn entry_cell<'a>(&self, item: &Item<'a>) -> Result<&'a Cell<Entry<'a>>, Error<'p>> {
+    pub fn entry_cell<'a>(&self, item: &Item<'a>) -> Result<&'a Cell<Entry<'a>>, PathError<'p>> {
         if self.branches.is_empty() {
             return Err(self.error_full("empty path can't be resolved"));
         }

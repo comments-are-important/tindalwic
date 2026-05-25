@@ -3,6 +3,7 @@
 extern crate alloc;
 
 use super::parse::Builder;
+use crate::parse::ParseError;
 use crate::{Comment, Dict, Entry, File, Item, List, Text, UTF8};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -42,17 +43,27 @@ struct HeapBuilder<'a> {
     bump: &'a Bump,
 }
 impl<'a> Builder<'a> for HeapBuilder<'a> {
-    fn list(&self, count: usize) -> Option<List<'a>> {
-        Some(List::wrap(self.items.finish(count, self.bump)?))
+    fn list(&self, count: usize) -> Result<List<'a>, ParseError> {
+        match self.items.finish(count, self.bump) {
+            Some(list) => Ok(List::wrap(list)),
+            None => Err(ParseError::mem("not enough items to make that list")),
+        }
     }
-    fn dict(&self, count: usize) -> Option<Dict<'a>> {
-        Some(Dict::wrap(self.entries.finish(count, self.bump)?))
+    fn dict(&self, count: usize) -> Result<Dict<'a>, ParseError> {
+        match self.entries.finish(count, self.bump) {
+            Some(dict) => Ok(Dict::wrap(dict)),
+            None => Err(ParseError::mem("not enough entries to make that dict")),
+        }
     }
-    fn item(&self, item: Item<'a>) -> Option<()> {
-        self.items.push(item)
+    fn item(&self, item: Item<'a>) -> Result<(), ParseError> {
+        self.items
+            .push(item)
+            .ok_or_else(|| ParseError::mem("no room for item"))
     }
-    fn entry(&self, entry: Entry<'a>) -> Option<()> {
-        self.entries.push(entry)
+    fn entry(&self, entry: Entry<'a>) -> Result<(), ParseError> {
+        self.entries
+            .push(entry)
+            .ok_or_else(|| ParseError::mem("no room for entry"))
     }
 }
 
@@ -72,19 +83,19 @@ impl<'a> Arena<'a> {
         Arena { builder }
     }
     /// after `count` calls to .item, call this to build a list of those.
-    pub fn list(&self, count: usize) -> Option<List<'a>> {
+    pub fn list(&self, count: usize) -> Result<List<'a>, ParseError> {
         self.builder.list(count)
     }
     /// after `count` calls to .entry, call this to build a dict of those.
-    pub fn dict(&self, count: usize) -> Option<Dict<'a>> {
+    pub fn dict(&self, count: usize) -> Result<Dict<'a>, ParseError> {
         self.builder.dict(count)
     }
     /// push an item into builder memory for future .list call to use.
-    pub fn item(&self, item: Item<'a>) -> Option<()> {
+    pub fn item(&self, item: Item<'a>) -> Result<(), ParseError> {
         self.builder.item(item)
     }
     /// push an entry into builder memory for future .dict call to use.
-    pub fn entry(&self, entry: Entry<'a>) -> Option<()> {
+    pub fn entry(&self, entry: Entry<'a>) -> Result<(), ParseError> {
         self.builder.entry(entry)
     }
     /// copy a str into the bump
@@ -92,15 +103,15 @@ impl<'a> Arena<'a> {
         self.builder.bump.alloc_str(value)
     }
     /// call the parser on the provided content, panic if the content isn't legit.
-    pub fn parse_or_panic(&self, content: &'a str) -> Option<File<'a>> {
+    pub fn parse_or_panic(&self, content: &'a str) -> Result<File<'a>, ParseError> {
         self.parse(content, |error| panic!("{error}"))
     }
     /// call the parser on the provided content, with a callback for errors.
-    pub fn parse<F: FnMut(crate::parse::SyntaxError)>(
+    pub fn parse<F: FnMut(crate::parse::ParseError)>(
         &self,
         content: &'a str,
         report: F,
-    ) -> Option<File<'a>> {
+    ) -> Result<File<'a>, ParseError> {
         crate::parse::Input::parse(&self.builder, content, report)
     }
 }

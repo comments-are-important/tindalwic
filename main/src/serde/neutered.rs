@@ -110,11 +110,14 @@ seeded! {
         fn visit_seq() {
             let mut count = 0usize;
             while let Some(item) = seq.next_element_seed(ItemDe(arena))? {
-                arena.item(item);
+                arena
+                    .item(item)
+                    .map_err(|err| Error::custom(err.to_string()))?;
                 count += 1;
             }
-            let list = arena.list(count).ok_or(Error::custom("out of memory"))?;
-            Ok(list)
+            arena
+                .list(count)
+                .map_err(|err| Error::custom(err.to_string()))
         }
     }
 } // !seeded
@@ -135,11 +138,14 @@ seeded! {
             let mut count = 0usize;
             while let Some((key, item)) = map.next_entry_seed(UTF8De(arena), ItemDe(arena))? {
                 assert!(key.dedent == 0 || key.dedent == usize::MAX);
-                arena.entry(Entry::wrap(key.slice, item));
+                arena
+                    .entry(Entry::wrap(key.slice, item))
+                    .map_err(|err| Error::custom(err.to_string()))?;
                 count += 1;
             }
-            let dict = arena.dict(count).ok_or(Error::custom("out of memory"))?;
-            Ok(dict)
+            arena
+                .dict(count)
+                .map_err(|err| Error::custom(err.to_string()))
         }
     }
 } // !seeded

@@ -2,8 +2,7 @@
 
 extern crate alloc;
 
-use super::parse::Builder;
-use crate::parse::ParseError;
+use crate::parse::{Builder, Input, ParseError, Reported};
 use crate::{Comment, Dict, Entry, File, Item, List, Text, UTF8};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -103,16 +102,33 @@ impl<'a> Arena<'a> {
         self.builder.bump.alloc_str(value)
     }
     /// call the parser on the provided content, panic if the content isn't legit.
-    pub fn parse_or_panic(&self, content: &'a str) -> Result<File<'a>, ParseError> {
+    pub fn parse_or_panic(&self, content: &'a str) -> File<'a> {
         self.parse(content, |error| panic!("{error}"))
+            .expect("panic should have already happened in report")
+    }
+    /// call the parser on the provided content, collect first `count` errors.
+    pub fn parse_collect(
+        &self,
+        content: &'a str,
+        count: usize,
+    ) -> Result<File<'a>, Vec<ParseError>> {
+        let mut errors = Vec::new();
+        self.parse(content, |err| {
+            if errors.len() >= count {
+                return Reported::Abort;
+            }
+            errors.push(err);
+            Reported::Continue
+        })
+        .ok_or_else(|| errors)
     }
     /// call the parser on the provided content, with a callback for errors.
-    pub fn parse<F: FnMut(crate::parse::ParseError)>(
+    pub fn parse<F: FnMut(ParseError) -> Reported>(
         &self,
         content: &'a str,
         report: F,
-    ) -> Result<File<'a>, ParseError> {
-        crate::parse::Input::parse(&self.builder, content, report)
+    ) -> Option<File<'a>> {
+        Input::parse(&self.builder, content, report)
     }
 }
 
@@ -157,7 +173,7 @@ mod tests {
     fn parse_alloc() {
         let bump = Bump::new();
         let arena = Arena::new(&bump);
-        let file = arena.parse_or_panic("k=v\n").unwrap();
+        let file = arena.parse_or_panic("k=v\n");
         assert_eq!(file.to_string(), "k=v\n");
     }
 }

@@ -149,8 +149,9 @@ impl<'a> Arena<'a> {
         let dict = self.dict(count)?;
         self.keyed(key, dict.into())
     }
-    pub fn parse_or_panic(&self, content: &'a str) -> Result<File<'a>, ParseError> {
+    pub fn parse_or_panic(&self, content: &'a str) -> File<'a> {
         parse::Input::parse(&self.builder, content, |error| panic!("{error}"))
+            .expect("panic should have already happened in report")
     }
 }
 

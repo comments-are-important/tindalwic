@@ -192,7 +192,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             };
             let original: File = random.file(32);
             let encoded = original.to_string();
-            let parsed = arena.parse_or_panic(&encoded).unwrap();
+            let parsed = arena.parse_or_panic(&encoded);
             if original != parsed {
                 println!("\n{original:?}\n===\n{encoded}===");
                 assert_json_eq!(Verbose(original), Verbose(parsed));

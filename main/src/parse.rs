@@ -58,6 +58,14 @@ pub(crate) trait Builder<'a> {
     fn entry(&self, entry: Entry<'a>) -> Result<(), ParseError>;
 }
 
+/// the "report" callback provided to the parser should return one of these
+pub enum Reported {
+    /// tell parser to give up
+    Abort,
+    /// tell parser to keep going if it can, to find additional errors
+    Continue,
+}
+
 pub(crate) struct Input<'a, F> {
     utf8: &'a str, // entire tindalwic encoded content
     line: usize,   // the number of the current line
@@ -70,20 +78,10 @@ pub(crate) struct Input<'a, F> {
 }
 impl<'a, F> Input<'a, F>
 where
-    F: FnMut(ParseError),
+    F: FnMut(ParseError) -> Reported,
 {
     /// None means the arena is too small (or the UTF-8 is way too big).
-    pub(crate) fn parse(
-        arena: &dyn Builder<'a>,
-        utf8: &'a str,
-        report: F,
-    ) -> Result<File<'a>, ParseError> {
-        if utf8.len() >= usize::MAX {
-            // MAX is a sentinel, so it also can't be a len. the wrap-around that could
-            // maybe happen without this check will almost certainly never actually
-            // occur because the arena will fill up before that.
-            return Err(ParseError::mem("way too big"));
-        }
+    pub(crate) fn parse(arena: &dyn Builder<'a>, utf8: &'a str, report: F) -> Option<File<'a>> {
         let mut input = Input {
             utf8,
             line: 0,
@@ -94,14 +92,34 @@ where
             tabs: 0,
             report,
         };
+        if utf8.len() >= usize::MAX {
+            // MAX is a sentinel, so it also can't be a len. the wrap-around will almost
+            // certainly never actually occur because the arena is guaranteed to fill up
+            // long before that, but it's an easy sanity check...
+            input.report(ParseError::mem("way too big"))?;
+            return None;
+        }
         input.next(0);
         let hashbang = input.comment(0, b"#!");
         let dict = input.entries(0, arena)?;
-        Ok(File {
+        Some(File {
             cells: dict.cells,
             hashbang,
             prolog: dict.prolog,
         })
+    }
+
+    fn report(&mut self, err: ParseError) -> Option<()> {
+        match (self.report)(err) {
+            Reported::Abort => None,
+            _ => {
+                if let ParseError::Memory(_) = err {
+                    None
+                } else {
+                    Some(())
+                }
+            }
+        }
     }
 
     /// done with current line, so advance, skipping excessively indented lines.
@@ -256,7 +274,7 @@ where
 
     /// previous line opened a list context, so parse all the items in it.
     /// None means insufficient space in Arena.
-    fn items(&mut self, indent: usize, arena: &dyn Builder<'a>) -> Result<List<'a>, ParseError> {
+    fn items(&mut self, indent: usize, arena: &dyn Builder<'a>) -> Option<List<'a>> {
         let bytes = self.utf8.as_bytes();
         let prolog = self.comment(indent, b"#");
         let mut count = 0usize;
@@ -272,23 +290,23 @@ where
                 let len = self.end - self.first;
                 match bytes[self.first] {
                     b'#' => {
-                        (self.report)(ParseError::at(self.line, "stray `#` comment"));
+                        self.report(ParseError::at(self.line, "stray `#` comment"))?;
                         self.comment(indent, b"#"); // read and throw away
                     }
                     b'/' => {
-                        (self.report)(ParseError::at(
+                        self.report(ParseError::at(
                             self.line,
                             if len < 2 || bytes[self.first + 1] != b'/' {
                                 "malformed // comment"
                             } else {
                                 "no // comments in lists"
                             },
-                        ));
+                        ))?;
                         self.comment(indent, b"/"); // read and throw away
                     }
                     b'<' => {
                         if len != 2 || bytes[self.end - 1] != b'>' {
-                            (self.report)(ParseError::at(self.line, "malformed `<>` in list"));
+                            self.report(ParseError::at(self.line, "malformed `<>` in list"))?;
                             self.next(indent);
                         } else {
                             let end = self.end;
@@ -306,7 +324,7 @@ where
                     }
                     b'[' => {
                         if len != 2 || bytes[self.end - 1] != b']' {
-                            (self.report)(ParseError::at(self.line, "malformed `[]` in list"));
+                            self.report(ParseError::at(self.line, "malformed `[]` in list"))?;
                             self.next(indent);
                         } else {
                             self.next(indent + 1);
@@ -315,7 +333,7 @@ where
                     }
                     b'{' => {
                         if len != 2 || bytes[self.end - 1] != b'}' {
-                            (self.report)(ParseError::at(self.line, "malformed `{}` in list"));
+                            self.report(ParseError::at(self.line, "malformed `{}` in list"))?;
                             self.next(indent);
                         } else {
                             self.next(indent + 1);
@@ -328,21 +346,30 @@ where
                 }
             }
             if let Some(item) = item {
-                arena.item(item)?;
+                if let Err(err) = arena.item(item) {
+                    self.report(err)?;
+                }
                 count += 1;
             }
         }
-        let mut list = arena.list(count)?;
-        if indent > 0 {
-            list.epilog = self.comment(indent - 1, b"#");
+        match arena.list(count) {
+            Ok(mut list) => {
+                if indent > 0 {
+                    list.epilog = self.comment(indent - 1, b"#");
+                }
+                list.prolog = prolog;
+                Some(list)
+            }
+            Err(err) => {
+                self.report(err)?;
+                None
+            }
         }
-        list.prolog = prolog;
-        Ok(list)
     }
 
     /// previous line opened a dict context, so parse all the entries in it.
     /// None means insufficient space in Arena.
-    fn entries(&mut self, indent: usize, arena: &dyn Builder<'a>) -> Result<Dict<'a>, ParseError> {
+    fn entries(&mut self, indent: usize, arena: &dyn Builder<'a>) -> Option<Dict<'a>> {
         let bytes = self.utf8.as_bytes();
         let prolog = self.comment(indent, b"#");
         let mut count = 0usize;
@@ -355,7 +382,7 @@ where
             let before = self.comment(indent, b"//");
             if self.start == usize::MAX || self.tabs != indent {
                 if gap || before.is_some() {
-                    (self.report)(ParseError::at(self.line, "gap/before but no key"));
+                    self.report(ParseError::at(self.line, "gap/before but no key"))?;
                 }
                 break;
             }
@@ -363,23 +390,23 @@ where
             let len = self.end - self.first;
             match bytes[self.first] {
                 b'#' => {
-                    (self.report)(ParseError::at(self.line, "stray `#` comment"));
+                    self.report(ParseError::at(self.line, "stray `#` comment"))?;
                     self.comment(indent, b"#"); // read and throw away
                 }
                 b'/' => {
-                    (self.report)(ParseError::at(
+                    self.report(ParseError::at(
                         self.line,
                         if len < 2 || bytes[self.first + 1] != b'/' {
                             "malformed // comment"
                         } else {
                             "stray `//` comment"
                         },
-                    ));
+                    ))?;
                     self.comment(indent, b"/"); // read and throw away
                 }
                 b'<' => {
                     if len < 2 || bytes[self.end - 1] != b'>' {
-                        (self.report)(ParseError::at(self.line, "malformed `<key>` in dict"));
+                        self.report(ParseError::at(self.line, "malformed `<key>` in dict"))?;
                         self.next(indent);
                     } else {
                         key = &self.utf8[self.first + 1..self.end - 1];
@@ -398,7 +425,7 @@ where
                 }
                 b'[' => {
                     if len < 2 || bytes[self.end - 1] != b']' {
-                        (self.report)(ParseError::at(self.line, "malformed `[key]` in dict"));
+                        self.report(ParseError::at(self.line, "malformed `[key]` in dict"))?;
                         self.next(indent);
                     } else {
                         key = &self.utf8[self.first + 1..self.end - 1];
@@ -408,7 +435,7 @@ where
                 }
                 b'{' => {
                     if len < 2 || bytes[self.end - 1] != b'}' {
-                        (self.report)(ParseError::at(self.line, "malformed `{key}` in dict"));
+                        self.report(ParseError::at(self.line, "malformed `{key}` in dict"))?;
                         self.next(indent);
                     } else {
                         key = &self.utf8[self.first + 1..self.end - 1];
@@ -417,12 +444,12 @@ where
                     }
                 }
                 b'\t' => {
-                    (self.report)(ParseError::at(self.line, "excess indentation?"));
+                    self.report(ParseError::at(self.line, "excess indentation?"))?;
                     self.next(indent);
                 }
                 _ => {
                     if self.assign == usize::MAX {
-                        (self.report)(ParseError::at(self.line, "missing `=` in dict"));
+                        self.report(ParseError::at(self.line, "missing `=` in dict"))?;
                         self.next(indent);
                     } else {
                         key = &self.utf8[self.first..self.assign];
@@ -431,21 +458,30 @@ where
                 }
             }
             if let Some(item) = item {
-                arena.entry(Entry {
+                if let Err(err) = arena.entry(Entry {
                     name: Name { key, gap, before },
                     item,
-                })?;
+                }) {
+                    self.report(err)?;
+                }
                 count += 1;
             } else if gap || before.is_some() {
-                (self.report)(ParseError::at(self.line, "gap/before but no item"));
+                self.report(ParseError::at(self.line, "gap/before but no item"))?;
             }
         }
-        let mut dict = arena.dict(count)?;
-        dict.prolog = prolog;
-        if indent > 0 {
-            dict.epilog = self.comment(indent - 1, b"#");
+        match arena.dict(count) {
+            Ok(mut dict) => {
+                dict.prolog = prolog;
+                if indent > 0 {
+                    dict.epilog = self.comment(indent - 1, b"#");
+                }
+                Some(dict)
+            }
+            Err(err) => {
+                self.report(err)?;
+                None
+            }
         }
-        Ok(dict)
     }
 }
 
@@ -468,7 +504,7 @@ mod tests {
             $crate = crate;
             let mut arena = <10dict,10list>;
         }
-        let file = arena.parse_or_panic("").unwrap();
+        let file = arena.parse_or_panic("");
         assert!(!arena.completed().is_some());
         assert!(!file.has_content());
     }
@@ -479,7 +515,7 @@ mod tests {
             $crate = crate;
             let mut arena = <1dict>;
         }
-        let file = arena.parse_or_panic("k=v").unwrap();
+        let file = arena.parse_or_panic("k=v");
         assert!(arena.completed().is_some());
         assert!(file.hashbang.is_none());
         assert!(file.prolog.is_none());
@@ -496,7 +532,7 @@ mod tests {
             $crate = crate;
             let mut arena = <3list,1dict>;
         }
-        let file = arena.parse_or_panic("[k]\n\t1\n\t2\n\t3").unwrap();
+        let file = arena.parse_or_panic("[k]\n\t1\n\t2\n\t3");
         assert!(arena.completed().is_some());
         assert_eq!(file.cells.len(), 1);
         let entry = file.get("k").unwrap();
@@ -523,7 +559,7 @@ mod tests {
             $crate = crate;
             let mut arena = <2dict>;
         }
-        let file = arena.parse_or_panic("{z}\n\t<k>\n\t\tv").unwrap();
+        let file = arena.parse_or_panic("{z}\n\t<k>\n\t\tv");
         assert!(arena.completed().is_some());
         walk! { $crate = crate;
             let v = (&file){"z"}<"k">.unwrap();

@@ -43,7 +43,7 @@ mod alloc_tests {
         arena! {
             let mut arena = <1dict>;
         }
-        let parsed = arena.parse_or_panic(&encoded).unwrap();
+        let parsed = arena.parse_or_panic(&encoded);
         assert!(parsed.hashbang.is_none());
         assert_eq!(
             Vec::from_iter(parsed.prolog.unwrap().lines()),
@@ -76,7 +76,7 @@ fn text_stretch_bug() {
     arena! {
         let mut arena = <1dict,1list>;
     }
-    let file = arena.parse_or_panic(content).unwrap();
+    let file = arena.parse_or_panic(content);
     assert_eq!(file.to_string(), content);
 }
 

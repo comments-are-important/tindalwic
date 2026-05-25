@@ -15,7 +15,7 @@ fn into_json<T: ?Sized + Serialize>(value: &T) -> Result<String, String> {
     serde_json::to_string_pretty(value).map_err(|e| e.to_string())
 }
 fn into_toml<T: ?Sized + Serialize>(value: &T) -> Result<String, String> {
-    toml::to_string_pretty(value).map_err(|e| e.to_string())
+    toml_edit::ser::to_string_pretty(value).map_err(|e| e.to_string())
 }
 fn into_yaml<T: ?Sized + Serialize>(value: &T) -> Result<String, String> {
     yaml_serde::to_string(value).map_err(|e| e.to_string())
@@ -65,7 +65,7 @@ fn from_toml<'de, 'a>(
     input: &'de str,
     seed: impl DeserializeSeed<'de, Value = File<'a>>,
 ) -> Result<File<'a>, String> {
-    let de = toml::de::Deserializer::parse(input).map_err(|e| e.to_string())?;
+    let de = toml_edit::de::Deserializer::parse(input).map_err(|e| e.to_string())?;
     seed.deserialize(de).map_err(|e| e.to_string())
 }
 fn from_yaml<'de, 'a>(

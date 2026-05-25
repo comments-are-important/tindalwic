@@ -34,7 +34,7 @@ pub fn from_tindalwic(
         Err(errors) => {
             let mut message = format!("{} errors:", errors.len());
             for error in errors {
-                message.push_str("\n + ");
+                message.push_str("\n  ");
                 message.push_str(&error.to_string());
             }
             return Err(message);

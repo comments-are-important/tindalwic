@@ -176,4 +176,13 @@ mod tests {
         let file = arena.parse_or_panic("k=v\n");
         assert_eq!(file.to_string(), "k=v\n");
     }
+    #[test]
+    fn invalid() {
+        let bump = Bump::new();
+        let arena = Arena::new(&bump);
+        let Err(errors) = arena.parse_collect("nope", usize::MAX) else {
+            panic!("got a file expected parse error")
+        };
+        assert_eq!(errors.len(), 1);
+    }
 }

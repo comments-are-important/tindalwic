@@ -1,6 +1,6 @@
 #![doc(hidden)] // only public so macro generated code can access.
 
-use super::parse::{Builder, ParseError};
+use super::parse::{Builder, Input, ParseError, Reported};
 use super::*;
 
 /// push T into stack on low side of array, finish them into high side.
@@ -150,8 +150,16 @@ impl<'a> Arena<'a> {
         self.keyed(key, dict.into())
     }
     pub fn parse_or_panic(&self, content: &'a str) -> File<'a> {
-        parse::Input::parse(&self.builder, content, |error| panic!("{error}"))
+        Input::parse(&self.builder, content, |error| panic!("{error}"))
             .expect("panic should have already happened in report")
+    }
+    /// call the parser on the provided content, with a callback for errors.
+    pub fn parse<F: FnMut(ParseError) -> Reported>(
+        &self,
+        content: &'a str,
+        report: F,
+    ) -> Option<File<'a>> {
+        Input::parse(&self.builder, content, report)
     }
 }
 

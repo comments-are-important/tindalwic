@@ -16,7 +16,6 @@ use rand::rngs::SmallRng;
 use rand::{Rng, RngExt, SeedableRng};
 use std::fmt::{self, Write};
 use tindalwic::alloc::Arena;
-use tindalwic::internals::Builder as _;
 use tindalwic::serde::Verbose;
 use tindalwic::{Comment, Dict, Entry, File, Item, List, Name, Text};
 

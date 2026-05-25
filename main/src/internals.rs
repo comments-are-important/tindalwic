@@ -1,14 +1,7 @@
 #![doc(hidden)] // only public so macro generated code can access.
 
+use super::parse::Builder;
 use super::*;
-
-/// TODO return Results, not Options, here and in Arenas.
-pub trait Builder<'a> {
-    fn list(&self, count: usize) -> Option<List<'a>>;
-    fn dict(&self, count: usize) -> Option<Dict<'a>>;
-    fn item(&self, item: Item<'a>) -> Option<()>;
-    fn entry(&self, entry: Entry<'a>) -> Option<()>;
-}
 
 /// push T into stack on low side of array, finish them into high side.
 /// aligns to an in-order tree traversal: push on entry, visit kids, finish on exit.
@@ -62,11 +55,18 @@ impl<'a, T> LowToHigh<'a, T> {
     }
 }
 
-pub struct Arena<'a> {
+struct StackBuilder<'a> {
     items: LowToHigh<'a, Item<'a>>,
     entries: LowToHigh<'a, Entry<'a>>,
 }
-impl<'a> Builder<'a> for Arena<'a> {
+impl<'a> StackBuilder<'a> {
+    pub fn wrap(items: &'a [Cell<Item<'a>>], entries: &'a [Cell<Entry<'a>>]) -> Self {
+        let items = LowToHigh::wrap(items);
+        let entries = LowToHigh::wrap(entries);
+        StackBuilder { items, entries }
+    }
+}
+impl<'a> Builder<'a> for StackBuilder<'a> {
     fn list(&self, count: usize) -> Option<List<'a>> {
         Some(List::wrap(self.items.finish(count)?))
     }
@@ -80,24 +80,39 @@ impl<'a> Builder<'a> for Arena<'a> {
         self.entries.push(entry)
     }
 }
+
+pub struct Arena<'a> {
+    builder: StackBuilder<'a>,
+}
 impl<'a> Arena<'a> {
     pub fn wrap(items: &'a [Cell<Item<'a>>], entries: &'a [Cell<Entry<'a>>]) -> Self {
-        let items = LowToHigh::wrap(items);
-        let entries = LowToHigh::wrap(entries);
-        Arena { items, entries }
+        let builder = StackBuilder::wrap(items, entries);
+        Arena { builder }
     }
     pub fn item_slots(&self) -> usize {
-        self.items.done.get() - self.items.next.get()
+        self.builder.items.done.get() - self.builder.items.next.get()
     }
     pub fn entry_slots(&self) -> usize {
-        self.entries.done.get() - self.entries.next.get()
+        self.builder.entries.done.get() - self.builder.entries.next.get()
     }
     pub fn completed(&self) -> Option<()> {
-        if self.items.done.get() == 0 && self.entries.done.get() == 0 {
+        if self.builder.items.done.get() == 0 && self.builder.entries.done.get() == 0 {
             Some(())
         } else {
             None
         }
+    }
+    pub fn list(&self, count: usize) -> Option<List<'a>> {
+        self.builder.list(count)
+    }
+    pub fn dict(&self, count: usize) -> Option<Dict<'a>> {
+        self.builder.dict(count)
+    }
+    pub fn item(&self, item: Item<'a>) -> Option<()> {
+        self.builder.item(item)
+    }
+    pub fn entry(&self, entry: Entry<'a>) -> Option<()> {
+        self.builder.entry(entry)
     }
     pub fn keyed(&self, key: &'a str, item: Item<'a>) -> Option<()> {
         self.entry(Entry::wrap(key, item))
@@ -125,7 +140,7 @@ impl<'a> Arena<'a> {
         self.keyed(key, dict.into())
     }
     pub fn parse_or_panic(&self, content: &'a str) -> Option<File<'a>> {
-        parse::Input::parse(self, content, |error| panic!("{error}"))
+        parse::Input::parse(&self.builder, content, |error| panic!("{error}"))
     }
 }
 

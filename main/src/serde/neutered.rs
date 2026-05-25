@@ -2,7 +2,6 @@ extern crate alloc;
 
 use super::{ArenaSeed, UTF8De, UTF8Ser, seeded};
 use crate::alloc::Arena;
-use crate::internals::Builder;
 use crate::{Dict, Entry, File, Item, List, Text};
 use alloc::format;
 use alloc::string::{String, ToString};

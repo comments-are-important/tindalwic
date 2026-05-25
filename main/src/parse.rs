@@ -1,7 +1,62 @@
-use core::usize;
+//! everything related to converting bytes into a File
 
-use super::internals::Builder;
+use core::fmt::{Display, Formatter, Result};
+use core::{usize, write};
+
 use super::*;
+
+/// parsing problem
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SyntaxError {
+    start: usize,
+    end: usize,
+    message: &'static str,
+}
+impl Display for SyntaxError {
+    fn fmt(&self, out: &mut Formatter<'_>) -> Result {
+        if self.start + 1 == self.end {
+            write!(out, "{}: {}", self.start, self.message)
+        } else {
+            write!(out, "{}-{}: {}", self.start, self.end - 1, self.message)
+        }
+    }
+}
+impl core::error::Error for SyntaxError {}
+impl SyntaxError {
+    /// make an Error with an arbitrary span of lines.
+    fn new(start: usize, end: usize, message: &'static str) -> Self {
+        SyntaxError {
+            start,
+            end,
+            message,
+        }
+    }
+    /// make an Error for a single line.
+    fn at(line: usize, message: &'static str) -> Self {
+        SyntaxError::new(line, line + 1, message)
+    }
+    /// index of first line
+    pub fn start(self) -> usize {
+        self.start
+    }
+    /// exclusive end of the range of lines
+    pub fn end(self) -> usize {
+        self.end
+    }
+    /// English description of the problem
+    pub fn message(self) -> &'static str {
+        self.message
+    }
+}
+
+/// TODO return Results, not Options, here and in Arenas.
+pub(crate) trait Builder<'a> {
+    fn list(&self, count: usize) -> Option<List<'a>>;
+    fn dict(&self, count: usize) -> Option<Dict<'a>>;
+    fn item(&self, item: Item<'a>) -> Option<()>;
+    fn entry(&self, entry: Entry<'a>) -> Option<()>;
+}
 
 pub(crate) struct Input<'a, F> {
     utf8: &'a str, // entire tindalwic encoded content
@@ -15,7 +70,7 @@ pub(crate) struct Input<'a, F> {
 }
 impl<'a, F> Input<'a, F>
 where
-    F: FnMut(ParseError),
+    F: FnMut(SyntaxError),
 {
     /// None means the arena is too small (or the UTF-8 is way too big).
     pub(crate) fn parse(arena: &dyn Builder<'a>, utf8: &'a str, report: F) -> Option<File<'a>> {
@@ -67,7 +122,7 @@ where
             self.line += 1;
             self.start = self.end + 1;
         }
-        (self.report)(ParseError::new(begin..self.line, "excess indentation"));
+        (self.report)(SyntaxError::new(begin, self.line, "excess indentation"));
         return self.start != usize::MAX;
     }
 
@@ -114,7 +169,11 @@ where
                 self.line += 1;
                 offset += 1;
             }
-            (self.report)(ParseError::new(begin..self.line, "consecutive empty lines"));
+            (self.report)(SyntaxError::new(
+                begin,
+                self.line,
+                "consecutive empty lines",
+            ));
             self.start = offset - 1;
             self.first = offset - 1;
             self.end = offset - 1;
@@ -213,11 +272,11 @@ where
                 let len = self.end - self.first;
                 match bytes[self.first] {
                     b'#' => {
-                        (self.report)(ParseError::at(self.line, "stray `#` comment"));
+                        (self.report)(SyntaxError::at(self.line, "stray `#` comment"));
                         self.comment(indent, b"#"); // read and throw away
                     }
                     b'/' => {
-                        (self.report)(ParseError::at(
+                        (self.report)(SyntaxError::at(
                             self.line,
                             if len < 2 || bytes[self.first + 1] != b'/' {
                                 "malformed // comment"
@@ -229,7 +288,7 @@ where
                     }
                     b'<' => {
                         if len != 2 || bytes[self.end - 1] != b'>' {
-                            (self.report)(ParseError::at(self.line, "malformed `<>` in list"));
+                            (self.report)(SyntaxError::at(self.line, "malformed `<>` in list"));
                             self.next(indent);
                         } else {
                             let end = self.end;
@@ -247,7 +306,7 @@ where
                     }
                     b'[' => {
                         if len != 2 || bytes[self.end - 1] != b']' {
-                            (self.report)(ParseError::at(self.line, "malformed `[]` in list"));
+                            (self.report)(SyntaxError::at(self.line, "malformed `[]` in list"));
                             self.next(indent);
                         } else {
                             self.next(indent + 1);
@@ -256,7 +315,7 @@ where
                     }
                     b'{' => {
                         if len != 2 || bytes[self.end - 1] != b'}' {
-                            (self.report)(ParseError::at(self.line, "malformed `{}` in list"));
+                            (self.report)(SyntaxError::at(self.line, "malformed `{}` in list"));
                             self.next(indent);
                         } else {
                             self.next(indent + 1);
@@ -296,7 +355,7 @@ where
             let before = self.comment(indent, b"//");
             if self.start == usize::MAX || self.tabs != indent {
                 if gap || before.is_some() {
-                    (self.report)(ParseError::at(self.line, "gap/before but no key"));
+                    (self.report)(SyntaxError::at(self.line, "gap/before but no key"));
                 }
                 break;
             }
@@ -304,11 +363,11 @@ where
             let len = self.end - self.first;
             match bytes[self.first] {
                 b'#' => {
-                    (self.report)(ParseError::at(self.line, "stray `#` comment"));
+                    (self.report)(SyntaxError::at(self.line, "stray `#` comment"));
                     self.comment(indent, b"#"); // read and throw away
                 }
                 b'/' => {
-                    (self.report)(ParseError::at(
+                    (self.report)(SyntaxError::at(
                         self.line,
                         if len < 2 || bytes[self.first + 1] != b'/' {
                             "malformed // comment"
@@ -320,7 +379,7 @@ where
                 }
                 b'<' => {
                     if len < 2 || bytes[self.end - 1] != b'>' {
-                        (self.report)(ParseError::at(self.line, "malformed `<key>` in dict"));
+                        (self.report)(SyntaxError::at(self.line, "malformed `<key>` in dict"));
                         self.next(indent);
                     } else {
                         key = &self.utf8[self.first + 1..self.end - 1];
@@ -339,7 +398,7 @@ where
                 }
                 b'[' => {
                     if len < 2 || bytes[self.end - 1] != b']' {
-                        (self.report)(ParseError::at(self.line, "malformed `[key]` in dict"));
+                        (self.report)(SyntaxError::at(self.line, "malformed `[key]` in dict"));
                         self.next(indent);
                     } else {
                         key = &self.utf8[self.first + 1..self.end - 1];
@@ -349,7 +408,7 @@ where
                 }
                 b'{' => {
                     if len < 2 || bytes[self.end - 1] != b'}' {
-                        (self.report)(ParseError::at(self.line, "malformed `{key}` in dict"));
+                        (self.report)(SyntaxError::at(self.line, "malformed `{key}` in dict"));
                         self.next(indent);
                     } else {
                         key = &self.utf8[self.first + 1..self.end - 1];
@@ -358,12 +417,12 @@ where
                     }
                 }
                 b'\t' => {
-                    (self.report)(ParseError::at(self.line, "excess indentation?"));
+                    (self.report)(SyntaxError::at(self.line, "excess indentation?"));
                     self.next(indent);
                 }
                 _ => {
                     if self.assign == usize::MAX {
-                        (self.report)(ParseError::at(self.line, "missing `=` in dict"));
+                        (self.report)(SyntaxError::at(self.line, "missing `=` in dict"));
                         self.next(indent);
                     } else {
                         key = &self.utf8[self.first..self.assign];
@@ -378,7 +437,7 @@ where
                 })?;
                 count += 1;
             } else if gap || before.is_some() {
-                (self.report)(ParseError::at(self.line, "gap/before but no item"));
+                (self.report)(SyntaxError::at(self.line, "gap/before but no item"));
             }
         }
         let mut dict = arena.dict(count)?;
@@ -393,10 +452,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn bail(error: ParseError) {
-        panic!("{error}");
-    }
 
     macro_rules! assert_lines_eq {
         // checking this gets repetitive without Vec
@@ -413,7 +468,7 @@ mod tests {
             $crate = crate;
             let mut arena = <10dict,10list>;
         }
-        let file = Input::parse(&mut arena, "", bail).unwrap();
+        let file = arena.parse_or_panic("").unwrap();
         assert!(!arena.completed().is_some());
         assert!(!file.has_content());
     }
@@ -424,7 +479,7 @@ mod tests {
             $crate = crate;
             let mut arena = <1dict>;
         }
-        let file = Input::parse(&mut arena, "k=v", bail).unwrap();
+        let file = arena.parse_or_panic("k=v").unwrap();
         assert!(arena.completed().is_some());
         assert!(file.hashbang.is_none());
         assert!(file.prolog.is_none());
@@ -441,7 +496,7 @@ mod tests {
             $crate = crate;
             let mut arena = <3list,1dict>;
         }
-        let file = Input::parse(&mut arena, "[k]\n\t1\n\t2\n\t3", bail).unwrap();
+        let file = arena.parse_or_panic("[k]\n\t1\n\t2\n\t3").unwrap();
         assert!(arena.completed().is_some());
         assert_eq!(file.cells.len(), 1);
         let entry = file.get("k").unwrap();
@@ -468,7 +523,7 @@ mod tests {
             $crate = crate;
             let mut arena = <2dict>;
         }
-        let file = Input::parse(&mut arena, "{z}\n\t<k>\n\t\tv", bail).unwrap();
+        let file = arena.parse_or_panic("{z}\n\t<k>\n\t\tv").unwrap();
         assert!(arena.completed().is_some());
         walk! { $crate = crate;
             let v = (&file){"z"}<"k">.unwrap();

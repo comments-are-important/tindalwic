@@ -2,8 +2,8 @@
 
 extern crate alloc;
 
-use super::internals::Builder;
-use crate::{Comment, Dict, Entry, File, Item, List, ParseError, Text, UTF8};
+use super::parse::Builder;
+use crate::{Comment, Dict, Entry, File, Item, List, Text, UTF8};
 use alloc::string::String;
 use alloc::vec::Vec;
 use bumpalo::Bump;
@@ -36,50 +36,72 @@ impl<T: Copy> CellVec<T> {
     }
 }
 
-/// a flavor of Arena that uses bumpalo to put things in the heap.
-/// TODO think about fleshing this out with more convenient methods.
-pub struct Arena<'a> {
+struct HeapBuilder<'a> {
     items: CellVec<Item<'a>>,
     entries: CellVec<Entry<'a>>,
     bump: &'a Bump,
 }
-impl<'a> Builder<'a> for Arena<'a> {
+impl<'a> Builder<'a> for HeapBuilder<'a> {
     fn list(&self, count: usize) -> Option<List<'a>> {
         Some(List::wrap(self.items.finish(count, self.bump)?))
     }
-
     fn dict(&self, count: usize) -> Option<Dict<'a>> {
         Some(Dict::wrap(self.entries.finish(count, self.bump)?))
     }
-
     fn item(&self, item: Item<'a>) -> Option<()> {
         self.items.push(item)
     }
-
     fn entry(&self, entry: Entry<'a>) -> Option<()> {
         self.entries.push(entry)
     }
 }
+
+/// a flavor of Arena that uses bumpalo to put things in the heap.
+/// TODO think about fleshing this out with more convenient methods.
+pub struct Arena<'a> {
+    builder: HeapBuilder<'a>,
+}
 impl<'a> Arena<'a> {
     /// the Bump needs an outside let binding so it lives long enough.
     pub fn new(bump: &'a Bump) -> Self {
-        Arena {
+        let builder = HeapBuilder {
             items: CellVec::new(),
             entries: CellVec::new(),
             bump,
-        }
+        };
+        Arena { builder }
+    }
+    /// after `count` calls to .item, call this to build a list of those.
+    pub fn list(&self, count: usize) -> Option<List<'a>> {
+        self.builder.list(count)
+    }
+    /// after `count` calls to .entry, call this to build a dict of those.
+    pub fn dict(&self, count: usize) -> Option<Dict<'a>> {
+        self.builder.dict(count)
+    }
+    /// push an item into builder memory for future .list call to use.
+    pub fn item(&self, item: Item<'a>) -> Option<()> {
+        self.builder.item(item)
+    }
+    /// push an entry into builder memory for future .dict call to use.
+    pub fn entry(&self, entry: Entry<'a>) -> Option<()> {
+        self.builder.entry(entry)
     }
     /// copy a str into the bump
     pub fn intern(&self, value: &'_ str) -> &'a str {
-        self.bump.alloc_str(value)
+        self.builder.bump.alloc_str(value)
     }
     /// call the parser on the provided content, panic if the content isn't legit.
     pub fn parse_or_panic(&self, content: &'a str) -> Option<File<'a>> {
         self.parse(content, |error| panic!("{error}"))
     }
     /// call the parser on the provided content, with a callback for errors.
-    pub fn parse<F: FnMut(ParseError)>(&self, content: &'a str, report: F) -> Option<File<'a>> {
-        crate::parse::Input::parse(self, content, report)
+    pub fn parse<F: FnMut(crate::parse::SyntaxError)>(
+        &self,
+        content: &'a str,
+        report: F,
+    ) -> Option<File<'a>> {
+        crate::parse::Input::parse(&self.builder, content, report)
     }
 }
 

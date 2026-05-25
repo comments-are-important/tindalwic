@@ -26,58 +26,12 @@ pub use tindalwic_macros::arena;
 pub mod internals; // macro generated code needs access.
 
 mod fmt;
-mod parse;
+pub mod parse;
 
 #[cfg(feature = "alloc")]
 pub mod alloc;
 #[cfg(feature = "serde")]
 pub mod serde;
-
-/// hopefully change to `pub use core::range::Range` when that becomes stable.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Range<Idx> {
-    /// The lower bound of the range (inclusive).
-    pub start: Idx,
-    /// The upper bound of the range (exclusive).
-    pub end: Idx,
-}
-impl<Idx> From<core::ops::Range<Idx>> for Range<Idx> {
-    fn from(r: core::ops::Range<Idx>) -> Self {
-        Range {
-            start: r.start,
-            end: r.end,
-        }
-    }
-}
-impl<Idx> From<Range<Idx>> for core::ops::Range<Idx> {
-    fn from(value: Range<Idx>) -> Self {
-        value.start..value.end
-    }
-}
-
-/// parsing problem
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct ParseError {
-    /// span of the problem
-    pub lines: Range<usize>,
-    /// English description of the problem
-    pub message: &'static str,
-}
-impl core::error::Error for ParseError {}
-impl ParseError {
-    /// make an Error with an arbitrary span of lines.
-    pub fn new(lines: impl Into<Range<usize>>, message: &'static str) -> Self {
-        ParseError {
-            lines: lines.into(),
-            message,
-        }
-    }
-    /// make an Error for a single line.
-    pub fn at(line: usize, message: &'static str) -> Self {
-        ParseError::new(line..line + 1, message)
-    }
-}
 
 /// Hidden parts of [Comment] and [Text].
 ///

@@ -44,6 +44,7 @@ down: must-run-outside
 .PHONY: down
 
 httpd: must-run-outside
+	cp webapp/favicon.ico target
 	cd target
 	python -m http.server >&http.server.log
 .PHONY: httpd

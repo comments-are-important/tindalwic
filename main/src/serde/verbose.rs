@@ -3,7 +3,6 @@ extern crate alloc;
 use super::{ArenaSeed, CommentDe, CommentSer, UTF8De, UTF8Ser, seeded};
 use super::{DictFields, EntryFields, FileFields, ItemVariants, ListFields, TextFields};
 use crate::alloc::Arena;
-use crate::internals::Builder;
 use crate::{Dict, Entry, File, Item, List, Name, Text};
 use alloc::string::String;
 use core::cell::Cell;

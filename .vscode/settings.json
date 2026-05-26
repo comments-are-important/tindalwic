@@ -40,5 +40,10 @@
         "venv"
     ],
     "editor.hover.delay": 3000,
-    "rust-analyzer.cargo.features": "all"
+    "rust-analyzer.cargo.features": "all",
+    "search.exclude": {
+        "Cargo.lock": true,
+        "python": true,
+        "target": true
+    }
 }

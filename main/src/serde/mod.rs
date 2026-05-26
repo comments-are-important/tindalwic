@@ -8,8 +8,7 @@ pub use compact::Compact;
 pub use neutered::Neutered;
 pub use verbose::Verbose;
 
-use crate::alloc::Arena;
-use crate::{Comment, File, UTF8};
+use crate::{Comment, UTF8};
 use serde::Deserialize;
 use serde::de::DeserializeSeed;
 
@@ -33,7 +32,7 @@ seeded! {
             }
         }
         fn visit_str() {
-            Ok(UTF8::wrap(arena.intern(v)))
+            Ok(UTF8::wrap(arena.str(v)))
         }
     }
 } // !seeded
@@ -52,7 +51,7 @@ seeded! {
             Ok(None)
         }
         fn visit_some() {
-            UTF8De(arena)
+            UTF8De::of(arena)
                 .deserialize(d)
                 .map(|utf8| Some(Comment { utf8 }))
         }
@@ -61,6 +60,7 @@ seeded! {
 
 #[derive(Deserialize)]
 #[serde(variant_identifier)]
+#[allow(dead_code)]
 enum ItemVariants {
     Text,
     List,
@@ -69,6 +69,7 @@ enum ItemVariants {
 
 #[derive(Deserialize)]
 #[serde(field_identifier, rename_all = "lowercase")]
+#[allow(dead_code)]
 enum TextFields {
     Value,
     Epilog,
@@ -76,6 +77,7 @@ enum TextFields {
 
 #[derive(Deserialize)]
 #[serde(field_identifier, rename_all = "lowercase")]
+#[allow(dead_code)]
 enum ListFields {
     Prolog,
     Array,
@@ -84,6 +86,7 @@ enum ListFields {
 
 #[derive(Deserialize)]
 #[serde(field_identifier, rename_all = "lowercase")]
+#[allow(dead_code)]
 enum EntryFields {
     Gap,
     Before,
@@ -93,6 +96,7 @@ enum EntryFields {
 
 #[derive(Deserialize)]
 #[serde(field_identifier, rename_all = "lowercase")]
+#[allow(dead_code)]
 enum DictFields {
     Prolog,
     Array,
@@ -101,14 +105,9 @@ enum DictFields {
 
 #[derive(Deserialize)]
 #[serde(field_identifier, rename_all = "lowercase")]
+#[allow(dead_code)]
 enum FileFields {
     Hashbang,
     Prolog,
     Array,
-}
-
-/// turn a mode into a DeserializeSeed that produces File
-pub trait ArenaSeed<'de, 'a: 'de> {
-    /// call thusly: `.seed(&arena).deserialize()`
-    fn seed(arena: &'de Arena<'a>) -> impl DeserializeSeed<'de, Value = File<'a>>;
 }

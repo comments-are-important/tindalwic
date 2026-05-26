@@ -2,8 +2,8 @@ use bumpalo::Bump;
 use serde::Serialize;
 use serde::de::DeserializeSeed;
 use tindalwic::File;
-use tindalwic::alloc::Arena;
-use tindalwic::serde::{ArenaSeed, Compact, Neutered, Verbose};
+use tindalwic::bumpalo::Arena;
+use tindalwic::serde::{Compact, Neutered, Verbose};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(start)]
@@ -85,15 +85,15 @@ pub fn into_tindalwic(
     let bump = Bump::new();
     let arena = Arena::new(&bump);
     match (&mode[..], &format[..]) {
-        ("Neutered", "JSON") => from_json(&input, Neutered::seed(&arena)),
-        ("Neutered", "TOML") => from_toml(&input, Neutered::seed(&arena)),
-        ("Neutered", "YAML") => from_yaml(&input, Neutered::seed(&arena)),
-        ("Compact", "JSON") => from_json(&input, Compact::seed(&arena)),
-        ("Compact", "TOML") => from_toml(&input, Compact::seed(&arena)),
-        ("Compact", "YAML") => from_yaml(&input, Compact::seed(&arena)),
-        ("Verbose", "JSON") => from_json(&input, Verbose::seed(&arena)),
-        ("Verbose", "TOML") => from_toml(&input, Verbose::seed(&arena)),
-        ("Verbose", "YAML") => from_yaml(&input, Verbose::seed(&arena)),
+        ("Neutered", "JSON") => from_json(&input, arena.neutered()),
+        ("Neutered", "TOML") => from_toml(&input, arena.neutered()),
+        ("Neutered", "YAML") => from_yaml(&input, arena.neutered()),
+        ("Compact", "JSON") => from_json(&input, arena.compact()),
+        ("Compact", "TOML") => from_toml(&input, arena.compact()),
+        ("Compact", "YAML") => from_yaml(&input, arena.compact()),
+        ("Verbose", "JSON") => from_json(&input, arena.verbose()),
+        ("Verbose", "TOML") => from_toml(&input, arena.verbose()),
+        ("Verbose", "YAML") => from_yaml(&input, arena.verbose()),
         _ => Err("bad parameters".to_string()),
     }
     .map(|f| f.to_string())

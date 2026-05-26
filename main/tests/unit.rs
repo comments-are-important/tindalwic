@@ -11,12 +11,11 @@ use tindalwic::{Comment, Dict, Entry, File, Item, Name, Text, arena, json, walk}
 mod alloc_tests {
     use tindalwic::{Comment, File, arena};
 
-    #[cfg(feature = "serde")]
+    #[cfg(all(feature = "bumpalo", feature = "serde"))]
     mod serde_tests {
         use bumpalo::Bump;
         use serde::de::DeserializeSeed;
-        use tindalwic::alloc::Arena;
-        use tindalwic::serde::{ArenaSeed, Neutered};
+        use tindalwic::bumpalo::Arena;
         use tindalwic::{File, json};
         #[test]
         fn deserialize_file_from_json() {
@@ -24,7 +23,7 @@ mod alloc_tests {
             let arena = Arena::new(&bump);
 
             let mut de = serde_json::Deserializer::from_str(r#"{ "key":"one\ntwo" }"#);
-            let file: File = Neutered::seed(&arena).deserialize(&mut de).unwrap();
+            let file: File = arena.neutered().deserialize(&mut de).unwrap();
 
             json! {
                 let expected = {"key":"one\ntwo"}.unwrap();

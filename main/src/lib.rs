@@ -30,6 +30,8 @@ pub mod parse;
 
 #[cfg(feature = "alloc")]
 pub mod alloc;
+#[cfg(feature = "bumpalo")]
+pub mod bumpalo;
 #[cfg(feature = "serde")]
 pub mod serde;
 

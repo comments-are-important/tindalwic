@@ -11,7 +11,8 @@ license = { workspace = true }
 all-features = true
 
 [features]
-alloc = ["dep:bumpalo"]
+alloc = []
+bumpalo = ["alloc", "dep:bumpalo"]
 serde = ["alloc", "dep:serde"]
 
 [[bench]]

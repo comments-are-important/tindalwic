@@ -50,12 +50,16 @@ pub struct SyntaxError {
     pub message: &'static str,
 }
 
-/// TODO return Results, not Options, here and in Arenas.
+/// used by parser to create items
 pub(crate) trait Builder<'a> {
-    fn list(&self, count: usize) -> Result<List<'a>, ParseError>;
-    fn dict(&self, count: usize) -> Result<Dict<'a>, ParseError>;
+    /// push an item into builder memory for future .list call
     fn item(&self, item: Item<'a>) -> Result<(), ParseError>;
+    /// create a list from the `count` most recently pushed items
+    fn list(&self, count: usize) -> Result<List<'a>, ParseError>;
+    /// push an entry into builder memory for future .dict call
     fn entry(&self, entry: Entry<'a>) -> Result<(), ParseError>;
+    /// create a dict from the `count` most recently pushed entries
+    fn dict(&self, count: usize) -> Result<Dict<'a>, ParseError>;
 }
 
 /// the "report" callback provided to the parser should return one of these
@@ -291,7 +295,7 @@ where
                 break;
             } else if self.first >= self.end {
                 // indentation-only is the shortcut for empty text
-                // TODO too easily confused with gaps (require explicit `<>`)?
+                // TODO maybe too easily confused with gaps (require explicit `<>`)?
                 item = Some(self.text(indent, self.end)?.into());
             } else {
                 let len = self.end - self.first;

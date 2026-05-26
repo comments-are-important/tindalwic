@@ -16,7 +16,7 @@ console_error_panic_hook = { workspace = true }
 js-sys = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["alloc"] }
-tindalwic = { path = "../main", features = ["serde"] }
+tindalwic = { path = "../main", features = ["serde", "bumpalo"] }
 toml_edit = { workspace = true, features = ["serde"] }
 wasm-bindgen = { workspace = true }
 web-sys = { workspace = true, features = ["console"] }

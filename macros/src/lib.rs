@@ -211,7 +211,7 @@ impl Parse for SerDe {
                     visitors.extend(quote! {
                         fn #ident #signature {
                             #[allow(unused)]
-                            let #de(arena) = self;
+                            let #de(arena, _) = self;
                             #(#body)*
                         }
                     });
@@ -360,6 +360,7 @@ impl ToTokens for SerDe {
             deserialize,
             visitors,
         } = self;
+        let tindalwic = tindalwic();
         tokens.extend(quote! {
             struct #ser <'a>(#value);
             impl <'a> ::serde::ser::Serialize for #ser <'a> {
@@ -368,14 +369,17 @@ impl ToTokens for SerDe {
                     #serialize
                 }
             }
-            struct #de<'de, 'a:'de>(&'de Arena<'a>);
-            impl<'de,'a:'de> ::serde::de::DeserializeSeed<'de> for #de<'de,'a> {
+            struct #de<'de, 'a:'de, IB: #tindalwic::alloc::Intern<'a> + #tindalwic::parse::Builder<'a>>(&'de IB, ::core::marker::PhantomData<&'a()>);
+            impl<'de,'a:'de, IB: #tindalwic::alloc::Intern<'a> + #tindalwic::parse::Builder<'a>> #de<'de,'a, IB> {
+                fn of(arena:&'de IB) -> Self { #de(arena, ::core::marker::PhantomData) }
+            }
+            impl<'de,'a:'de, IB: #tindalwic::alloc::Intern<'a> + #tindalwic::parse::Builder<'a>> ::serde::de::DeserializeSeed<'de> for #de<'de,'a, IB> {
                 type Value = #value ;
                 fn deserialize<D: ::serde::de::Deserializer<'de>>(self,d:D)->Result<Self::Value,D::Error>{
                     d.#deserialize
                 }
             }
-            impl<'de, 'a:'de> ::serde::de::Visitor<'de> for #de<'de, 'a> {
+            impl<'de, 'a:'de, IB: #tindalwic::alloc::Intern<'a> + #tindalwic::parse::Builder<'a>> ::serde::de::Visitor<'de> for #de<'de, 'a, IB> {
                 type Value = #value ;
                 fn expecting(&self, out: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
                     out.write_str(#expecting)

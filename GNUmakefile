@@ -59,7 +59,9 @@ main/test: must-run-inside
 	set -e
 	echo ====== default && cargo test
 	echo ====== alloc && cargo test --features alloc
+	echo ====== bumpalo && cargo test --features bumpalo
 	echo ====== serde && cargo test --features serde
+	echo ====== all && cargo test --all-features
 .PHONY: main/test
 
 main/rand: must-run-inside

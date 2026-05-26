@@ -1,11 +1,10 @@
 extern crate alloc;
 
-use super::{ArenaSeed, UTF8De, UTF8Ser, seeded};
-use crate::alloc::Arena;
+use super::{UTF8De, UTF8Ser, seeded};
 use crate::{Dict, Entry, File, Item, List, Text};
 use alloc::format;
 use alloc::string::{String, ToString};
-use serde::de::{DeserializeSeed, Error};
+use serde::de::Error;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
 seeded! {
@@ -24,47 +23,47 @@ seeded! {
             Ok(Item::Text(Text::wrap(value)))
         }
         fn visit_i8() {
-            Ok(Item::Text(Text::wrap(arena.intern(&format!("{:?}", v)))))
+            Ok(Item::Text(Text::wrap(arena.str(&format!("{:?}", v)))))
         }
         fn visit_i16() {
-            Ok(Item::Text(Text::wrap(arena.intern(&format!("{:?}", v)))))
+            Ok(Item::Text(Text::wrap(arena.str(&format!("{:?}", v)))))
         }
         fn visit_i32() {
-            Ok(Item::Text(Text::wrap(arena.intern(&format!("{:?}", v)))))
+            Ok(Item::Text(Text::wrap(arena.str(&format!("{:?}", v)))))
         }
         fn visit_i64() {
-            Ok(Item::Text(Text::wrap(arena.intern(&format!("{:?}", v)))))
+            Ok(Item::Text(Text::wrap(arena.str(&format!("{:?}", v)))))
         }
         fn visit_i128() {
-            Ok(Item::Text(Text::wrap(arena.intern(&format!("{:?}", v)))))
+            Ok(Item::Text(Text::wrap(arena.str(&format!("{:?}", v)))))
         }
         fn visit_u8() {
-            Ok(Item::Text(Text::wrap(arena.intern(&format!("{:?}", v)))))
+            Ok(Item::Text(Text::wrap(arena.str(&format!("{:?}", v)))))
         }
         fn visit_u16() {
-            Ok(Item::Text(Text::wrap(arena.intern(&format!("{:?}", v)))))
+            Ok(Item::Text(Text::wrap(arena.str(&format!("{:?}", v)))))
         }
         fn visit_u32() {
-            Ok(Item::Text(Text::wrap(arena.intern(&format!("{:?}", v)))))
+            Ok(Item::Text(Text::wrap(arena.str(&format!("{:?}", v)))))
         }
         fn visit_u64() {
-            Ok(Item::Text(Text::wrap(arena.intern(&format!("{:?}", v)))))
+            Ok(Item::Text(Text::wrap(arena.str(&format!("{:?}", v)))))
         }
         fn visit_u128() {
-            Ok(Item::Text(Text::wrap(arena.intern(&format!("{:?}", v)))))
+            Ok(Item::Text(Text::wrap(arena.str(&format!("{:?}", v)))))
         }
         fn visit_f32() {
-            Ok(Item::Text(Text::wrap(arena.intern(&format!("{:?}", v)))))
+            Ok(Item::Text(Text::wrap(arena.str(&format!("{:?}", v)))))
         }
         fn visit_f64() {
-            Ok(Item::Text(Text::wrap(arena.intern(&format!("{:?}", v)))))
+            Ok(Item::Text(Text::wrap(arena.str(&format!("{:?}", v)))))
         }
         fn visit_char() {
-            Ok(Item::Text(Text::wrap(arena.intern(&v.to_string()))))
+            Ok(Item::Text(Text::wrap(arena.str(&v.to_string()))))
         }
         fn visit_str() {
             // defaults for `_borrowed_str` and `_string` arrive here
-            let utf8 = UTF8De(arena).visit_str(v)?;
+            let utf8 = UTF8De::of(arena).visit_str(v)?;
             Ok(Item::Text(Text { utf8, epilog: None }))
         }
         fn visit_bytes() {
@@ -72,10 +71,10 @@ seeded! {
             if v.is_ascii() {
                 // SAFETY: Verified it is ASCII.
                 let value = unsafe { str::from_utf8_unchecked(v) };
-                Ok(Item::Text(Text::wrap(arena.intern(value))))
+                Ok(Item::Text(Text::wrap(arena.str(value))))
             } else {
                 let value: String = v.iter().map(|&b| char::from(b)).collect();
-                Ok(Item::Text(Text::wrap(arena.intern(&value))))
+                Ok(Item::Text(Text::wrap(arena.str(&value))))
             }
         }
         fn visit_unit() {
@@ -83,11 +82,11 @@ seeded! {
             Ok(Item::Text(Text::wrap("")))
         }
         fn visit_seq() {
-            let list = ListDe(arena).visit_seq(seq)?;
+            let list = ListDe::of(arena).visit_seq(seq)?;
             Ok(Item::List(list))
         }
         fn visit_map() {
-            let dict = DictDe(arena).visit_map(map)?;
+            let dict = DictDe::of(arena).visit_map(map)?;
             Ok(Item::Dict(dict))
         }
         // defaults for non-simple `_none`, `_some`, `_enum`, `_newtype_struct`
@@ -109,7 +108,7 @@ seeded! {
         }
         fn visit_seq() {
             let mut count = 0usize;
-            while let Some(item) = seq.next_element_seed(ItemDe(arena))? {
+            while let Some(item) = seq.next_element_seed(ItemDe::of(arena))? {
                 arena
                     .item(item)
                     .map_err(|err| Error::custom(err.to_string()))?;
@@ -136,7 +135,9 @@ seeded! {
         }
         fn visit_map() {
             let mut count = 0usize;
-            while let Some((key, item)) = map.next_entry_seed(UTF8De(arena), ItemDe(arena))? {
+            while let Some((key, item)) =
+                map.next_entry_seed(UTF8De::of(arena), ItemDe::of(arena))?
+            {
                 assert!(key.dedent == 0 || key.dedent == usize::MAX);
                 arena
                     .entry(Entry::wrap(key.slice, item))
@@ -158,7 +159,7 @@ seeded! {
             DictSer(Dict::wrap(this.cells)).serialize(s)
         }
         fn visit_map() {
-            let dict = DictDe(arena).visit_map(map)?;
+            let dict = DictDe::of(arena).visit_map(map)?;
             Ok(File::wrap(dict.cells))
         }
     }
@@ -172,8 +173,10 @@ impl<'a> Serialize for Neutered<'a> {
         DictSer(Dict::wrap(file.cells)).serialize(s)
     }
 }
-impl<'de, 'a: 'de> ArenaSeed<'de, 'a> for Neutered<'a> {
-    fn seed(arena: &'de Arena<'a>) -> impl DeserializeSeed<'de, Value = File<'a>> {
-        FileDe(arena)
+#[cfg(feature = "bumpalo")]
+impl<'a> crate::bumpalo::Arena<'a> {
+    /// call thusly: `arena.neutered().deserialize(...)`
+    pub fn neutered<'de>(&'de self) -> impl serde::de::DeserializeSeed<'de, Value = File<'a>> {
+        FileDe::of(&self.builder)
     }
 }

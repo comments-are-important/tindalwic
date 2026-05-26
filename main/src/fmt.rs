@@ -1,8 +1,9 @@
 //! code for encoding data into the Tindalwic format.
 
-use super::parse::{MemoryError, ParseError, SyntaxError};
-use super::*;
+use crate::parse::{MemoryError, ParseError, SyntaxError};
+use crate::tree::*;
 
+use core::cell::Cell;
 use core::fmt::{Display, Formatter, Result, Write};
 
 impl Display for ParseError {
@@ -40,8 +41,8 @@ impl<'o, 'f> Output<'o, 'f> {
         Ok(())
     }
     fn encoded<'a>(&mut self, encoded: &UTF8<'a>) -> Result {
-        if self.indent == encoded.dedent || encoded.one_liner() {
-            self.out.write_str(encoded.slice)?;
+        if let Some(slice) = encoded.shortcut(self.indent) {
+            self.out.write_str(slice)?;
             self.out.write_char('\n')?;
         } else {
             let mut lines = encoded.lines();
@@ -50,23 +51,23 @@ impl<'o, 'f> Output<'o, 'f> {
                 self.out.write_char('\n')?;
                 for line in lines {
                     self.indent()?;
-                    self.out.write_str(&line[encoded.dedent..])?;
+                    self.out.write_str(line)?;
                     self.out.write_char('\n')?;
                 }
-            };
+            } else {
+                self.out.write_char('\n')?;
+            }
         }
         Ok(())
     }
     fn some_comment<'a>(&mut self, marker: &'a str, comment: &Comment<'a>) -> Result {
         self.indent()?;
         self.out.write_str(marker)?;
-        if comment.utf8.slice.is_empty() {
+        if comment.utf8.is_empty() {
             self.out.write_char('\n')?;
         } else {
             self.indent += 1;
-            if marker == "#"
-                && (comment.utf8.slice.starts_with('!') || comment.utf8.slice.starts_with('\n'))
-            {
+            if marker == "#" && comment.is_funny() {
                 self.out.write_char('\n')?;
                 self.indent()?;
             }
@@ -83,8 +84,8 @@ impl<'o, 'f> Output<'o, 'f> {
     }
     fn text_in_list<'a>(&mut self, text: &Text<'a>) -> Result {
         self.indent()?;
-        if text.one_liner_in_list() {
-            self.out.write_str(text.utf8.slice)?;
+        if let Some(slice) = text.one_liner_in_list() {
+            self.out.write_str(slice)?;
             self.out.write_char('\n')?;
         } else {
             self.out.write_str("<>\n")?;
@@ -97,10 +98,10 @@ impl<'o, 'f> Output<'o, 'f> {
     }
     fn text_in_dict<'a>(&mut self, key: &'a str, text: &Text<'a>) -> Result {
         self.indent()?;
-        if text.one_liner_in_dict(key) {
+        if let Some(slice) = text.one_liner_in_dict(key) {
             self.out.write_str(key)?;
             self.out.write_char('=')?;
-            self.out.write_str(text.utf8.slice)?;
+            self.out.write_str(slice)?;
             self.out.write_char('\n')?;
         } else {
             self.out.write_char('<')?;
@@ -199,7 +200,7 @@ impl<'o, 'f> Output<'o, 'f> {
 /// ```
 /// fn check(gfm: &str) {
 ///     let expected = format!("#{}\n", gfm.replace("\n", "\n\t"));
-///     assert_eq!(tindalwic::Comment::wrap(gfm).to_string(), expected);
+///     assert_eq!(tindalwic::tree::Comment::wrap(gfm).to_string(), expected);
 /// }
 /// check("one-liner");
 /// check("two\nlines");

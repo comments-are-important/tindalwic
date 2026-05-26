@@ -1,7 +1,7 @@
 extern crate alloc;
 
 use super::{UTF8De, UTF8Ser, seeded};
-use crate::{Dict, Entry, File, Item, List, Text};
+use crate::tree::{Dict, Entry, File, Item, List, Text};
 use alloc::format;
 use alloc::string::{String, ToString};
 use serde::de::Error;
@@ -138,10 +138,15 @@ seeded! {
             while let Some((key, item)) =
                 map.next_entry_seed(UTF8De::of(arena), ItemDe::of(arena))?
             {
-                assert!(key.dedent == 0 || key.dedent == usize::MAX);
-                arena
-                    .entry(Entry::wrap(key.slice, item))
-                    .map_err(|err| Error::custom(err.to_string()))?;
+                if let Some(slice) = key.shortcut(0) {
+                    arena
+                        .entry(Entry::wrap(slice, item))
+                        .map_err(|err| Error::custom(err.to_string()))?;
+                } else {
+                    arena
+                        .entry(Entry::wrap(arena.str(&key.joined()), item))
+                        .map_err(|err| Error::custom(err.to_string()))?;
+                }
                 count += 1;
             }
             arena

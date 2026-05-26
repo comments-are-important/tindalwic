@@ -2,7 +2,7 @@ extern crate alloc;
 
 use super::{CommentDe, CommentSer, UTF8De, UTF8Ser, seeded};
 use super::{DictFields, EntryFields, FileFields, ItemVariants, ListFields, TextFields};
-use crate::{Dict, Entry, File, Item, List, Name, Text};
+use crate::tree::{Dict, Entry, File, Item, List, Name, Text};
 use alloc::string::{String, ToString};
 use core::cell::Cell;
 use serde::de::{Error, VariantAccess};

@@ -18,7 +18,7 @@ use std::fmt::{self, Write};
 use tindalwic::bumpalo::Arena;
 use tindalwic::parse::ParseError;
 use tindalwic::serde::Verbose;
-use tindalwic::{Comment, Dict, Entry, File, Item, List, Name, Text};
+use tindalwic::tree::{Comment, Dict, Entry, File, Item, List, Name, Text};
 
 /// a very blurry outline of some data. created first to be able to call the
 /// Arena/Builder API in the order it requires.

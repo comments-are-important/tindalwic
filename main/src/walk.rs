@@ -3,7 +3,7 @@
 //! but using these directly is not recommended.
 //! using walk! is much easier.
 
-use super::{Dict, Entry, Item, Key, List, Text};
+use crate::tree::{Dict, Entry, Item, Key, List, Text};
 use core::cell::Cell;
 
 /// a decision along a walk.

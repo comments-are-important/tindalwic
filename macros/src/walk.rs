@@ -51,7 +51,7 @@ impl Parse for Walk {
         } else if let Some(stream) = Group::optional_parenthesized(input)? {
             let stream = stream.not_empty("missing file inside ()")?;
             let tindalwic = tindalwic();
-            quote!(#tindalwic::Dict::wrap((#stream).cells))
+            quote!(#tindalwic::tree::Dict::wrap((#stream).cells))
         } else {
             return Err(input.error("must start with [List], {Dict} or (File)"));
         };

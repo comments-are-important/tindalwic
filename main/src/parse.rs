@@ -2,7 +2,7 @@
 
 use core::usize;
 
-use super::*;
+use crate::tree::*;
 
 /// parsing problems
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -222,10 +222,7 @@ where
         } else {
             while self.stretch_once(indent) {}
         }
-        return UTF8 {
-            slice: &self.utf8[from..self.end],
-            dedent: indent,
-        };
+        UTF8::of(&self.utf8[from..self.end], indent)
     }
     fn stretch_once(&mut self, mut indent: usize) -> bool {
         let bytes = self.utf8.as_bytes();
@@ -499,6 +496,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{arena, walk};
 
     macro_rules! assert_lines_eq {
         // checking this gets repetitive without Vec

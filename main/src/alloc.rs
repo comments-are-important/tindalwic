@@ -2,16 +2,16 @@
 
 extern crate alloc;
 
-use crate::{Comment, Text, UTF8};
+use crate::tree::{Comment, Text, UTF8};
 use alloc::string::String;
 
 impl<'a> UTF8<'a> {
     /// Allocates a [String], filled with the UTF-8 copied from `self`.
     pub(crate) fn joined(&self) -> String {
-        if self.dedent == 0 || self.dedent == usize::MAX {
-            String::from(self.slice)
+        if let Some(slice) = self.shortcut(0) {
+            String::from(slice)
         } else {
-            let mut result = String::with_capacity(self.slice.len());
+            let mut result = String::new(); //with_capacity(self.len());
             for line in self.lines() {
                 result.push_str(line);
                 result.push('\n');

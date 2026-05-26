@@ -8,7 +8,7 @@ pub use compact::Compact;
 pub use neutered::Neutered;
 pub use verbose::Verbose;
 
-use crate::{Comment, UTF8};
+use crate::tree::{Comment, UTF8};
 use serde::Deserialize;
 use serde::de::DeserializeSeed;
 
@@ -25,8 +25,8 @@ seeded! {
     #[deserialize_str]
     impl UTF8 {
         fn serialize() {
-            if this.dedent == 0 || this.dedent == usize::MAX {
-                s.serialize_str(this.slice)
+            if let Some(slice) = this.shortcut(0) {
+                s.serialize_str(slice)
             } else {
                 s.serialize_str(&this.joined())
             }

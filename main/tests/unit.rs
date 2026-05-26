@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 
-use tindalwic::{Comment, Dict, Entry, File, Item, Name, Text, arena, json, walk};
+use tindalwic::tree::{Comment, Dict, Entry, File, Item, Name, Text};
+use tindalwic::{arena, json, walk};
 
 // #[test]
 // fn macro_failures() {
@@ -9,15 +10,15 @@ use tindalwic::{Comment, Dict, Entry, File, Item, Name, Text, arena, json, walk}
 
 #[cfg(feature = "alloc")]
 mod alloc_tests {
-    use tindalwic::{Comment, File, arena};
+    use super::*;
 
     #[cfg(all(feature = "bumpalo", feature = "serde"))]
     mod serde_tests {
+        use super::*;
         use bumpalo::Bump;
         use serde::de::DeserializeSeed;
         use tindalwic::bumpalo::Arena;
         use tindalwic::serde::Neutered;
-        use tindalwic::{File, json};
         #[test]
         fn deserialize_file_from_json() {
             let bump = Bump::new();

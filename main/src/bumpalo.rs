@@ -4,7 +4,7 @@ extern crate alloc;
 
 use crate::alloc::Intern;
 use crate::parse::{Builder, Input, ParseError, Reported};
-use crate::{Dict, Entry, File, Item, List};
+use crate::tree::{Dict, Entry, File, Item, List};
 use alloc::vec::Vec;
 use bumpalo::Bump;
 use core::cell::Cell;

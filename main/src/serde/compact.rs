@@ -388,9 +388,14 @@ impl<'a> Serialize for Compact<'a> {
     }
 }
 #[cfg(feature = "bumpalo")]
-impl<'a> crate::bumpalo::Arena<'a> {
-    /// call thusly: `arena.compact().deserialize(...)`
-    pub fn compact<'de>(&'de self) -> impl serde::de::DeserializeSeed<'de, Value = File<'a>> {
-        FileDe::of(&self.builder)
+impl<'a> Compact<'a> {
+    /// call thusly: `Compact::bumpalo_seed(&arena).deserialize(...)`
+    pub fn bumpalo_seed<'de>(
+        arena: &'de crate::bumpalo::Arena<'a>,
+    ) -> impl serde::de::DeserializeSeed<'de, Value = File<'a>>
+    where
+        'a: 'de,
+    {
+        FileDe::of(&arena.builder)
     }
 }

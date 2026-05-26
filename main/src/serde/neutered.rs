@@ -174,9 +174,14 @@ impl<'a> Serialize for Neutered<'a> {
     }
 }
 #[cfg(feature = "bumpalo")]
-impl<'a> crate::bumpalo::Arena<'a> {
-    /// call thusly: `arena.neutered().deserialize(...)`
-    pub fn neutered<'de>(&'de self) -> impl serde::de::DeserializeSeed<'de, Value = File<'a>> {
-        FileDe::of(&self.builder)
+impl<'a> Neutered<'a> {
+    /// call thusly: `Neutered::bumpalo_seed(&arena).deserialize(...)`
+    pub fn bumpalo_seed<'de>(
+        arena: &'de crate::bumpalo::Arena<'a>,
+    ) -> impl serde::de::DeserializeSeed<'de, Value = File<'a>>
+    where
+        'a: 'de,
+    {
+        FileDe::of(&arena.builder)
     }
 }

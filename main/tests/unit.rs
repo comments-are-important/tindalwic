@@ -16,6 +16,7 @@ mod alloc_tests {
         use bumpalo::Bump;
         use serde::de::DeserializeSeed;
         use tindalwic::bumpalo::Arena;
+        use tindalwic::serde::Neutered;
         use tindalwic::{File, json};
         #[test]
         fn deserialize_file_from_json() {
@@ -23,7 +24,7 @@ mod alloc_tests {
             let arena = Arena::new(&bump);
 
             let mut de = serde_json::Deserializer::from_str(r#"{ "key":"one\ntwo" }"#);
-            let file: File = arena.neutered().deserialize(&mut de).unwrap();
+            let file: File = Neutered::bumpalo_seed(&arena).deserialize(&mut de).unwrap();
 
             json! {
                 let expected = {"key":"one\ntwo"}.unwrap();

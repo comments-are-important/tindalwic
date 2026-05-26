@@ -1,3 +1,5 @@
+//! code for encoding data into the Tindalwic format.
+
 use super::parse::{MemoryError, ParseError, SyntaxError};
 use super::*;
 

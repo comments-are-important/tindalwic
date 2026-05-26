@@ -108,11 +108,11 @@ main/api: nightly
 	mkdir -p target
 	cd main
 	cargo public-api -sss --all-features --target-dir ../target/public-api \
-	  | grep -v '^impl' \
-	  | sed -E -e 's=^#.non_exhaustive. ==' \
+	  | sed -E -e 's=^impl (.*)=|\1|impl|=' \
+	  | sed -E -e 's=^(impl<[^>]+)> (.*)=|\2|\1|=' \
 	  | sed -E -e 's=^pub (enum|fn|const fn|mod|struct|use|type) (&?)(.*)=|\3|\2\1|=' \
 	  | sed -E -e 's=^pub (.*)=|\1|property|=' \
-	  | LC_ALL=C sort >../target/public-api/tindalwic.org
+	  | LC_ALL=C sort -u >../target/public-api/tindalwic.org
 .PHONY: main/api
 
 main/llvm-lines: must-run-inside

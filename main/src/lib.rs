@@ -23,10 +23,10 @@ pub use tindalwic_macros::json;
 #[doc(inline)]
 pub use tindalwic_macros::arena;
 
-pub mod internals; // macro generated code needs access.
-
-mod fmt;
+pub mod capped;
+pub mod fmt;
 pub mod parse;
+pub mod walk;
 
 #[cfg(feature = "alloc")]
 pub mod alloc;
@@ -34,6 +34,28 @@ pub mod alloc;
 pub mod bumpalo;
 #[cfg(feature = "serde")]
 pub mod serde;
+
+/// an iter type to enable for-loops for List, Dict, and File.
+#[derive(Clone, Debug)]
+pub struct ArrayOfCellIter<'a, T: Copy> {
+    pub(crate) inner: core::slice::Iter<'a, Cell<T>>,
+}
+impl<'a, T: Copy> Iterator for ArrayOfCellIter<'a, T> {
+    type Item = T;
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(Cell::get)
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+impl<'a, T: Copy> ExactSizeIterator for ArrayOfCellIter<'a, T> {}
+impl<'a, T: Copy> DoubleEndedIterator for ArrayOfCellIter<'a, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.inner.next_back().map(Cell::get)
+    }
+}
+impl<'a, T: Copy> core::iter::FusedIterator for ArrayOfCellIter<'a, T> {}
 
 /// Hidden parts of [Comment] and [Text].
 ///
@@ -259,18 +281,18 @@ impl<'a> List<'a> {
 }
 impl<'a> IntoIterator for List<'a> {
     type Item = Item<'a>;
-    type IntoIter = internals::CellIter<'a, Self::Item>;
+    type IntoIter = ArrayOfCellIter<'a, Self::Item>;
     fn into_iter(self) -> Self::IntoIter {
-        internals::CellIter {
+        ArrayOfCellIter {
             inner: self.cells.iter(),
         }
     }
 }
 impl<'a> IntoIterator for &List<'a> {
     type Item = Item<'a>;
-    type IntoIter = internals::CellIter<'a, Self::Item>;
+    type IntoIter = ArrayOfCellIter<'a, Self::Item>;
     fn into_iter(self) -> Self::IntoIter {
-        internals::CellIter {
+        ArrayOfCellIter {
             inner: self.cells.iter(),
         }
     }
@@ -390,18 +412,18 @@ impl<'a> Dict<'a> {
 }
 impl<'a> IntoIterator for Dict<'a> {
     type Item = Entry<'a>;
-    type IntoIter = internals::CellIter<'a, Self::Item>;
+    type IntoIter = ArrayOfCellIter<'a, Self::Item>;
     fn into_iter(self) -> Self::IntoIter {
-        internals::CellIter {
+        ArrayOfCellIter {
             inner: self.cells.iter(),
         }
     }
 }
 impl<'a> IntoIterator for &Dict<'a> {
     type Item = Entry<'a>;
-    type IntoIter = internals::CellIter<'a, Self::Item>;
+    type IntoIter = ArrayOfCellIter<'a, Self::Item>;
     fn into_iter(self) -> Self::IntoIter {
-        internals::CellIter {
+        ArrayOfCellIter {
             inner: self.cells.iter(),
         }
     }
@@ -504,18 +526,18 @@ impl<'a> File<'a> {
 }
 impl<'a> IntoIterator for File<'a> {
     type Item = Entry<'a>;
-    type IntoIter = internals::CellIter<'a, Self::Item>;
+    type IntoIter = ArrayOfCellIter<'a, Self::Item>;
     fn into_iter(self) -> Self::IntoIter {
-        internals::CellIter {
+        ArrayOfCellIter {
             inner: self.cells.iter(),
         }
     }
 }
 impl<'a> IntoIterator for &File<'a> {
     type Item = Entry<'a>;
-    type IntoIter = internals::CellIter<'a, Self::Item>;
+    type IntoIter = ArrayOfCellIter<'a, Self::Item>;
     fn into_iter(self) -> Self::IntoIter {
-        internals::CellIter {
+        ArrayOfCellIter {
             inner: self.cells.iter(),
         }
     }

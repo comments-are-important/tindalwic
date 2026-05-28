@@ -18,7 +18,7 @@ use std::fmt::{self, Write};
 use tindalwic::bumpalo::Arena;
 use tindalwic::parse::ParseError;
 use tindalwic::serde::Verbose;
-use tindalwic::tree::{Comment, Dict, Entry, File, Item, List, Name, Text};
+use tindalwic::{Comment, Dict, Entry, File, Item, List, Value};
 
 /// a very blurry outline of some data. created first to be able to call the
 /// Arena/Builder API in the order it requires.
@@ -95,8 +95,8 @@ pub struct Random<'a, 'r, R: Rng + ?Sized> {
     sample: Vec<char>,
 }
 impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
-    fn utf8(&mut self, newline: bool) -> &'a str {
-        let mut utf8 = String::new();
+    fn value(&mut self, newline: bool) -> &'a str {
+        let mut value = String::new();
         let lines = if !newline {
             1
         } else {
@@ -104,7 +104,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
         };
         for line in 0..lines {
             if line != 0 {
-                utf8.push('\n');
+                value.push('\n');
             }
             let mut len: usize = self.rng.random_range(..5);
             while len > 0 {
@@ -114,16 +114,17 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
                     *self.sample.choose(&mut self.rng).unwrap()
                 };
                 if c != '\n' {
-                    utf8.push(c);
+                    value.push(c);
                     len -= 1;
                 }
             }
         }
-        self.bump.alloc_str(&utf8)
+        self.bump.alloc_str(&value)
     }
     fn comment(&mut self) -> Option<Comment<'a>> {
         if self.rng.random_bool(0.5) {
-            Comment::some(self.utf8(true))
+            let value = Value::wrap(self.value(true));
+            Some(Comment { value })
         } else {
             None
         }
@@ -136,7 +137,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
                 Item::List(self.list(parent)?)
             }
         } else {
-            Item::Text(Text::wrap(self.utf8(true)))
+            Item::text(self.value(true))
         })
     }
     fn list(&mut self, shape: &Silhouette) -> Result<List<'a>, ParseError> {
@@ -154,9 +155,11 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
             let item = self.item(kid)?;
             let gap = self.rng.random_bool(0.2);
             let before = self.comment();
-            let key = self.utf8(false);
+            let key = Value::wrap(self.value(false));
             self.arena.entry(Entry {
-                name: Name { gap, before, key },
+                gap,
+                before,
+                key,
                 item,
             })?;
         }

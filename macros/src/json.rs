@@ -42,7 +42,7 @@ impl Parse for JSON {
     }
 }
 
-pub(crate) struct JSONs {
+pub(super) struct JSONs {
     arena: Arena,
     statements: Vec<JSON>,
     completed: Option<Propagate>,

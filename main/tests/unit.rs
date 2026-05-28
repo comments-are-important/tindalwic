@@ -1,12 +1,17 @@
 #![allow(missing_docs)]
 
-use tindalwic::tree::{Comment, Dict, Entry, File, Item, Name, Text};
-use tindalwic::{arena, json, walk};
+use tindalwic::{Comment, Dict, Entry, File, Item};
+use tindalwic::{Value, arena, json, walk};
 
 // #[test]
 // fn macro_failures() {
 //     trybuild::TestCases::new().compile_fail("tests/macro_err/*.rs");
 // }
+
+fn some_comment<'a>(value: &'a str) -> Option<Comment<'a>> {
+    let value = Value::wrap(value);
+    Some(Comment { value })
+}
 
 #[cfg(feature = "alloc")]
 mod alloc_tests {
@@ -30,15 +35,14 @@ mod alloc_tests {
             json! {
                 let expected = {"key":"one\ntwo"}.unwrap();
             }
-            assert_eq!(file, File::wrap(expected.cells));
+            assert_eq!(file.cells, expected.cells);
         }
     }
 
     #[test]
     fn hashbang_avoidance() {
-        let nothing = [];
-        let mut file = File::wrap(&nothing);
-        file.prolog = Comment::some("!suspect");
+        let mut file = File::default();
+        file.prolog = some_comment("!suspect");
         let encoded = file.to_string();
         assert_eq!(encoded, "#\n\t!suspect\n");
         arena! {
@@ -47,7 +51,7 @@ mod alloc_tests {
         let parsed = arena.parse_or_panic(&encoded);
         assert!(parsed.hashbang.is_none());
         assert_eq!(
-            Vec::from_iter(parsed.prolog.unwrap().lines()),
+            Vec::from_iter(parsed.prolog.unwrap().value.lines()),
             vec!["!suspect"]
         );
     }
@@ -55,19 +59,17 @@ mod alloc_tests {
 
 #[test]
 fn three_blank_comments() {
-    let nothing = [];
-    let name = Name {
-        gap: false,
-        before: Comment::some(""),
-        key: "",
+    let entry = Entry {
+        before: some_comment(""),
+        item: Item::Dict(Dict::default()),
+        ..Default::default()
     };
-    let entries = [core::cell::Cell::new(Entry {
-        name,
-        item: Item::Dict(Dict::wrap(&nothing)),
-    })];
-    let mut file = File::wrap(&entries);
-    file.hashbang = Comment::some("");
-    file.prolog = Comment::some("");
+    let entries = [core::cell::Cell::new(entry)];
+    let file = File {
+        hashbang: some_comment(""),
+        prolog: some_comment(""),
+        cells: &entries,
+    };
     let encoded = file.to_string();
     assert_eq!(encoded, "#!\n#\n//\n{}\n");
 }
@@ -101,7 +103,7 @@ fn nested_lists() {
     walk! {
         let text = [list][0][0][0]<0>.unwrap();
     }
-    assert_eq!(Vec::from_iter(text.lines()), vec!["value"]);
+    assert_eq!(Vec::from_iter(text.value.lines()), vec!["value"]);
 }
 
 #[test]
@@ -110,18 +112,19 @@ fn nested_dicts() {
         let dict = {"1":"one","2":["two"],"a":{"b":{"c":{"d":{"k":"v"}}}}}.unwrap();
     }
     let mut keys = Vec::new();
-    for entry in dict {
-        keys.push(entry.name.key);
+    for entry in dict.cells {
+        let entry = entry.get();
+        keys.push(entry.key.lines().next().unwrap_or(""));
     }
     assert_eq!(keys, vec!["1", "2", "a"]);
     assert_eq!(
-        File::wrap(dict.cells).to_string(),
-        "1=one\n[2]\n\ttwo\n{a}\n\t{b}\n\t\t{c}\n\t\t\t{d}\n\t\t\t\tk=v\n"
+        dict.to_string(),
+        "{}\n\t1=one\n\t[2]\n\t\ttwo\n\t{a}\n\t\t{b}\n\t\t\t{c}\n\t\t\t\t{d}\n\t\t\t\t\tk=v\n"
     );
     walk! {
         let text = {dict}{"a"}{"b"}{"c"}{"d"}<"k">.unwrap();
     }
-    assert_eq!(Vec::from_iter(text.lines()), vec!["v"]);
+    assert_eq!(Vec::from_iter(text.value.lines()), vec!["v"]);
 }
 
 #[test]
@@ -130,11 +133,10 @@ fn change_in_list() {
         let dict = {"a":{"b":["z"]}}.unwrap();
     }
     walk! {
-        let (mut text, cell) = {dict}{"a"}["b"]<0>.unwrap();
+        let (_text, cell) = {dict}{"a"}["b"]<0>.unwrap();
     }
-    text = Text::wrap("c");
-    cell.set(text.into());
-    assert_eq!(File::wrap(dict.cells).to_string(), "{a}\n\t[b]\n\t\tc\n");
+    cell.set(Item::text("c"));
+    assert_eq!(dict.to_string(), "{}\n\t{a}\n\t\t[b]\n\t\t\tc\n");
 }
 
 #[test]
@@ -142,16 +144,12 @@ fn change_in_dict() {
     json! {
         let dict = {"a":[{"b":"z"}]}.unwrap();
     }
-    let file = File::wrap(dict.cells);
     walk! {
-        let (mut text, name, cell) = {dict}["a"]{0}<"b">.unwrap();
+        let (_text, mut entry, cell) = {dict}["a"]{0}<"b">.unwrap();
     }
-    text = Text::wrap("c");
-    cell.set(Entry {
-        name,
-        item: text.into(),
-    });
-    assert_eq!(file.to_string(), "[a]\n\t{}\n\t\tb=c\n");
+    entry.item = Item::text("c");
+    cell.set(entry);
+    assert_eq!(dict.to_string(), "{}\n\t[a]\n\t\t{}\n\t\t\tb=c\n");
 }
 
 #[test]
@@ -159,17 +157,14 @@ fn inject_comments() {
     json! {
         let dict = {"k":"v"}.unwrap();
     }
-    let file = File::wrap(dict.cells);
     walk! {
-        let (mut text, mut name, cell) = {dict}<"k">.unwrap();
+        let (mut text, mut entry, cell) = {dict}<"k">.unwrap();
     }
-    name.before = Comment::some("b");
-    text.epilog = Comment::some("c");
-    cell.set(Entry {
-        name,
-        item: text.into(),
-    });
-    assert_eq!(file.to_string(), "//b\nk=v\n#c\n");
+    entry.before = some_comment("b");
+    text.epilog = some_comment("c");
+    entry.item = Item::Text(text);
+    cell.set(entry);
+    assert_eq!(dict.to_string(), "{}\n\t//b\n\tk=v\n\t#c\n");
 }
 
 #[test]
@@ -182,7 +177,7 @@ fn change_structure() {
         let (mut resolved, cell) = {changing}[key]<0>.unwrap();
     }
     let b = String::from("b");
-    resolved.epilog = Comment::some(&b);
+    resolved.epilog = some_comment(&b);
     json! {
         let patch = {"p":(resolved)}.unwrap();
     }

@@ -1,9 +1,9 @@
 use bumpalo::Bump;
 use serde::Serialize;
 use serde::de::DeserializeSeed;
+use tindalwic::File;
 use tindalwic::bumpalo::Arena;
 use tindalwic::serde::{Compact, Neutered, Verbose};
-use tindalwic::tree::File;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(start)]

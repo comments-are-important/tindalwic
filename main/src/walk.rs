@@ -3,7 +3,7 @@
 //! but using these directly is not recommended.
 //! using walk! is much easier.
 
-use crate::tree::{Dict, Entry, Item, Key, List, Text};
+use crate::{Dict, Entry, Item, List, Text};
 use core::cell::Cell;
 
 /// a decision along a walk.
@@ -12,7 +12,7 @@ pub enum Branch<'p> {
     /// select list item by index
     List(usize),
     /// select dict entry by key
-    Dict(Key<'p>),
+    Dict(&'p str),
 }
 /// information about where a walk went wrong.
 #[derive(Debug)]

@@ -4,7 +4,7 @@ extern crate alloc;
 
 use crate::alloc::Intern;
 use crate::parse::{Builder, Input, ParseError, Reported};
-use crate::tree::{Dict, Entry, File, Item, List};
+use crate::{Dict, Entry, File, Item, List};
 use alloc::vec::Vec;
 use bumpalo::Bump;
 use core::cell::Cell;
@@ -43,16 +43,22 @@ pub(crate) struct HeapBuilder<'a> {
 }
 impl<'a> Builder<'a> for HeapBuilder<'a> {
     fn list(&self, count: usize) -> Result<List<'a>, ParseError> {
-        match self.items.finish(count, self.bump) {
-            Some(list) => Ok(List::wrap(list)),
-            None => Err(ParseError::mem("not enough items to make that list")),
-        }
+        let Some(cells) = self.items.finish(count, self.bump) else {
+            return Err(ParseError::mem("not enough items to make that list"));
+        };
+        Ok(List {
+            cells,
+            ..Default::default()
+        })
     }
     fn dict(&self, count: usize) -> Result<Dict<'a>, ParseError> {
-        match self.entries.finish(count, self.bump) {
-            Some(dict) => Ok(Dict::wrap(dict)),
-            None => Err(ParseError::mem("not enough entries to make that dict")),
-        }
+        let Some(cells) = self.entries.finish(count, self.bump) else {
+            return Err(ParseError::mem("not enough entries to make that dict"));
+        };
+        Ok(Dict {
+            cells,
+            ..Default::default()
+        })
     }
     fn item(&self, item: Item<'a>) -> Result<(), ParseError> {
         self.items

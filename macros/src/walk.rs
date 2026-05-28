@@ -51,7 +51,7 @@ impl Parse for Walk {
         } else if let Some(stream) = Group::optional_parenthesized(input)? {
             let stream = stream.not_empty("missing file inside ()")?;
             let tindalwic = tindalwic();
-            quote!(#tindalwic::tree::Dict::wrap((#stream).cells))
+            quote!(#tindalwic::Dict{cells:(#stream).cells,..Default::default()})
         } else {
             return Err(input.error("must start with [List], {Dict} or (File)"));
         };
@@ -141,7 +141,8 @@ impl ToTokens for Walk {
         let item = result.derive("item");
         if let Some(name) = &self.name {
             tokens.extend(quote! {
-                let Entry { name: #name, item: #item } = #cell.get();
+                let #name = #cell.get();
+                let #item = &#name.item;
             });
         } else {
             tokens.extend(quote! {
@@ -159,7 +160,7 @@ impl ToTokens for Walk {
     }
 }
 
-pub(crate) struct Walks {
+pub(super) struct Walks {
     statements: Punctuated<Walk, Nothing>,
 }
 impl Parse for Walks {

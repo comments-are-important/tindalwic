@@ -33,6 +33,9 @@ yaml_serde = "0.10.4"
 missing_docs = "deny"
 unused = "deny"
 
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+
 [profile.release-small]
 inherits = "release"
 opt-level = "z"

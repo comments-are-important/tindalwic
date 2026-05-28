@@ -2,12 +2,13 @@
 
 extern crate alloc;
 
-use crate::tree::{Comment, Text, UTF8};
+use crate::Value;
+use crate::{Comment, Text};
 use alloc::string::String;
 
-impl<'a> UTF8<'a> {
+impl<'a> Value<'a> {
     /// Allocates a [String], filled with the UTF-8 copied from `self`.
-    pub(crate) fn joined(&self) -> String {
+    pub fn joined(&self) -> String {
         if let Some(slice) = self.shortcut(0) {
             String::from(slice)
         } else {
@@ -27,14 +28,14 @@ impl<'a> UTF8<'a> {
 impl<'a> Comment<'a> {
     /// Allocates a [String], filled with the UTF-8 copied from `self`.
     pub fn joined(&self) -> String {
-        self.utf8.joined()
+        self.value.joined()
     }
 }
 
 impl<'a> Text<'a> {
     /// Allocates a [String], filled with the UTF-8 copied from `self`.
     pub fn joined(&self) -> String {
-        self.utf8.joined()
+        self.value.joined()
     }
 }
 

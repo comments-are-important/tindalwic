@@ -8,7 +8,7 @@ pub use compact::Compact;
 pub use neutered::Neutered;
 pub use verbose::Verbose;
 
-use crate::tree::{Comment, UTF8};
+use crate::{Comment, Value};
 use serde::Deserialize;
 use serde::de::DeserializeSeed;
 
@@ -23,7 +23,7 @@ use tindalwic_macros::serialize_deserialize_seed_visit as seeded;
 seeded! {
     #[expecting = "a string value"]
     #[deserialize_str]
-    impl UTF8 {
+    impl Value {
         fn serialize() {
             if let Some(slice) = this.shortcut(0) {
                 s.serialize_str(slice)
@@ -32,7 +32,7 @@ seeded! {
             }
         }
         fn visit_str() {
-            Ok(UTF8::wrap(arena.str(v)))
+            Ok(Value::wrap(arena.str(v)))
         }
     }
 } // !seeded
@@ -44,16 +44,16 @@ seeded! {
         fn serialize() {
             match this {
                 None => s.serialize_none(),
-                Some(comment) => s.serialize_some(&UTF8Ser(comment.utf8)),
+                Some(comment) => s.serialize_some(&ValueSer(comment.value)),
             }
         }
         fn visit_none() {
             Ok(None)
         }
         fn visit_some() {
-            UTF8De::of(arena)
+            ValueDe::of(arena)
                 .deserialize(d)
-                .map(|utf8| Some(Comment { utf8 }))
+                .map(|value| Some(Comment { value }))
         }
     }
 } // !seeded

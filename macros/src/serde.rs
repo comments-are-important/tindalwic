@@ -1,6 +1,6 @@
 use super::*;
 
-pub(crate) struct SerDe {
+pub(super) struct SerDe {
     ser: Ident,
     de: Ident,
     value: TokenStream,
@@ -17,7 +17,6 @@ impl Parse for SerDe {
         let ser = Ident::new(&format!("{kind_str}Ser"), Span::call_site());
         let de = Ident::new(&format!("{kind_str}De"), Span::call_site());
         let value = match &kind_str[..] {
-            "UTF8" | "Text" => quote!(#kind<'a>),
             "Comment" => quote!(Option<Comment<'a>>),
             "Items" => quote!(&'a [Cell<Item<'a>>]),
             "Entries" => quote!(&'a [Cell<Entry<'a>>]),

@@ -1,8 +1,9 @@
 extern crate alloc;
 
-use super::{CommentDe, CommentSer, UTF8De, UTF8Ser, seeded};
+use super::{CommentDe, CommentSer, ValueDe, ValueSer, seeded};
 use super::{DictFields, EntryFields, FileFields, ItemVariants, ListFields, TextFields};
-use crate::tree::{Dict, Entry, File, Item, List, Name, Text};
+use crate::Value;
+use crate::{Dict, Entry, File, Item, List, Text};
 use alloc::string::{String, ToString};
 use core::cell::Cell;
 use serde::de::{Error, VariantAccess};
@@ -36,14 +37,14 @@ seeded! {
     impl Text {
         fn serialize() {
             let mut fields = s.serialize_struct("Text", 2)?;
-            fields.serialize_field("value", &UTF8Ser(this.utf8))?;
+            fields.serialize_field("value", &ValueSer(this.value))?;
             fields.serialize_field("epilog", &CommentSer(this.epilog))?;
             fields.end()
         }
         fn visit_seq() {
             let err = || Error::invalid_length(2, &self);
             Ok(Text {
-                utf8: seq.next_element_seed(UTF8De::of(arena))?.ok_or_else(err)?,
+                value: seq.next_element_seed(ValueDe::of(arena))?.ok_or_else(err)?,
                 epilog: seq
                     .next_element_seed(CommentDe::of(arena))?
                     .ok_or_else(err)?,
@@ -58,7 +59,7 @@ seeded! {
                         if value.is_some() {
                             return Err(Error::duplicate_field("value"));
                         }
-                        value = Some(map.next_value_seed(UTF8De::of(arena))?);
+                        value = Some(map.next_value_seed(ValueDe::of(arena))?);
                     }
                     TextFields::Epilog => {
                         if epilog.is_some() {
@@ -69,7 +70,7 @@ seeded! {
                 }
             }
             Ok(Text {
-                utf8: value.ok_or_else(|| Error::missing_field("value"))?,
+                value: value.ok_or_else(|| Error::missing_field("value"))?,
                 epilog: epilog.ok_or_else(|| Error::missing_field("epilog"))?,
             })
         }
@@ -166,23 +167,22 @@ seeded! {
     #[deserialize_struct]
     impl Entry {
         fn serialize() {
+            let first = this.key.lines().next().unwrap_or(""); // TODO key.one_liner
             let mut fields = s.serialize_struct("Entry", 4)?;
-            fields.serialize_field("gap", &this.name.gap)?;
-            fields.serialize_field("before", &CommentSer(this.name.before))?;
-            fields.serialize_field("key", this.name.key)?;
+            fields.serialize_field("gap", &this.gap)?;
+            fields.serialize_field("before", &CommentSer(this.before))?;
+            fields.serialize_field("key", first)?;
             fields.serialize_field("item", &ItemSer(this.item))?;
             fields.end()
         }
         fn visit_seq() {
             let err = || Error::invalid_length(4, &self);
             Ok(Entry {
-                name: Name {
-                    gap: seq.next_element()?.ok_or_else(err)?,
-                    before: seq
-                        .next_element_seed(CommentDe::of(arena))?
-                        .ok_or_else(err)?,
-                    key: arena.str(&seq.next_element::<String>()?.ok_or_else(err)?),
-                },
+                gap: seq.next_element()?.ok_or_else(err)?,
+                before: seq
+                    .next_element_seed(CommentDe::of(arena))?
+                    .ok_or_else(err)?,
+                key: Value::wrap(arena.str(&seq.next_element::<String>()?.ok_or_else(err)?)),
                 item: seq.next_element_seed(ItemDe::of(arena))?.ok_or_else(err)?,
             })
         }
@@ -209,7 +209,7 @@ seeded! {
                         if key.is_some() {
                             return Err(Error::duplicate_field("key"));
                         }
-                        key = Some(arena.str(&map.next_value::<String>()?));
+                        key = Some(Value::wrap(arena.str(&map.next_value::<String>()?)));
                     }
                     EntryFields::Item => {
                         if item.is_some() {
@@ -220,11 +220,9 @@ seeded! {
                 }
             }
             Ok(Entry {
-                name: Name {
-                    gap: gap.ok_or_else(|| Error::missing_field("gap"))?,
-                    before: before.ok_or_else(|| Error::missing_field("before"))?,
-                    key: key.ok_or_else(|| Error::missing_field("key"))?,
-                },
+                gap: gap.ok_or_else(|| Error::missing_field("gap"))?,
+                before: before.ok_or_else(|| Error::missing_field("before"))?,
+                key: key.ok_or_else(|| Error::missing_field("key"))?,
                 item: item.ok_or_else(|| Error::missing_field("item"))?,
             })
         }

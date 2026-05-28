@@ -1,8 +1,9 @@
 extern crate alloc;
 
-use super::{CommentDe, CommentSer, UTF8De, UTF8Ser, seeded};
+use super::{CommentDe, CommentSer, ValueDe, ValueSer, seeded};
 use super::{DictFields, EntryFields, FileFields, ItemVariants, ListFields, TextFields};
-use crate::tree::{Dict, Entry, File, Item, List, Name, Text, UTF8};
+use crate::Value;
+use crate::{Dict, Entry, File, Item, List, Text};
 use alloc::string::{String, ToString};
 use core::cell::Cell;
 use serde::de::{Error, VariantAccess};
@@ -35,11 +36,11 @@ seeded! {
     #[deserialize_struct]
     impl Text {
         fn serialize() {
-            let value = !this.utf8.is_empty() as usize;
+            let value = !this.value.is_empty() as usize;
             let epilog = this.epilog.is_some() as usize;
             let mut fields = s.serialize_struct("Text", value + epilog)?;
             if value != 0 {
-                fields.serialize_field("value", &UTF8Ser(this.utf8))?;
+                fields.serialize_field("value", &ValueSer(this.value))?;
             }
             if epilog != 0 {
                 fields.serialize_field("epilog", &CommentSer(this.epilog))?;
@@ -58,7 +59,7 @@ seeded! {
                         if value.is_some() {
                             return Err(Error::duplicate_field("value"));
                         }
-                        value = Some(map.next_value_seed(UTF8De::of(arena))?);
+                        value = Some(map.next_value_seed(ValueDe::of(arena))?);
                     }
                     TextFields::Epilog => {
                         if epilog.is_some() {
@@ -69,7 +70,7 @@ seeded! {
                 }
             }
             Ok(Text {
-                utf8: value.unwrap_or_else(|| UTF8::wrap("")),
+                value: value.unwrap_or_else(|| Value::wrap("")),
                 epilog: epilog.unwrap_or(None),
             })
         }
@@ -162,26 +163,28 @@ seeded! {
 } // !seeded
 
 seeded! {
-    #[expecting = "a compact entry in a dictionary: [gap] + [before] + [key] + item"]
+    #[expecting = "a compact entry in a dictionary: [gap] + [before] + [key] + [item]"]
     #[deserialize_struct]
     impl Entry {
         fn serialize() {
-            let gap = this.name.gap as usize;
-            let before = this.name.before.is_some() as usize;
-            let key = !this.name.key.is_empty() as usize;
+            let gap = this.gap as usize;
+            let before = this.before.is_some() as usize;
+            let key = !this.key.is_empty() as usize;
             let item = match this.item {
-                Item::Text(text) => text.has_content() as usize,
+                // aggressive, maybe confusing, but appropriate for this mode.
+                Item::Text(text) => (text.epilog.is_some() || !text.value.is_empty()) as usize,
                 _ => 1usize,
             };
             let mut fields = s.serialize_struct("Entry", gap + before + key + item)?;
             if gap != 0 {
-                fields.serialize_field("gap", &this.name.gap)?;
+                fields.serialize_field("gap", &this.gap)?;
             }
             if before != 0 {
-                fields.serialize_field("before", &CommentSer(this.name.before))?;
+                fields.serialize_field("before", &CommentSer(this.before))?;
             }
             if key != 0 {
-                fields.serialize_field("key", this.name.key)?;
+                let first = this.key.lines().next().unwrap_or(""); // TODO key.one_liner
+                fields.serialize_field("key", first)?;
             }
             if item != 0 {
                 fields.serialize_field("item", &ItemSer(this.item))?;
@@ -214,7 +217,7 @@ seeded! {
                         if key.is_some() {
                             return Err(Error::duplicate_field("key"));
                         }
-                        key = Some(arena.str(&map.next_value::<String>()?));
+                        key = Some(Value::wrap(arena.str(&map.next_value::<String>()?)));
                     }
                     EntryFields::Item => {
                         if item.is_some() {
@@ -225,12 +228,10 @@ seeded! {
                 }
             }
             Ok(Entry {
-                name: Name {
-                    gap: gap.unwrap_or(false),
-                    before: before.unwrap_or(None),
-                    key: key.unwrap_or(""),
-                },
-                item: item.unwrap_or_else(|| Item::Text(Text::wrap(""))),
+                gap: gap.unwrap_or(false),
+                before: before.unwrap_or(None),
+                key: key.unwrap_or_else(Value::default),
+                item: item.unwrap_or_else(Item::default),
             })
         }
     }

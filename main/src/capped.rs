@@ -2,7 +2,7 @@
 //! but you should probably not use these directly, macros are much easier.
 
 use crate::parse::{Builder, Input, ParseError, Reported};
-use crate::tree::*;
+use crate::{Dict, Entry, File, Item, List, Value};
 
 use core::cell::Cell;
 
@@ -71,16 +71,22 @@ impl<'a> StackBuilder<'a> {
 }
 impl<'a> Builder<'a> for StackBuilder<'a> {
     fn list(&self, count: usize) -> Result<List<'a>, ParseError> {
-        match self.items.finish(count) {
-            Some(list) => Ok(List::wrap(list)),
-            None => Err(ParseError::mem("not enough items to make that list")),
-        }
+        let Some(cells) = self.items.finish(count) else {
+            return Err(ParseError::mem("not enough items to make that list"));
+        };
+        Ok(List {
+            cells,
+            ..Default::default()
+        })
     }
     fn dict(&self, count: usize) -> Result<Dict<'a>, ParseError> {
-        match self.entries.finish(count) {
-            Some(dict) => Ok(Dict::wrap(dict)),
-            None => Err(ParseError::mem("not enough entries to make that dict")),
-        }
+        let Some(cells) = self.entries.finish(count) else {
+            return Err(ParseError::mem("not enough entries to make that dict"));
+        };
+        Ok(Dict {
+            cells,
+            ..Default::default()
+        })
     }
     fn item(&self, item: Item<'a>) -> Result<(), ParseError> {
         self.items
@@ -139,11 +145,15 @@ impl<'a> Arena<'a> {
     }
     /// push an entry into builder memory for future .dict call to use.
     pub fn keyed(&self, key: &'a str, item: Item<'a>) -> Result<(), ParseError> {
-        self.entry(Entry::wrap(key, item))
+        self.entry(Entry {
+            key: Value::wrap(key),
+            item,
+            ..Default::default()
+        })
     }
     /// push a text item into builder memory for future .list call to use.
-    pub fn text_item(&self, utf8: &'a str) -> Result<(), ParseError> {
-        self.item(Text::wrap(utf8).into())
+    pub fn text_item(&self, value: &'a str) -> Result<(), ParseError> {
+        self.item(Item::text(value))
     }
     /// push a list item into builder memory for future .list call to use.
     pub fn list_item(&self, count: usize) -> Result<(), ParseError> {
@@ -156,8 +166,8 @@ impl<'a> Arena<'a> {
         self.item(dict.into())
     }
     /// push a text entry into builder memory for future .dict call to use.
-    pub fn text_entry(&self, key: &'a str, utf8: &'a str) -> Result<(), ParseError> {
-        self.keyed(key, Text::wrap(utf8).into())
+    pub fn text_entry(&self, key: &'a str, value: &'a str) -> Result<(), ParseError> {
+        self.keyed(key, Item::text(value))
     }
     /// push a list entry into builder memory for future .dict call to use.
     pub fn list_entry(&self, key: &'a str, count: usize) -> Result<(), ParseError> {

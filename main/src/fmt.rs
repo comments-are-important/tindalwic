@@ -1,7 +1,8 @@
 //! code for encoding data into the Tindalwic format.
 
+use crate::Value;
 use crate::parse::{MemoryError, ParseError, SyntaxError};
-use crate::tree::*;
+use crate::{Comment, Dict, Entry, File, Item, List, Text};
 
 use core::cell::Cell;
 use core::fmt::{Display, Formatter, Result, Write};
@@ -40,7 +41,7 @@ impl<'o, 'f> Output<'o, 'f> {
         }
         Ok(())
     }
-    fn encoded<'a>(&mut self, encoded: &UTF8<'a>) -> Result {
+    fn encoded<'a>(&mut self, encoded: &Value<'a>) -> Result {
         if let Some(slice) = encoded.shortcut(self.indent) {
             self.out.write_str(slice)?;
             self.out.write_char('\n')?;
@@ -63,15 +64,16 @@ impl<'o, 'f> Output<'o, 'f> {
     fn some_comment<'a>(&mut self, marker: &'a str, comment: &Comment<'a>) -> Result {
         self.indent()?;
         self.out.write_str(marker)?;
-        if comment.utf8.is_empty() {
+        if comment.value.is_empty() {
             self.out.write_char('\n')?;
         } else {
             self.indent += 1;
-            if marker == "#" && comment.is_funny() {
+            if marker == "#" && (comment.value.starts_with('!') || comment.value.starts_with('\n'))
+            {
                 self.out.write_char('\n')?;
                 self.indent()?;
             }
-            self.encoded(&comment.utf8)?;
+            self.encoded(&comment.value)?;
             self.indent -= 1;
         }
         Ok(())
@@ -82,34 +84,63 @@ impl<'o, 'f> Output<'o, 'f> {
         }
         Ok(())
     }
+    fn one_liner_in_list<'a>(text: &Text<'a>) -> Option<&'a str> {
+        let only = text.value.only_line()?;
+        if text.value.is_empty() {
+            Some(only)
+        } else if matches!(
+            only.as_bytes()[0],
+            b'\t' | b'#' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'='
+        ) {
+            None
+        } else {
+            Some(only)
+        }
+    }
     fn text_in_list<'a>(&mut self, text: &Text<'a>) -> Result {
         self.indent()?;
-        if let Some(slice) = text.one_liner_in_list() {
+        if let Some(slice) = Output::one_liner_in_list(text) {
             self.out.write_str(slice)?;
             self.out.write_char('\n')?;
         } else {
             self.out.write_str("<>\n")?;
             self.indent += 1;
             self.indent()?;
-            self.encoded(&text.utf8)?;
+            self.encoded(&text.value)?;
             self.indent -= 1;
         }
         self.comment("#", &text.epilog)
     }
-    fn text_in_dict<'a>(&mut self, key: &'a str, text: &Text<'a>) -> Result {
+    fn one_liner_in_dict<'a>(text: &Text<'a>, key: &'_ str) -> Option<&'a str> {
+        let only = text.value.only_line()?;
+        if key.is_empty() {
+            Some(only)
+        } else if key.contains('=') {
+            None
+        } else if matches!(
+            key.as_bytes()[0],
+            b'\t' | b'#' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'='
+        ) {
+            None
+        } else {
+            Some(only)
+        }
+    }
+    fn text_in_dict<'a>(&mut self, key: &Value<'a>, text: &Text<'a>) -> Result {
+        let first = key.lines().next().unwrap_or(""); // TODO key.one_liner
         self.indent()?;
-        if let Some(slice) = text.one_liner_in_dict(key) {
-            self.out.write_str(key)?;
+        if let Some(slice) = Output::one_liner_in_dict(text, first) {
+            self.out.write_str(first)?;
             self.out.write_char('=')?;
             self.out.write_str(slice)?;
             self.out.write_char('\n')?;
         } else {
             self.out.write_char('<')?;
-            self.out.write_str(key)?;
+            self.out.write_str(first)?;
             self.out.write_str(">\n")?;
             self.indent += 1;
             self.indent()?;
-            self.encoded(&text.utf8)?;
+            self.encoded(&text.value)?;
             self.indent -= 1;
         }
         self.comment("#", &text.epilog)
@@ -125,10 +156,11 @@ impl<'o, 'f> Output<'o, 'f> {
         self.indent -= 1;
         self.comment("#", &list.epilog)
     }
-    fn list_in_dict<'a>(&mut self, key: &'a str, list: &List<'a>) -> Result {
+    fn list_in_dict<'a>(&mut self, key: &Value<'a>, list: &List<'a>) -> Result {
+        let first = key.lines().next().unwrap_or(""); // TODO key.one_liner
         self.indent()?;
         self.out.write_char('[')?;
-        self.out.write_str(key)?;
+        self.out.write_str(first)?;
         self.out.write_str("]\n")?;
         self.indent += 1;
         self.comment("#", &list.prolog)?;
@@ -149,10 +181,11 @@ impl<'o, 'f> Output<'o, 'f> {
         self.indent -= 1;
         self.comment("#", &dict.epilog)
     }
-    fn dict_in_dict<'a>(&mut self, key: &'a str, dict: &Dict<'a>) -> Result {
+    fn dict_in_dict<'a>(&mut self, key: &Value<'a>, dict: &Dict<'a>) -> Result {
+        let first = key.lines().next().unwrap_or(""); // TODO key.one_liner
         self.indent()?;
         self.out.write_char('{')?;
-        self.out.write_str(key)?;
+        self.out.write_str(first)?;
         self.out.write_str("}\n")?;
         self.indent += 1;
         self.comment("#", &dict.prolog)?;
@@ -172,15 +205,15 @@ impl<'o, 'f> Output<'o, 'f> {
     }
     fn entry_in_dict<'a>(&mut self, cell: &Cell<Entry<'a>>) -> Result {
         let entry = cell.get();
-        if entry.name.gap {
+        if entry.gap {
             // TODO be strict? f.write_indent(self.indent)?;
             self.out.write_char('\n')?;
         }
-        self.comment("//", &entry.name.before)?;
+        self.comment("//", &entry.before)?;
         match &entry.item {
-            Item::Text(text) => self.text_in_dict(entry.name.key, text),
-            Item::List(list) => self.list_in_dict(entry.name.key, list),
-            Item::Dict(dict) => self.dict_in_dict(entry.name.key, dict),
+            Item::Text(text) => self.text_in_dict(&entry.key, text),
+            Item::List(list) => self.list_in_dict(&entry.key, list),
+            Item::Dict(dict) => self.dict_in_dict(&entry.key, dict),
         }
     }
     fn file<'a>(&mut self, file: &File<'a>) -> Result {
@@ -200,7 +233,8 @@ impl<'o, 'f> Output<'o, 'f> {
 /// ```
 /// fn check(gfm: &str) {
 ///     let expected = format!("#{}\n", gfm.replace("\n", "\n\t"));
-///     assert_eq!(tindalwic::tree::Comment::wrap(gfm).to_string(), expected);
+///     let value = tindalwic::Value::wrap(gfm);
+///     assert_eq!(tindalwic::Comment { value }.to_string(), expected);
 /// }
 /// check("one-liner");
 /// check("two\nlines");

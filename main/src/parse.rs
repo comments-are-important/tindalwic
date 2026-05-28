@@ -2,7 +2,8 @@
 
 use core::usize;
 
-use crate::tree::*;
+use crate::Value;
+use crate::{Comment, Dict, Entry, File, Item, List, Text};
 
 /// parsing problems
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -105,7 +106,7 @@ where
             input.report(ParseError::mem("way too big"))?;
             return None;
         }
-        input.next(0);
+        input.next(0)?;
         let hashbang = input.comment(0, b"#!")?;
         let dict = input.entries(0, arena)?;
         if !input.good {
@@ -136,6 +137,7 @@ where
     /// done with current line, so advance, skipping excessively indented lines.
     /// usize::MAX prevents skipping. return false if finished with entire UTF-8.
     /// use `stretch` instead for Comment and Text (where no line is excessive).
+    /// return None if the report signals abort.
     fn next(&mut self, indent: usize) -> Option<bool> {
         if self.start == usize::MAX {
             return Some(false);
@@ -161,6 +163,7 @@ where
 
     /// helper for `next` to update state by examining a line of UTF-8.
     /// assumes caller has correctly set `self.start` (out-of-bounds is fine).
+    /// return None if the report signals abort.
     fn scan(&mut self) -> Option<bool> {
         let bytes = self.utf8.as_bytes();
         let limit = bytes.len();
@@ -172,9 +175,7 @@ where
             self.tabs = 0;
             return Some(false);
         }
-        while offset < limit && bytes[offset] == b'\t' {
-            offset += 1;
-        }
+        offset += Value::indentation(bytes, offset, limit);
         self.first = offset;
         self.assign = usize::MAX;
         while offset < limit && bytes[offset] != b'\n' {
@@ -207,24 +208,24 @@ where
             self.first = offset - 1;
             self.end = offset - 1;
         }
-        while offset < limit && bytes[offset] == b'\t' {
-            offset += 1;
-        }
+        offset += Value::indentation(bytes, offset, limit);
         self.tabs = offset - 1 - self.end;
         return Some(true);
     }
 
     /// current line has been recognized as beginning of a Comment or Text that might
     /// continue, so stretch it out to include the whole thing by changing `end`.
-    fn stretch(&mut self, mut indent: usize, from: usize) -> UTF8<'a> {
-        if !self.stretch_once(indent) {
-            indent = usize::MAX;
-        } else {
-            while self.stretch_once(indent) {}
-        }
-        UTF8::of(&self.utf8[from..self.end], indent)
+    /// return None if the report signals abort.
+    fn stretch(&mut self, indent: usize, from: usize) -> Option<Value<'a>> {
+        let value = Value::parse(indent, &self.utf8[from..]);
+        let slice = value
+            .shortcut(indent)
+            .expect("impossible because just parsed");
+        self.end = from + slice.as_bytes().len();
+        self.next(usize::MAX)?; // stretch means excess is impossible
+        Some(value)
     }
-    fn stretch_once(&mut self, mut indent: usize) -> bool {
+    fn stretch_once(&mut self, indent: usize) -> bool {
         let bytes = self.utf8.as_bytes();
         let limit = bytes.len();
         let mut offset = self.end;
@@ -232,16 +233,11 @@ where
             return false;
         }
         assert!(bytes[offset] == b'\n', "impossible: not at newline");
-        offset += 1;
-        while offset < limit && bytes[offset] == b'\t' {
-            offset += 1;
-            if indent > 0 {
-                indent -= 1;
-            }
-        }
-        if indent != 0 {
+        let tabs = Value::indentation(bytes, offset + 1, limit);
+        if tabs < indent {
             return false;
         }
+        offset += 1 + tabs;
         while offset < limit && bytes[offset] != b'\n' {
             offset += 1;
         }
@@ -265,19 +261,17 @@ where
         if prefix == [b'#'] && from == self.end && self.stretch_once(more) {
             from += more + 1;
         }
-        let utf8 = self.stretch(more, from);
-        self.next(usize::MAX)?; // stretch means excess is impossible
-        Some(Some(Comment { utf8 }))
+        let value = self.stretch(more, from)?;
+        Some(Some(Comment { value }))
     }
 
     /// current line has been recognized as beginning a Text, from a `<>` context on
     /// the previous line, or from shortcut syntax. `from` says where text begins.
     /// lenient - one-liners can stretch.
     fn text(&mut self, indent: usize, from: usize) -> Option<Text<'a>> {
-        let utf8 = self.stretch(indent + 1, from);
-        self.next(usize::MAX)?; // stretch means excess is impossible
+        let value = self.stretch(indent + 1, from)?;
         let epilog = self.comment(indent, b"#")?;
-        Some(Text { utf8, epilog })
+        Some(Text { value, epilog })
     }
 
     /// previous line opened a list context, so parse all the items in it.
@@ -394,7 +388,7 @@ where
                 }
                 break;
             }
-            let mut key: &'a str = "";
+            let mut key: Value<'a> = Value::default();
             let len = self.end - self.first;
             match bytes[self.first] {
                 b'#' => {
@@ -417,7 +411,7 @@ where
                         self.report(ParseError::at(self.line, "malformed `<key>` in dict"))?;
                         self.next(indent)?;
                     } else {
-                        key = &self.utf8[self.first + 1..self.end - 1];
+                        key = Value::wrap(&self.utf8[self.first + 1..self.end - 1]);
                         let end = self.end;
                         item = Some(
                             if !self.stretch_once(indent + 1) {
@@ -436,7 +430,7 @@ where
                         self.report(ParseError::at(self.line, "malformed `[key]` in dict"))?;
                         self.next(indent)?;
                     } else {
-                        key = &self.utf8[self.first + 1..self.end - 1];
+                        key = Value::wrap(&self.utf8[self.first + 1..self.end - 1]);
                         self.next(indent + 1)?;
                         item = Some(self.items(indent + 1, arena)?.into());
                     }
@@ -446,7 +440,7 @@ where
                         self.report(ParseError::at(self.line, "malformed `{key}` in dict"))?;
                         self.next(indent)?;
                     } else {
-                        key = &self.utf8[self.first + 1..self.end - 1];
+                        key = Value::wrap(&self.utf8[self.first + 1..self.end - 1]);
                         self.next(indent + 1)?;
                         item = Some(self.entries(indent + 1, arena)?.into());
                     }
@@ -460,14 +454,16 @@ where
                         self.report(ParseError::at(self.line, "missing `=` in dict"))?;
                         self.next(indent)?;
                     } else {
-                        key = &self.utf8[self.first..self.assign];
+                        key = Value::wrap(&self.utf8[self.first..self.assign]);
                         item = Some(self.text(indent, self.assign + 1)?.into());
                     }
                 }
             }
             if let Some(item) = item {
                 if let Err(err) = arena.entry(Entry {
-                    name: Name { key, gap, before },
+                    gap,
+                    before,
+                    key,
                     item,
                 }) {
                     self.report(err)?;
@@ -501,7 +497,7 @@ mod tests {
     macro_rules! assert_lines_eq {
         // checking this gets repetitive without Vec
         ($text:ident, $($line:literal),*) => {
-            let mut it = $text.lines();
+            let mut it = $text.value.lines();
             $(assert_eq!(it.next(), Some($line));)*
             assert_eq!(it.next(), None);
         };
@@ -515,7 +511,9 @@ mod tests {
         }
         let file = arena.parse_or_panic("");
         assert!(!arena.completed().is_some());
-        assert!(!file.has_content());
+        assert!(file.hashbang.is_none());
+        assert!(file.prolog.is_none());
+        assert!(file.cells.is_empty());
     }
 
     #[test]
@@ -529,7 +527,7 @@ mod tests {
         assert!(file.hashbang.is_none());
         assert!(file.prolog.is_none());
         assert_eq!(file.cells.len(), 1);
-        let entry = file.get("k").unwrap();
+        let entry = file.cells[file.position("k").unwrap()].get();
         let Item::Text(text) = entry.item else {
             panic!("not text?");
         };
@@ -544,7 +542,7 @@ mod tests {
         let file = arena.parse_or_panic("[k]\n\t1\n\t2\n\t3");
         assert!(arena.completed().is_some());
         assert_eq!(file.cells.len(), 1);
-        let entry = file.get("k").unwrap();
+        let entry = file.cells[file.position("k").unwrap()].get();
         let Item::List(list) = entry.item else {
             panic!("not list?");
         };

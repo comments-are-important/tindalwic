@@ -12,7 +12,7 @@ impl ToTokens for Branch {
         if self.list {
             tokens.extend(quote!(#tindalwic::walk::Branch::List(#expr)));
         } else {
-            tokens.extend(quote!(#tindalwic::walk::Branch::Dict(#expr)));
+            tokens.extend(quote!(#tindalwic::walk::Branch::Dict((#expr).into())));
         }
     }
 }

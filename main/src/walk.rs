@@ -3,7 +3,7 @@
 //! but using these directly is not recommended.
 //! using walk! is much easier.
 
-use crate::{Dict, Entry, Item, List, Text};
+use crate::{Dict, Entry, Item, List, Text, Value};
 use core::cell::Cell;
 
 /// a decision along a walk.
@@ -12,7 +12,7 @@ pub enum Branch<'p> {
     /// select list item by index
     List(usize),
     /// select dict entry by key
-    Dict(&'p str),
+    Dict(Value<'p>),
 }
 /// information about where a walk went wrong.
 #[derive(Debug)]
@@ -69,7 +69,10 @@ impl<'p> Path<'p> {
         Ok(*dict)
     }
     /// walk down a path that starts at a list
-    pub fn item_cell<'a>(&self, item: &Item<'a>) -> Result<&'a Cell<Item<'a>>, PathError<'p>> {
+    pub fn item_cell<'a>(&self, item: &Item<'a>) -> Result<&'a Cell<Item<'a>>, PathError<'p>>
+    where
+        'p: 'a,
+    {
         if self.branches.is_empty() {
             return Err(self.error_full("empty path can't be resolved"));
         }
@@ -95,7 +98,7 @@ impl<'p> Path<'p> {
                 },
                 Item::Dict(dict) => match branch {
                     Branch::Dict(key) => {
-                        match dict.position(key) {
+                        match key.find_linearly_in(dict.cells) {
                             None => return Err(self.error_at(step, "key not found")),
                             Some(found) => {
                                 from = dict.cells[found].get().item;
@@ -111,7 +114,10 @@ impl<'p> Path<'p> {
         Err(self.error_full("path did not end at an item inside a list"))
     }
     /// walk down a path that starts at a dict
-    pub fn entry_cell<'a>(&self, item: &Item<'a>) -> Result<&'a Cell<Entry<'a>>, PathError<'p>> {
+    pub fn entry_cell<'a>(&self, item: &Item<'a>) -> Result<&'a Cell<Entry<'a>>, PathError<'p>>
+    where
+        'p: 'a,
+    {
         if self.branches.is_empty() {
             return Err(self.error_full("empty path can't be resolved"));
         }
@@ -134,7 +140,7 @@ impl<'p> Path<'p> {
                 },
                 Item::Dict(dict) => match branch {
                     Branch::Dict(key) => {
-                        match dict.position(key) {
+                        match key.find_linearly_in(dict.cells) {
                             None => return Err(self.error_at(step, "key not found")),
                             Some(found) => {
                                 if step + 1 == self.branches.len() {

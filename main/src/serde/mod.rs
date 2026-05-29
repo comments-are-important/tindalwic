@@ -25,14 +25,14 @@ seeded! {
     #[deserialize_str]
     impl Value {
         fn serialize() {
-            if let Some(slice) = this.shortcut(0) {
+            if let Some(slice) = this.verbatim(0) {
                 s.serialize_str(slice)
             } else {
                 s.serialize_str(&this.joined())
             }
         }
         fn visit_str() {
-            Ok(Value::new(arena.str(v)))
+            Ok(arena.str(v).into())
         }
     }
 } // !seeded

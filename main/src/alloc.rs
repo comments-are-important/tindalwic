@@ -9,7 +9,7 @@ use alloc::string::String;
 impl<'a> Value<'a> {
     /// Allocates a [String], filled with the UTF-8 copied from `self`.
     pub fn joined(&self) -> String {
-        if let Some(slice) = self.shortcut(0) {
+        if let Some(slice) = self.verbatim(0) {
             String::from(slice)
         } else {
             let mut result = String::new(); //with_capacity(self.len());

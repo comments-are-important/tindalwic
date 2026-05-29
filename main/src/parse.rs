@@ -71,6 +71,15 @@ pub enum Reported {
     Continue,
 }
 
+/// start at provided offset, count tab chars.
+pub(crate) fn indentation(bytes: &[u8], start: usize, limit: usize) -> usize {
+    let mut offset = start;
+    while offset < limit && bytes[offset] == b'\t' {
+        offset += 1;
+    }
+    offset - start
+}
+
 pub(crate) struct Input<'a, F> {
     utf8: &'a str, // entire tindalwic encoded content
     line: usize,   // the number of the current line
@@ -87,7 +96,7 @@ where
     F: FnMut(ParseError) -> Reported,
 {
     /// None means the arena is too small (or the UTF-8 is way too big).
-    pub(crate) fn parse(arena: &dyn Builder<'a>, utf8: &'a str, report: F) -> Option<File<'a>> {
+    pub fn parse(arena: &dyn Builder<'a>, utf8: &'a str, report: F) -> Option<File<'a>> {
         let mut input = Input {
             utf8,
             line: 0,
@@ -175,7 +184,7 @@ where
             self.tabs = 0;
             return Some(false);
         }
-        offset += Value::indentation(bytes, offset, limit);
+        offset += indentation(bytes, offset, limit);
         self.first = offset;
         self.assign = usize::MAX;
         while offset < limit && bytes[offset] != b'\n' {
@@ -208,7 +217,7 @@ where
             self.first = offset - 1;
             self.end = offset - 1;
         }
-        offset += Value::indentation(bytes, offset, limit);
+        offset += indentation(bytes, offset, limit);
         self.tabs = offset - 1 - self.end;
         return Some(true);
     }
@@ -217,9 +226,9 @@ where
     /// continue, so stretch it out to include the whole thing by changing `end`.
     /// return None if the report signals abort.
     fn stretch(&mut self, indent: usize, from: usize) -> Option<Value<'a>> {
-        let value = Value::parse(indent, &self.utf8[from..]);
+        let value = Value::slice_prefix(indent, &self.utf8[from..]);
         let slice = value
-            .shortcut(indent)
+            .verbatim(indent)
             .expect("impossible because just parsed");
         self.end = from + slice.as_bytes().len();
         self.next(usize::MAX)?; // stretch means excess is impossible
@@ -233,7 +242,7 @@ where
             return false;
         }
         assert!(bytes[offset] == b'\n', "impossible: not at newline");
-        let tabs = Value::indentation(bytes, offset + 1, limit);
+        let tabs = indentation(bytes, offset + 1, limit);
         if tabs < indent {
             return false;
         }
@@ -411,7 +420,7 @@ where
                         self.report(ParseError::at(self.line, "malformed `<key>` in dict"))?;
                         self.next(indent)?;
                     } else {
-                        key = Value::new(&self.utf8[self.first + 1..self.end - 1]);
+                        key = self.utf8[self.first + 1..self.end - 1].into();
                         let end = self.end;
                         item = Some(
                             if !self.stretch_once(indent + 1) {
@@ -430,7 +439,7 @@ where
                         self.report(ParseError::at(self.line, "malformed `[key]` in dict"))?;
                         self.next(indent)?;
                     } else {
-                        key = Value::new(&self.utf8[self.first + 1..self.end - 1]);
+                        key = self.utf8[self.first + 1..self.end - 1].into();
                         self.next(indent + 1)?;
                         item = Some(self.items(indent + 1, arena)?.into());
                     }
@@ -440,7 +449,7 @@ where
                         self.report(ParseError::at(self.line, "malformed `{key}` in dict"))?;
                         self.next(indent)?;
                     } else {
-                        key = Value::new(&self.utf8[self.first + 1..self.end - 1]);
+                        key = self.utf8[self.first + 1..self.end - 1].into();
                         self.next(indent + 1)?;
                         item = Some(self.entries(indent + 1, arena)?.into());
                     }
@@ -454,7 +463,7 @@ where
                         self.report(ParseError::at(self.line, "missing `=` in dict"))?;
                         self.next(indent)?;
                     } else {
-                        key = Value::new(&self.utf8[self.first..self.assign]);
+                        key = self.utf8[self.first..self.assign].into();
                         item = Some(self.text(indent, self.assign + 1)?.into());
                     }
                 }
@@ -527,8 +536,11 @@ mod tests {
         assert!(file.hashbang.is_none());
         assert!(file.prolog.is_none());
         assert_eq!(file.cells.len(), 1);
-        let entry = file.cells[file.position("k").unwrap()].get();
-        let Item::Text(text) = entry.item else {
+        let key: Value<'_> = "k".into();
+        let Some(position) = key.find_linearly_in(file.cells) else {
+            panic!("no 'k' key found");
+        };
+        let Item::Text(text) = file.cells[position].get().item else {
             panic!("not text?");
         };
         assert_lines_eq!(text, "v");
@@ -542,8 +554,11 @@ mod tests {
         let file = arena.parse_or_panic("[k]\n\t1\n\t2\n\t3");
         assert!(arena.completed().is_some());
         assert_eq!(file.cells.len(), 1);
-        let entry = file.cells[file.position("k").unwrap()].get();
-        let Item::List(list) = entry.item else {
+        let key: Value<'_> = "k".into();
+        let Some(position) = key.find_linearly_in(file.cells) else {
+            panic!("no 'k' key found");
+        };
+        let Item::List(list) = file.cells[position].get().item else {
             panic!("not list?");
         };
         assert_eq!(list.cells.len(), 3);

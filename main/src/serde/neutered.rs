@@ -1,7 +1,7 @@
 extern crate alloc;
 
 use super::{ValueDe, ValueSer, seeded};
-use crate::{Dict, Entry, File, Item, List, Text, Value};
+use crate::{Dict, Entry, File, Item, List, Text};
 use alloc::format;
 use alloc::string::{String, ToString};
 use serde::de::Error;
@@ -144,11 +144,12 @@ seeded! {
             {
                 arena
                     .entry(Entry {
-                        key: Value::new(if let Some(slice) = key.shortcut(0) {
+                        key: if let Some(slice) = key.verbatim(0) {
                             slice
                         } else {
                             arena.str(&key.joined())
-                        }),
+                        }
+                        .into(),
                         item,
                         ..Default::default()
                     })

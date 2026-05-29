@@ -42,7 +42,7 @@ impl<'o, 'f> Output<'o, 'f> {
         Ok(())
     }
     fn encoded<'a>(&mut self, encoded: &Value<'a>) -> Result {
-        if let Some(slice) = encoded.shortcut(self.indent) {
+        if let Some(slice) = encoded.verbatim(self.indent) {
             self.out.write_str(slice)?;
             self.out.write_char('\n')?;
         } else {
@@ -234,9 +234,7 @@ impl<'o, 'f> Output<'o, 'f> {
 /// use tindalwic::*;
 /// fn check(gfm: &str) {
 ///     let expected = format!("#{}\n", gfm.replace("\n", "\n\t"));
-///     let comment = Comment {
-///         value: Value::new(gfm),
-///     };
+///     let comment = Comment { value: gfm.into() };
 ///     assert_eq!(comment.to_string(), expected);
 /// }
 /// check("one-liner");

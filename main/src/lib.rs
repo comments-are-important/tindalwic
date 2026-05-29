@@ -80,7 +80,7 @@ mod value {
             }
         }
         /// if the value was captured at this indent, then it can be used as is.
-        pub fn shortcut(&self, indent: usize) -> Option<&'a str> {
+        pub fn verbatim(&self, indent: usize) -> Option<&'a str> {
             let only = self.only_line();
             if only.is_some() {
                 only
@@ -113,7 +113,8 @@ mod value {
         ///
         /// No indentation is expected at the beginning, subsequent indented lines
         /// (even those with excess indentation) are included.
-        pub fn parse(indent: usize, slice: &'a str) -> Self {
+        pub fn slice_prefix(indent: usize, slice: &'a str) -> Self {
+            assert!(indent != usize::MAX, "indent can't be MAX");
             if slice.is_empty() {
                 return Value::default();
             }
@@ -130,7 +131,7 @@ mod value {
             if indent == 0 {
                 return Value { slice, indent };
             }
-            let mut tabs = Value::indentation(bytes, offset + 1, limit);
+            let mut tabs = crate::parse::indentation(bytes, offset + 1, limit);
             if tabs < indent {
                 return Value {
                     slice: &slice[..offset],
@@ -148,20 +149,12 @@ mod value {
                         return Value { slice, indent };
                     }
                 }
-                tabs = Value::indentation(bytes, offset + 1, limit);
+                tabs = crate::parse::indentation(bytes, offset + 1, limit);
                 if tabs < indent {
                     let slice = &slice[..offset];
                     return Value { slice, indent };
                 }
             }
-        }
-        /// start at provided offset, count tab chars.
-        pub fn indentation(bytes: &[u8], start: usize, limit: usize) -> usize {
-            let mut offset = start;
-            while offset < limit && bytes[offset] == b'\t' {
-                offset += 1;
-            }
-            offset - start
         }
     }
     impl<'a> Default for Value<'a> {
@@ -175,9 +168,23 @@ mod value {
 }
 pub use value::Value;
 impl<'a> Value<'a> {
-    /// The provided string is used verbatim (no indentation).
-    pub fn new(value: &'a str) -> Self {
-        Value::parse(0, value)
+    /// linear `O(n)` scan.
+    // TODO: add link to `alloc` map view, say it "offers `O(1)`."
+    pub fn find_linearly_in(self, cells: &'a [Cell<Entry<'a>>]) -> Option<usize> {
+        cells.iter().position(|cell| cell.get().key == self)
+    }
+}
+impl<'a> From<&'a str> for Value<'a> {
+    fn from(value: &'a str) -> Self {
+        Value::slice_prefix(0, value)
+    }
+}
+impl<'a> Eq for Value<'a> {}
+impl<'a> core::hash::Hash for Value<'a> {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        for line in self.lines() {
+            line.hash(state);
+        }
     }
 }
 
@@ -203,7 +210,7 @@ impl<'a> Value<'a> {
 /// # {
 /// use tindalwic::*;
 /// let comment = Comment {
-///     value: Value::new("with ~strikethrough~ extension"),
+///     value: "with ~strikethrough~ extension".into(),
 /// };
 ///
 /// let html = markdown::to_html_with_options(&comment.joined(), &markdown::Options::gfm()).expect(
@@ -248,8 +255,7 @@ pub struct List<'a> {
 
 /// an association (from key to item) and its metadata.
 ///
-/// at the lowest level, these are stored in an array. TODO a Map view can be
-/// built (if the `alloc` feature is enabled).
+/// at the lowest level, these are stored in an array.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Entry<'a> {
     /// a key can have a blank line before it (before its comment)
@@ -276,12 +282,6 @@ impl<'a> Entry<'a> {
     pub fn array<const N: usize>() -> [Cell<Entry<'a>>; N] {
         ::core::array::from_fn::<_, N, _>(|_| Cell::default())
     }
-    fn position(cells: &'a [Cell<Entry<'a>>], key: &'_ str) -> Option<usize> {
-        cells.iter().position(|x| {
-            let first = x.get().key.lines().next().unwrap_or(""); // TODO key.one_liner
-            first == key
-        })
-    }
 }
 
 /// [Item::Dict] wraps a sequence of `Cell<Entry>`, and optional prolog and epilog comments.
@@ -293,12 +293,6 @@ pub struct Dict<'a> {
     pub cells: &'a [Cell<Entry<'a>>],
     /// A Dict can have a Comment after it.
     pub epilog: Option<Comment<'a>>,
-}
-impl<'a> Dict<'a> {
-    /// return Some(index of entry) of the first one matching the given key.
-    pub fn position(&self, key: &'_ str) -> Option<usize> {
-        Entry::position(self.cells, key)
-    }
 }
 
 // ------------------------------------------------------------------------------------
@@ -326,7 +320,7 @@ impl<'a> Item<'a> {
     /// wrap a value (no epilog) into an Item::Text
     pub fn text(value: &'a str) -> Self {
         Item::Text(Text {
-            value: Value::new(value),
+            value: value.into(),
             ..Default::default()
         })
     }
@@ -361,12 +355,6 @@ pub struct File<'a> {
     /// The contents of the Item::File.
     pub cells: &'a [Cell<Entry<'a>>],
 }
-impl<'a> File<'a> {
-    /// return Some(index of entry) of the first one matching the given key.
-    pub fn position(&self, key: &'_ str) -> Option<usize> {
-        Entry::position(self.cells, key)
-    }
-}
 
 #[cfg(test)]
 #[allow(unused_extern_crates)]
@@ -389,6 +377,10 @@ mod tests {
 
     #[test]
     fn value_eq() {
-        assert_eq!(Value::new("ONE\nTWO"), Value::parse(1, "ONE\n\tTWO"));
+        let zero: Value<'_> = "ONE\nTWO".into();
+        let one = Value::slice_prefix(1, "ONE\n\tTWO");
+        let two = Value::slice_prefix(2, "ONE\n\t\tTWO");
+        assert_eq!(zero, one);
+        assert_eq!(one, two);
     }
 }

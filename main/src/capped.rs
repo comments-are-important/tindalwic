@@ -2,7 +2,7 @@
 //! but you should probably not use these directly, macros are much easier.
 
 use crate::parse::{Builder, Input, ParseError, Reported};
-use crate::{Dict, Entry, File, Item, List, Value};
+use crate::{Dict, Entry, File, Item, List};
 
 use core::cell::Cell;
 
@@ -146,7 +146,7 @@ impl<'a> Arena<'a> {
     /// push an entry into builder memory for future .dict call to use.
     pub fn keyed(&self, key: &'a str, item: Item<'a>) -> Result<(), ParseError> {
         self.entry(Entry {
-            key: Value::new(key),
+            key: key.into(),
             item,
             ..Default::default()
         })

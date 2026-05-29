@@ -217,7 +217,7 @@ seeded! {
                         if key.is_some() {
                             return Err(Error::duplicate_field("key"));
                         }
-                        key = Some(Value::new(arena.str(&map.next_value::<String>()?)));
+                        key = Some(arena.str(&map.next_value::<String>()?).into());
                     }
                     EntryFields::Item => {
                         if item.is_some() {

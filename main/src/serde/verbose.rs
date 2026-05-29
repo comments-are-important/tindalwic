@@ -2,7 +2,6 @@ extern crate alloc;
 
 use super::{CommentDe, CommentSer, ValueDe, ValueSer, seeded};
 use super::{DictFields, EntryFields, FileFields, ItemVariants, ListFields, TextFields};
-use crate::Value;
 use crate::{Dict, Entry, File, Item, List, Text};
 use alloc::string::{String, ToString};
 use core::cell::Cell;
@@ -182,7 +181,9 @@ seeded! {
                 before: seq
                     .next_element_seed(CommentDe::of(arena))?
                     .ok_or_else(err)?,
-                key: Value::new(arena.str(&seq.next_element::<String>()?.ok_or_else(err)?)),
+                key: arena
+                    .str(&seq.next_element::<String>()?.ok_or_else(err)?)
+                    .into(),
                 item: seq.next_element_seed(ItemDe::of(arena))?.ok_or_else(err)?,
             })
         }
@@ -209,7 +210,7 @@ seeded! {
                         if key.is_some() {
                             return Err(Error::duplicate_field("key"));
                         }
-                        key = Some(Value::new(arena.str(&map.next_value::<String>()?)));
+                        key = Some(arena.str(&map.next_value::<String>()?).into());
                     }
                     EntryFields::Item => {
                         if item.is_some() {

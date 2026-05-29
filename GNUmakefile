@@ -121,7 +121,7 @@ main/api: nightly
 main/llvm-lines: must-run-inside
 	cd main
 	cargo install --list | grep -q cargo-llvm-lines || cargo $(BINSTALL) cargo-llvm-lines
-	cargo llvm-lines --all-features
+	cargo llvm-lines --all-features >../target/llvm-lines.out
 .PHONY: main/llvm-lines
 
 fmt: nightly
@@ -138,6 +138,7 @@ fmt: nightly
 .PHONY: fmt
 
 msrv: must-run-inside
+	set -e
 	cargo install --list | grep -q cargo-llvm-lines || cargo $(BINSTALL) cargo-msrv
 	echo macros $$(cargo msrv verify --output-format minimal --path macros)
 	echo main   $$(cargo msrv verify --output-format minimal --path main)

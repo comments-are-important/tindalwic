@@ -18,7 +18,7 @@ use std::fmt::{self, Write};
 use tindalwic::bumpalo::Arena;
 use tindalwic::parse::ParseError;
 use tindalwic::serde::Verbose;
-use tindalwic::{Comment, Dict, Entry, File, Item, List, Value};
+use tindalwic::{Comment, Dict, Entry, File, Item, List};
 
 /// a very blurry outline of some data. created first to be able to call the
 /// Arena/Builder API in the order it requires.
@@ -124,7 +124,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
     fn comment(&mut self) -> Option<Comment<'a>> {
         if self.rng.random_bool(0.5) {
             Some(Comment {
-                value: Value::new(self.value(true)),
+                value: self.value(true).into(),
             })
         } else {
             None
@@ -154,7 +154,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
     fn dict(&mut self, shape: &Silhouette) -> Result<Dict<'a>, ParseError> {
         for kid in &shape.children {
             let before = self.comment();
-            let key = Value::new(self.value(false));
+            let key = self.value(false).into();
             let item = self.item(kid)?;
             self.arena.entry(Entry {
                 gap: self.rng.random_bool(0.2),

@@ -3,6 +3,7 @@ name = "tindalwic"
 description = "tindalwic data format and tools"
 version = { workspace = true }
 edition = { workspace = true }
+rust-version = { workspace = true }
 authors = { workspace = true }
 repository = { workspace = true }
 license = { workspace = true }

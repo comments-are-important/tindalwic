@@ -3,6 +3,7 @@ name = "tindalwic-webapp"
 description = "a simple tindalwic browser app"
 version = { workspace = true }
 edition = { workspace = true }
+rust-version = "1.87"
 authors = { workspace = true }
 repository = { workspace = true }
 license = { workspace = true }

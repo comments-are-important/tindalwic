@@ -176,7 +176,7 @@ mod value {
 pub use value::Value;
 impl<'a> Value<'a> {
     /// The provided string is used verbatim (no indentation).
-    pub fn wrap(value: &'a str) -> Self {
+    pub fn new(value: &'a str) -> Self {
         Value::parse(0, value)
     }
 }
@@ -201,8 +201,10 @@ impl<'a> Value<'a> {
 /// ```
 /// # #[cfg(feature="alloc")]
 /// # {
-/// let value = tindalwic::Value::wrap("with ~strikethrough~ extension");
-/// let comment = tindalwic::Comment { value };
+/// use tindalwic::*;
+/// let comment = Comment {
+///     value: Value::new("with ~strikethrough~ extension"),
+/// };
 ///
 /// let html = markdown::to_html_with_options(&comment.joined(), &markdown::Options::gfm()).expect(
 ///     "should never error, according to:
@@ -324,7 +326,7 @@ impl<'a> Item<'a> {
     /// wrap a value (no epilog) into an Item::Text
     pub fn text(value: &'a str) -> Self {
         Item::Text(Text {
-            value: Value::wrap(value),
+            value: Value::new(value),
             ..Default::default()
         })
     }
@@ -387,6 +389,6 @@ mod tests {
 
     #[test]
     fn value_eq() {
-        assert_eq!(Value::wrap("ONE\nTWO"), Value::parse(1, "ONE\n\tTWO"));
+        assert_eq!(Value::new("ONE\nTWO"), Value::parse(1, "ONE\n\tTWO"));
     }
 }

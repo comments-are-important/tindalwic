@@ -32,7 +32,7 @@ seeded! {
             }
         }
         fn visit_str() {
-            Ok(Value::wrap(arena.str(v)))
+            Ok(Value::new(arena.str(v)))
         }
     }
 } // !seeded

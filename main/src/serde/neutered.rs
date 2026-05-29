@@ -142,17 +142,16 @@ seeded! {
             while let Some((key, item)) =
                 map.next_entry_seed(ValueDe::of(arena), ItemDe::of(arena))?
             {
-                let mut entry = Entry {
-                    item,
-                    ..Default::default()
-                };
-                if let Some(slice) = key.shortcut(0) {
-                    entry.key = Value::wrap(slice);
-                } else {
-                    entry.key = Value::wrap(arena.str(&key.joined()));
-                }
                 arena
-                    .entry(entry)
+                    .entry(Entry {
+                        key: Value::new(if let Some(slice) = key.shortcut(0) {
+                            slice
+                        } else {
+                            arena.str(&key.joined())
+                        }),
+                        item,
+                        ..Default::default()
+                    })
                     .map_err(|err| Error::custom(err.to_string()))?;
                 count += 1;
             }

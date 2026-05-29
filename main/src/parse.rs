@@ -411,7 +411,7 @@ where
                         self.report(ParseError::at(self.line, "malformed `<key>` in dict"))?;
                         self.next(indent)?;
                     } else {
-                        key = Value::wrap(&self.utf8[self.first + 1..self.end - 1]);
+                        key = Value::new(&self.utf8[self.first + 1..self.end - 1]);
                         let end = self.end;
                         item = Some(
                             if !self.stretch_once(indent + 1) {
@@ -430,7 +430,7 @@ where
                         self.report(ParseError::at(self.line, "malformed `[key]` in dict"))?;
                         self.next(indent)?;
                     } else {
-                        key = Value::wrap(&self.utf8[self.first + 1..self.end - 1]);
+                        key = Value::new(&self.utf8[self.first + 1..self.end - 1]);
                         self.next(indent + 1)?;
                         item = Some(self.items(indent + 1, arena)?.into());
                     }
@@ -440,7 +440,7 @@ where
                         self.report(ParseError::at(self.line, "malformed `{key}` in dict"))?;
                         self.next(indent)?;
                     } else {
-                        key = Value::wrap(&self.utf8[self.first + 1..self.end - 1]);
+                        key = Value::new(&self.utf8[self.first + 1..self.end - 1]);
                         self.next(indent + 1)?;
                         item = Some(self.entries(indent + 1, arena)?.into());
                     }
@@ -454,7 +454,7 @@ where
                         self.report(ParseError::at(self.line, "missing `=` in dict"))?;
                         self.next(indent)?;
                     } else {
-                        key = Value::wrap(&self.utf8[self.first..self.assign]);
+                        key = Value::new(&self.utf8[self.first..self.assign]);
                         item = Some(self.text(indent, self.assign + 1)?.into());
                     }
                 }

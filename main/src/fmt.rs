@@ -231,10 +231,13 @@ impl<'o, 'f> Output<'o, 'f> {
 /// # Examples
 ///
 /// ```
+/// use tindalwic::*;
 /// fn check(gfm: &str) {
 ///     let expected = format!("#{}\n", gfm.replace("\n", "\n\t"));
-///     let value = tindalwic::Value::wrap(gfm);
-///     assert_eq!(tindalwic::Comment { value }.to_string(), expected);
+///     let comment = Comment {
+///         value: Value::new(gfm),
+///     };
+///     assert_eq!(comment.to_string(), expected);
 /// }
 /// check("one-liner");
 /// check("two\nlines");

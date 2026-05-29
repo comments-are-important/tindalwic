@@ -51,6 +51,9 @@ httpd: must-run-outside
 
 # =====================================================================================
 
+all: fmt msrv main/test doc main/api main/llvm-lines webapp main/rand
+.PHONY: all
+
 test: main/test main/rand
 .PHONY: test
 
@@ -133,6 +136,13 @@ fmt: nightly
 	  -e 's|^}; // !seeded$$|} // !seeded|' \
 	  main/src/serde/*.rs
 .PHONY: fmt
+
+msrv: must-run-inside
+	cargo install --list | grep -q cargo-llvm-lines || cargo $(BINSTALL) cargo-msrv
+	echo macros $$(cargo msrv verify --output-format minimal --path macros)
+	echo main   $$(cargo msrv verify --output-format minimal --path main)
+	echo webapp $$(cargo msrv verify --output-format minimal --path webapp)
+.PHONY: msrv
 
 # =====================================================================================
 

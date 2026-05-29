@@ -1,7 +1,6 @@
 #![allow(missing_docs)]
 
-use tindalwic::{Comment, Dict, Entry, File, Item};
-use tindalwic::{Value, arena, json, walk};
+use tindalwic::{Comment, Dict, Entry, File, Item, Value, arena, json, walk};
 
 // #[test]
 // fn macro_failures() {
@@ -9,8 +8,9 @@ use tindalwic::{Value, arena, json, walk};
 // }
 
 fn some_comment<'a>(value: &'a str) -> Option<Comment<'a>> {
-    let value = Value::wrap(value);
-    Some(Comment { value })
+    Some(Comment {
+        value: Value::new(value),
+    })
 }
 
 #[cfg(feature = "alloc")]

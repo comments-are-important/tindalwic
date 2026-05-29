@@ -70,7 +70,7 @@ seeded! {
                 }
             }
             Ok(Text {
-                value: value.unwrap_or_else(|| Value::wrap("")),
+                value: value.unwrap_or_else(Value::default),
                 epilog: epilog.unwrap_or(None),
             })
         }
@@ -217,7 +217,7 @@ seeded! {
                         if key.is_some() {
                             return Err(Error::duplicate_field("key"));
                         }
-                        key = Some(Value::wrap(arena.str(&map.next_value::<String>()?)));
+                        key = Some(Value::new(arena.str(&map.next_value::<String>()?)));
                     }
                     EntryFields::Item => {
                         if item.is_some() {

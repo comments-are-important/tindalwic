@@ -146,7 +146,7 @@ impl<'a> Arena<'a> {
     /// push an entry into builder memory for future .dict call to use.
     pub fn keyed(&self, key: &'a str, item: Item<'a>) -> Result<(), ParseError> {
         self.entry(Entry {
-            key: Value::wrap(key),
+            key: Value::new(key),
             item,
             ..Default::default()
         })

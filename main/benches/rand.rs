@@ -123,8 +123,9 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
     }
     fn comment(&mut self) -> Option<Comment<'a>> {
         if self.rng.random_bool(0.5) {
-            let value = Value::wrap(self.value(true));
-            Some(Comment { value })
+            Some(Comment {
+                value: Value::new(self.value(true)),
+            })
         } else {
             None
         }
@@ -152,12 +153,11 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
     }
     fn dict(&mut self, shape: &Silhouette) -> Result<Dict<'a>, ParseError> {
         for kid in &shape.children {
-            let item = self.item(kid)?;
-            let gap = self.rng.random_bool(0.2);
             let before = self.comment();
-            let key = Value::wrap(self.value(false));
+            let key = Value::new(self.value(false));
+            let item = self.item(kid)?;
             self.arena.entry(Entry {
-                gap,
+                gap: self.rng.random_bool(0.2),
                 before,
                 key,
                 item,

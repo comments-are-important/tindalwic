@@ -182,7 +182,7 @@ seeded! {
                 before: seq
                     .next_element_seed(CommentDe::of(arena))?
                     .ok_or_else(err)?,
-                key: Value::wrap(arena.str(&seq.next_element::<String>()?.ok_or_else(err)?)),
+                key: Value::new(arena.str(&seq.next_element::<String>()?.ok_or_else(err)?)),
                 item: seq.next_element_seed(ItemDe::of(arena))?.ok_or_else(err)?,
             })
         }
@@ -209,7 +209,7 @@ seeded! {
                         if key.is_some() {
                             return Err(Error::duplicate_field("key"));
                         }
-                        key = Some(Value::wrap(arena.str(&map.next_value::<String>()?)));
+                        key = Some(Value::new(arena.str(&map.next_value::<String>()?)));
                     }
                     EntryFields::Item => {
                         if item.is_some() {

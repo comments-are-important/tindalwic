@@ -1,7 +1,5 @@
 //! everything related to converting bytes into a File
 
-use core::usize;
-
 use crate::Value;
 use crate::{Comment, Dict, Entry, File, Item, List, Text};
 
@@ -9,46 +7,34 @@ use crate::{Comment, Dict, Entry, File, Item, List, Text};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParseError {
     /// a problem in the Tindalwic
-    Syntax(SyntaxError),
+    Syntax {
+        /// the first line (inclusive ala Range::start)
+        start: usize,
+        /// one past last line (exclusive ala Range::end)
+        end: usize,
+        /// English description of the problem
+        message: &'static str,
+    },
     /// ran out of room in the storage
-    Memory(MemoryError),
+    Memory(
+        /// English description of the problem
+        &'static str,
+    ),
 }
 impl core::error::Error for ParseError {}
 impl ParseError {
     /// make a Syntax error with an arbitrary span of lines.
-    pub(crate) fn new(start: usize, end: usize, message: &'static str) -> Self {
-        ParseError::Syntax(SyntaxError {
+    fn new(start: usize, end: usize, message: &'static str) -> Self {
+        ParseError::Syntax {
             start,
             end,
             message,
-        })
+        }
     }
     /// make a Syntax error for a single line.
-    pub(crate) fn at(line: usize, message: &'static str) -> Self {
+    fn at(line: usize, message: &'static str) -> Self {
         ParseError::new(line, line + 1, message)
     }
-    /// make a Memory error
-    pub(crate) fn mem(message: &'static str) -> Self {
-        ParseError::Memory(MemoryError { message })
-    }
-}
-
-/// ran out of room in the storage
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MemoryError {
-    /// English description of the problem
-    pub message: &'static str,
-}
-
-/// a problem in the Tindalwic
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SyntaxError {
-    /// the first line (inclusive ala Range::start)
-    pub start: usize,
-    /// one past last line (exclusive ala Range::end)
-    pub end: usize,
-    /// English description of the problem
-    pub message: &'static str,
 }
 
 /// used by parser to create items
@@ -80,7 +66,7 @@ pub(crate) fn indentation(bytes: &[u8], start: usize, limit: usize) -> usize {
     offset - start
 }
 
-pub(crate) struct Input<'a, F> {
+pub(crate) struct Input<'a, 'r> {
     utf8: &'a str, // entire tindalwic encoded content
     line: usize,   // the number of the current line
     start: usize,  // start of current line, `MAX` means finished
@@ -88,15 +74,16 @@ pub(crate) struct Input<'a, F> {
     assign: usize, // the `=` on current line, `MAX` means none
     end: usize,    // the newline ending current line, or `utf8.len()`
     tabs: usize,   // indentation on this line, unless gap, then peek from next line
-    report: F,
+    report: &'r mut dyn FnMut(ParseError) -> Reported,
     good: bool,
 }
-impl<'a, F> Input<'a, F>
-where
-    F: FnMut(ParseError) -> Reported,
-{
+impl<'a, 'r> Input<'a, 'r> {
     /// None means the arena is too small (or the UTF-8 is way too big).
-    pub fn parse(arena: &dyn Builder<'a>, utf8: &'a str, report: F) -> Option<File<'a>> {
+    pub fn parse(
+        arena: &dyn Builder<'a>,
+        utf8: &'a str,
+        mut report: impl FnMut(ParseError) -> Reported + 'r,
+    ) -> Option<File<'a>> {
         let mut input = Input {
             utf8,
             line: 0,
@@ -105,14 +92,14 @@ where
             assign: 0,
             end: usize::MAX, // will wrap to 0 inside `next`
             tabs: 0,
-            report,
+            report: &mut report,
             good: true,
         };
         if utf8.len() >= usize::MAX {
             // MAX is a sentinel, so it also can't be a len. the wrap-around will almost
             // certainly never actually occur because the arena is guaranteed to fill up
             // long before that, but it's an easy sanity check...
-            input.report(ParseError::mem("way too big"))?;
+            input.report(ParseError::Memory("way too big"))?;
             return None;
         }
         input.next(0)?;
@@ -227,10 +214,7 @@ where
     /// return None if the report signals abort.
     fn stretch(&mut self, indent: usize, from: usize) -> Option<Value<'a>> {
         let value = Value::slice_prefix(indent, &self.utf8[from..]);
-        let slice = value
-            .verbatim(indent)
-            .expect("impossible because just parsed");
-        self.end = from + slice.as_bytes().len();
+        self.end = from + value.byte_count();
         self.next(usize::MAX)?; // stretch means excess is impossible
         Some(value)
     }
@@ -241,7 +225,7 @@ where
         if offset >= limit {
             return false;
         }
-        assert!(bytes[offset] == b'\n', "impossible: not at newline");
+        debug_assert!(bytes[offset] == b'\n', "impossible: not at newline");
         let tabs = indentation(bytes, offset + 1, limit);
         if tabs < indent {
             return false;
@@ -282,6 +266,17 @@ where
         let epilog = self.comment(indent, b"#")?;
         Some(Text { value, epilog })
     }
+    /// text block follows current line. block might have zero lines.
+    fn text_block(&mut self, indent: usize) -> Option<Text<'a>> {
+        let end = self.end;
+        if !self.stretch_once(indent + 1) {
+            // zero lines in this block, take empty slice from this line
+            self.text(indent, end)
+        } else {
+            // first line of stretched text can have excess indent
+            self.text(indent, end + indent + 2)
+        }
+    }
 
     /// previous line opened a list context, so parse all the items in it.
     /// None means insufficient space in Arena.
@@ -320,17 +315,7 @@ where
                             self.report(ParseError::at(self.line, "malformed `<>` in list"))?;
                             self.next(indent)?;
                         } else {
-                            let end = self.end;
-                            item = Some(
-                                if !self.stretch_once(indent + 1) {
-                                    // zero lines in this text, take empty slice from this line
-                                    self.text(indent, end)?
-                                } else {
-                                    // first line of stretched text can have excess indent
-                                    self.text(indent, end + indent + 2)?
-                                }
-                                .into(),
-                            );
+                            item = Some(self.text_block(indent)?.into());
                         }
                     }
                     b'[' => {
@@ -421,17 +406,7 @@ where
                         self.next(indent)?;
                     } else {
                         key = self.utf8[self.first + 1..self.end - 1].into();
-                        let end = self.end;
-                        item = Some(
-                            if !self.stretch_once(indent + 1) {
-                                // zero lines in this text, take empty slice from this line
-                                self.text(indent, end)?
-                            } else {
-                                // first line of stretched text can have excess indent
-                                self.text(indent, end + 1 + indent + 1)?
-                            }
-                            .into(),
-                        );
+                        item = Some(self.text_block(indent)?.into());
                     }
                 }
                 b'[' => {
@@ -442,6 +417,34 @@ where
                         key = self.utf8[self.first + 1..self.end - 1].into();
                         self.next(indent + 1)?;
                         item = Some(self.items(indent + 1, arena)?.into());
+                    }
+                }
+                b'@' => {
+                    key = self.stretch(indent + 1, self.first + 1)?;
+                    let marker = if self.end > 1 && self.first == self.end - 2 {
+                        (bytes[self.first], bytes[self.first + 1])
+                    } else {
+                        (0u8, 0u8)
+                    };
+                    match marker {
+                        (b'<', b'>') => {
+                            item = Some(self.text_block(indent)?.into());
+                        }
+                        (b'[', b']') => {
+                            self.next(indent + 1)?;
+                            item = Some(self.items(indent + 1, arena)?.into());
+                        }
+                        (b'{', b'}') => {
+                            self.next(indent + 1)?;
+                            item = Some(self.entries(indent + 1, arena)?.into());
+                        }
+                        _ => {
+                            self.report(ParseError::at(
+                                self.line,
+                                "must have `<>`, `[]` or `{}` after @multi-line-key",
+                            ))?;
+                            self.next(indent)?;
+                        }
                     }
                 }
                 b'{' => {

@@ -44,7 +44,7 @@ pub(crate) struct HeapBuilder<'a> {
 impl<'a> Builder<'a> for HeapBuilder<'a> {
     fn list(&self, count: usize) -> Result<List<'a>, ParseError> {
         let Some(cells) = self.items.finish(count, self.bump) else {
-            return Err(ParseError::mem("not enough items to make that list"));
+            return Err(ParseError::Memory("not enough items to make that list"));
         };
         Ok(List {
             cells,
@@ -53,7 +53,7 @@ impl<'a> Builder<'a> for HeapBuilder<'a> {
     }
     fn dict(&self, count: usize) -> Result<Dict<'a>, ParseError> {
         let Some(cells) = self.entries.finish(count, self.bump) else {
-            return Err(ParseError::mem("not enough entries to make that dict"));
+            return Err(ParseError::Memory("not enough entries to make that dict"));
         };
         Ok(Dict {
             cells,
@@ -63,12 +63,12 @@ impl<'a> Builder<'a> for HeapBuilder<'a> {
     fn item(&self, item: Item<'a>) -> Result<(), ParseError> {
         self.items
             .push(item)
-            .ok_or_else(|| ParseError::mem("no room for item"))
+            .ok_or_else(|| ParseError::Memory("no room for item"))
     }
     fn entry(&self, entry: Entry<'a>) -> Result<(), ParseError> {
         self.entries
             .push(entry)
-            .ok_or_else(|| ParseError::mem("no room for entry"))
+            .ok_or_else(|| ParseError::Memory("no room for entry"))
     }
 }
 impl<'a> Intern<'a> for HeapBuilder<'a> {

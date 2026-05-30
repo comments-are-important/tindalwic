@@ -65,6 +65,9 @@ mod value {
         pub fn is_empty(&self) -> bool {
             self.slice.is_empty()
         }
+        pub(crate) fn byte_count(&self) -> usize {
+            self.slice.as_bytes().len()
+        }
         /// `true` if prefix matches (see [str::starts_with]).
         ///
         /// Restricted to char until [core::str::pattern::Pattern] is stable.

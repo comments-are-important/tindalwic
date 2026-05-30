@@ -1,7 +1,7 @@
 //! code for encoding data into the Tindalwic format.
 
 use crate::Value;
-use crate::parse::{MemoryError, ParseError, SyntaxError};
+use crate::parse::ParseError;
 use crate::{Comment, Dict, Entry, File, Item, List, Text};
 
 use core::cell::Cell;
@@ -10,23 +10,25 @@ use core::fmt::{Display, Formatter, Result, Write};
 impl Display for ParseError {
     fn fmt(&self, out: &mut Formatter<'_>) -> Result {
         match self {
-            ParseError::Memory(err) => err.fmt(out),
-            ParseError::Syntax(err) => err.fmt(out),
+            ParseError::Memory(message) => out.write_str(message),
+            ParseError::Syntax {
+                start,
+                end,
+                message,
+            } => {
+                if start + 1 == *end {
+                    write!(out, "{}: {}", start, message)
+                } else {
+                    write!(out, "{}-{}: {}", start, end - 1, message)
+                }
+            }
         }
     }
 }
-impl Display for MemoryError {
+
+impl<'a> Display for File<'a> {
     fn fmt(&self, out: &mut Formatter<'_>) -> Result {
-        out.write_str(self.message)
-    }
-}
-impl Display for SyntaxError {
-    fn fmt(&self, out: &mut Formatter<'_>) -> Result {
-        if self.start + 1 == self.end {
-            write!(out, "{}: {}", self.start, self.message)
-        } else {
-            write!(out, "{}-{}: {}", self.start, self.end - 1, self.message)
-        }
+        Output { out, indent: 0 }.file(self)
     }
 }
 
@@ -41,12 +43,18 @@ impl<'o, 'f> Output<'o, 'f> {
         }
         Ok(())
     }
-    fn encoded<'a>(&mut self, encoded: &Value<'a>) -> Result {
-        if let Some(slice) = encoded.verbatim(self.indent) {
+    const fn special_first(byte: u8) -> bool {
+        matches!(
+            byte,
+            b'\t' | b'#' | b'<' | b'>' | b'@' | b'[' | b']' | b'{' | b'}' | b'/' | b'='
+        )
+    }
+    fn string<'a>(&mut self, value: &Value<'a>) -> Result {
+        if let Some(slice) = value.verbatim(self.indent) {
             self.out.write_str(slice)?;
             self.out.write_char('\n')?;
         } else {
-            let mut lines = encoded.lines();
+            let mut lines = value.lines();
             if let Some(first) = lines.next() {
                 self.out.write_str(first)?;
                 self.out.write_char('\n')?;
@@ -73,7 +81,7 @@ impl<'o, 'f> Output<'o, 'f> {
                 self.out.write_char('\n')?;
                 self.indent()?;
             }
-            self.encoded(&comment.value)?;
+            self.string(&comment.value)?;
             self.indent -= 1;
         }
         Ok(())
@@ -88,10 +96,7 @@ impl<'o, 'f> Output<'o, 'f> {
         let only = text.value.only_line()?;
         if text.value.is_empty() {
             Some(only)
-        } else if matches!(
-            only.as_bytes()[0],
-            b'\t' | b'#' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'='
-        ) {
+        } else if Output::special_first(only.as_bytes()[0]) {
             None
         } else {
             Some(only)
@@ -106,7 +111,7 @@ impl<'o, 'f> Output<'o, 'f> {
             self.out.write_str("<>\n")?;
             self.indent += 1;
             self.indent()?;
-            self.encoded(&text.value)?;
+            self.string(&text.value)?;
             self.indent -= 1;
         }
         self.comment("#", &text.epilog)
@@ -117,30 +122,39 @@ impl<'o, 'f> Output<'o, 'f> {
             Some(only)
         } else if key.contains('=') {
             None
-        } else if matches!(
-            key.as_bytes()[0],
-            b'\t' | b'#' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'='
-        ) {
+        } else if Output::special_first(key.as_bytes()[0]) {
             None
         } else {
             Some(only)
         }
     }
     fn text_in_dict<'a>(&mut self, key: &Value<'a>, text: &Text<'a>) -> Result {
-        let first = key.lines().next().unwrap_or(""); // TODO key.one_liner
         self.indent()?;
-        if let Some(slice) = Output::one_liner_in_dict(text, first) {
-            self.out.write_str(first)?;
-            self.out.write_char('=')?;
-            self.out.write_str(slice)?;
-            self.out.write_char('\n')?;
+        if let Some(only) = key.only_line() {
+            if let Some(text) = Output::one_liner_in_dict(text, only) {
+                self.out.write_str(only)?;
+                self.out.write_char('=')?;
+                self.out.write_str(text)?;
+                self.out.write_char('\n')?;
+            } else {
+                self.out.write_char('<')?;
+                self.out.write_str(only)?;
+                self.out.write_str(">\n")?;
+                self.indent += 1;
+                self.indent()?;
+                self.string(&text.value)?;
+                self.indent -= 1;
+            }
         } else {
-            self.out.write_char('<')?;
-            self.out.write_str(first)?;
-            self.out.write_str(">\n")?;
+            self.out.write_char('@')?;
+            self.indent += 1;
+            self.string(key)?;
+            self.indent -= 1;
+            self.indent()?;
+            self.out.write_str("<>\n")?;
             self.indent += 1;
             self.indent()?;
-            self.encoded(&text.value)?;
+            self.string(&text.value)?;
             self.indent -= 1;
         }
         self.comment("#", &text.epilog)
@@ -157,11 +171,19 @@ impl<'o, 'f> Output<'o, 'f> {
         self.comment("#", &list.epilog)
     }
     fn list_in_dict<'a>(&mut self, key: &Value<'a>, list: &List<'a>) -> Result {
-        let first = key.lines().next().unwrap_or(""); // TODO key.one_liner
         self.indent()?;
-        self.out.write_char('[')?;
-        self.out.write_str(first)?;
-        self.out.write_str("]\n")?;
+        if let Some(only) = key.only_line() {
+            self.out.write_char('[')?;
+            self.out.write_str(only)?;
+            self.out.write_str("]\n")?;
+        } else {
+            self.out.write_char('@')?;
+            self.indent += 1;
+            self.string(key)?;
+            self.indent -= 1;
+            self.indent()?;
+            self.out.write_str("[]\n")?;
+        }
         self.indent += 1;
         self.comment("#", &list.prolog)?;
         for cell in list.cells {
@@ -182,11 +204,19 @@ impl<'o, 'f> Output<'o, 'f> {
         self.comment("#", &dict.epilog)
     }
     fn dict_in_dict<'a>(&mut self, key: &Value<'a>, dict: &Dict<'a>) -> Result {
-        let first = key.lines().next().unwrap_or(""); // TODO key.one_liner
         self.indent()?;
-        self.out.write_char('{')?;
-        self.out.write_str(first)?;
-        self.out.write_str("}\n")?;
+        if let Some(only) = key.only_line() {
+            self.out.write_char('{')?;
+            self.out.write_str(only)?;
+            self.out.write_str("}\n")?;
+        } else {
+            self.out.write_char('@')?;
+            self.indent += 1;
+            self.string(key)?;
+            self.indent -= 1;
+            self.indent()?;
+            self.out.write_str("{}\n")?;
+        }
         self.indent += 1;
         self.comment("#", &dict.prolog)?;
         for cell in dict.cells {
@@ -220,71 +250,8 @@ impl<'o, 'f> Output<'o, 'f> {
         self.comment("#!", &file.hashbang)?;
         self.comment("#", &file.prolog)?;
         for cell in file.cells {
-            self.entry_in_dict(&cell)?;
+            self.entry_in_dict(cell)?;
         }
         Ok(())
     }
 }
-
-/// Serialize using the "#" marker (ignoring any actual position).
-///
-/// # Examples
-///
-/// ```
-/// use tindalwic::*;
-/// fn check(gfm: &str) {
-///     let expected = format!("#{}\n", gfm.replace("\n", "\n\t"));
-///     let comment = Comment { value: gfm.into() };
-///     assert_eq!(comment.to_string(), expected);
-/// }
-/// check("one-liner");
-/// check("two\nlines");
-/// check(
-///     "# heading
-/// paragraph
-///     blockquote
-/// ",
-/// );
-/// ```
-impl<'a> Display for Comment<'a> {
-    fn fmt(&self, out: &mut Formatter<'_>) -> Result {
-        Output { out, indent: 0 }.some_comment("#", self)
-    }
-}
-
-impl<'a> Display for Text<'a> {
-    fn fmt(&self, out: &mut Formatter<'_>) -> Result {
-        Output { out, indent: 0 }.text_in_list(self)
-    }
-}
-
-impl<'a> Display for List<'a> {
-    fn fmt(&self, out: &mut Formatter<'_>) -> Result {
-        Output { out, indent: 0 }.list_in_list(self)
-    }
-}
-
-impl<'a> Display for Dict<'a> {
-    fn fmt(&self, out: &mut Formatter<'_>) -> Result {
-        Output { out, indent: 0 }.dict_in_list(self)
-    }
-}
-
-impl<'a> Display for Item<'a> {
-    fn fmt(&self, out: &mut Formatter<'_>) -> Result {
-        let mut out = Output { out, indent: 0 };
-        match self {
-            Item::Text(text) => out.text_in_list(text),
-            Item::List(list) => out.list_in_list(list),
-            Item::Dict(dict) => out.dict_in_list(dict),
-        }
-    }
-}
-
-impl<'a> Display for File<'a> {
-    fn fmt(&self, out: &mut Formatter<'_>) -> Result {
-        Output { out, indent: 0 }.file(self)
-    }
-}
-
-// TODO file is good, but others include a superfluous introductory first line

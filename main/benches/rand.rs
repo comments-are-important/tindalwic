@@ -95,8 +95,9 @@ pub struct Random<'a, 'r, R: Rng + ?Sized> {
     sample: Vec<char>,
 }
 impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
-    fn value(&mut self, newline: bool) -> &'a str {
+    fn value(&mut self) -> &'a str {
         let mut value = String::new();
+        let newline = self.rng.random_bool(0.5);
         let lines = if !newline {
             1
         } else {
@@ -124,7 +125,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
     fn comment(&mut self) -> Option<Comment<'a>> {
         if self.rng.random_bool(0.5) {
             Some(Comment {
-                value: self.value(true).into(),
+                value: self.value().into(),
             })
         } else {
             None
@@ -138,7 +139,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
                 Item::List(self.list(parent)?)
             }
         } else {
-            Item::text(self.value(true))
+            Item::text(self.value())
         })
     }
     fn list(&mut self, shape: &Silhouette) -> Result<List<'a>, ParseError> {
@@ -154,7 +155,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
     fn dict(&mut self, shape: &Silhouette) -> Result<Dict<'a>, ParseError> {
         for kid in &shape.children {
             let before = self.comment();
-            let key = self.value(false).into();
+            let key = self.value().into();
             let item = self.item(kid)?;
             self.arena.entry(Entry {
                 gap: self.rng.random_bool(0.2),

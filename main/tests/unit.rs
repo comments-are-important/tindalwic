@@ -12,6 +12,12 @@ fn some_comment<'a>(value: &'a str) -> Option<Comment<'a>> {
         value: value.into(),
     })
 }
+fn file<'a>(dict: &Dict<'a>) -> File<'a> {
+    File {
+        cells: dict.cells,
+        ..Default::default()
+    }
+}
 
 #[cfg(feature = "alloc")]
 mod alloc_tests {
@@ -88,7 +94,27 @@ fn two_lines() {
     json! {
         let dict = {"key":"one\ntwo"}.unwrap();
     }
-    assert_eq!(dict.to_string(), "{}\n\t<key>\n\t\tone\n\t\ttwo\n");
+    assert_eq!(file(&dict).to_string(), "<key>\n\tone\n\ttwo\n");
+}
+
+#[test]
+fn multi_line_key() {
+    arena! {
+        let mut arena = <2dict>;
+    }
+    let data = "@one\n\ttwo\n<>\n\tv\n";
+    let file = arena.parse_or_panic(data);
+    assert_eq!(file.to_string(), data);
+    let report = |err| {
+        print!("{err}");
+        tindalwic::parse::Reported::Continue
+    };
+    assert!(arena.parse("@", report).is_none());
+    assert!(arena.parse("@k", report).is_none());
+    assert!(arena.parse("@k\n", report).is_none());
+    assert!(arena.parse("@k\n<", report).is_none());
+    assert!(arena.parse("@k\n<>", report).is_some());
+    assert!(arena.parse("@k\n<x>", report).is_none());
 }
 
 #[test]
@@ -96,8 +122,14 @@ fn nested_lists() {
     json! {
         let list = [[[["value"]]]].unwrap();
     }
+    let mut array = Entry::array::<1>();
+    array[0].get_mut().item = list.into();
+    let file = File {
+        cells: &array[..],
+        ..Default::default()
+    };
     assert_eq!(
-        list.to_string(),
+        file.to_string(),
         "[]\n\t[]\n\t\t[]\n\t\t\t[]\n\t\t\t\tvalue\n"
     );
     walk! {
@@ -118,8 +150,8 @@ fn nested_dicts() {
     }
     assert_eq!(keys, vec!["1", "2", "a"]);
     assert_eq!(
-        dict.to_string(),
-        "{}\n\t1=one\n\t[2]\n\t\ttwo\n\t{a}\n\t\t{b}\n\t\t\t{c}\n\t\t\t\t{d}\n\t\t\t\t\tk=v\n"
+        file(&dict).to_string(),
+        "1=one\n[2]\n\ttwo\n{a}\n\t{b}\n\t\t{c}\n\t\t\t{d}\n\t\t\t\tk=v\n"
     );
     walk! {
         let text = {dict}{"a"}{"b"}{"c"}{"d"}<"k">.unwrap();
@@ -136,7 +168,7 @@ fn change_in_list() {
         let (_text, cell) = {dict}{"a"}["b"]<0>.unwrap();
     }
     cell.set(Item::text("c"));
-    assert_eq!(dict.to_string(), "{}\n\t{a}\n\t\t[b]\n\t\t\tc\n");
+    assert_eq!(file(&dict).to_string(), "{a}\n\t[b]\n\t\tc\n");
 }
 
 #[test]
@@ -149,7 +181,7 @@ fn change_in_dict() {
     }
     entry.item = Item::text("c");
     cell.set(entry);
-    assert_eq!(dict.to_string(), "{}\n\t[a]\n\t\t{}\n\t\t\tb=c\n");
+    assert_eq!(file(&dict).to_string(), "[a]\n\t{}\n\t\tb=c\n");
 }
 
 #[test]
@@ -164,7 +196,7 @@ fn inject_comments() {
     text.epilog = some_comment("c");
     entry.item = Item::Text(text);
     cell.set(entry);
-    assert_eq!(dict.to_string(), "{}\n\t//b\n\tk=v\n\t#c\n");
+    assert_eq!(file(&dict).to_string(), "//b\nk=v\n#c\n");
 }
 
 #[test]
@@ -182,10 +214,7 @@ fn change_structure() {
         let patch = {"p":(resolved)}.unwrap();
     }
     cell.set(patch.into());
-    assert_eq!(
-        changing.to_string(),
-        "{}\n\t[k]\n\t\t{}\n\t\t\tp=v\n\t\t\t#b\n"
-    )
+    assert_eq!(file(&changing).to_string(), "[k]\n\t{}\n\t\tp=v\n\t\t#b\n")
 }
 
 /*

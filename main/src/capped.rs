@@ -72,7 +72,7 @@ impl<'a> StackBuilder<'a> {
 impl<'a> Builder<'a> for StackBuilder<'a> {
     fn list(&self, count: usize) -> Result<List<'a>, ParseError> {
         let Some(cells) = self.items.finish(count) else {
-            return Err(ParseError::mem("not enough items to make that list"));
+            return Err(ParseError::Memory("not enough items to make that list"));
         };
         Ok(List {
             cells,
@@ -81,7 +81,7 @@ impl<'a> Builder<'a> for StackBuilder<'a> {
     }
     fn dict(&self, count: usize) -> Result<Dict<'a>, ParseError> {
         let Some(cells) = self.entries.finish(count) else {
-            return Err(ParseError::mem("not enough entries to make that dict"));
+            return Err(ParseError::Memory("not enough entries to make that dict"));
         };
         Ok(Dict {
             cells,
@@ -91,12 +91,12 @@ impl<'a> Builder<'a> for StackBuilder<'a> {
     fn item(&self, item: Item<'a>) -> Result<(), ParseError> {
         self.items
             .push(item)
-            .ok_or_else(|| ParseError::mem("no room for item"))
+            .ok_or_else(|| ParseError::Memory("no room for item"))
     }
     fn entry(&self, entry: Entry<'a>) -> Result<(), ParseError> {
         self.entries
             .push(entry)
-            .ok_or_else(|| ParseError::mem("no room for entry"))
+            .ok_or_else(|| ParseError::Memory("no room for entry"))
     }
 }
 
@@ -181,7 +181,7 @@ impl<'a> Arena<'a> {
     }
     /// call the parser on the provided content, panic if the content isn't legit.
     pub fn parse_or_panic(&self, content: &'a str) -> File<'a> {
-        Input::parse(&self.builder, content, |error| panic!("{error}"))
+        self.parse(content, |error| panic!("{error}"))
             .expect("panic should have already happened in report")
     }
     /// call the parser on the provided content, with a callback for errors.

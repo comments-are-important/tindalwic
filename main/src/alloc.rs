@@ -2,8 +2,7 @@
 
 extern crate alloc;
 
-use crate::Value;
-use crate::{Comment, Text};
+use crate::{Comment, Item, Value};
 use alloc::string::String;
 
 impl<'a> Value<'a> {
@@ -32,10 +31,14 @@ impl<'a> Comment<'a> {
     }
 }
 
-impl<'a> Text<'a> {
+impl<'a> Item<'a> {
     /// Allocates a [String], filled with the UTF-8 copied from `self`.
-    pub fn joined(&self) -> String {
-        self.value.joined()
+    pub fn joined(&self) -> Option<String> {
+        if let Item::Text { value, .. } = self {
+            Some(value.joined())
+        } else {
+            None
+        }
     }
 }
 

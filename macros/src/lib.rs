@@ -38,6 +38,13 @@ pub fn json(input: RawStream) -> RawStream {
     quote!(#output).into()
 }
 
+mod path;
+#[proc_macro]
+pub fn path(input: RawStream) -> RawStream {
+    let output = parse_macro_input!(input as DollarCrate<path::Path>);
+    quote!(#output).into()
+}
+
 mod walk;
 #[proc_macro]
 pub fn walk(input: RawStream) -> RawStream {

@@ -3,16 +3,22 @@
 //! but using these directly is not recommended.
 //! using walk! is much easier.
 
-use crate::{Dict, Entry, Item, List, Text, Value};
+use crate::{Entry, Item, Value};
 use core::cell::Cell;
 
 /// a decision along a walk.
 #[derive(Debug)]
 pub enum Branch<'p> {
     /// select list item by index
-    List(usize),
+    Item(usize),
     /// select dict entry by key
-    Dict(Value<'p>),
+    Entry(Value<'p>),
+    /// end at text
+    Text,
+    /// end at list
+    List,
+    /// end at dict
+    Dict,
 }
 /// information about where a walk went wrong.
 #[derive(Debug)]
@@ -23,139 +29,133 @@ pub struct PathError<'p> {
     pub message: &'static str,
 }
 /// a sequence of Branch built and used by the walk macro.
+///
+/// the ENTRY parameter determines the Cell inner type of `Ok` walk:
+///  + false => Item (so penultimate branch must be a Branch::Item)
+///  + true => Entry (so penultimate branch must be a Branch::Entry)
 #[derive(Debug)]
-pub struct Path<'p> {
+pub struct Path<'p, const ENTRY: bool> {
     /// all the decisions for a walk
-    pub branches: &'p [Branch<'p>],
+    branches: &'p [Branch<'p>],
 }
-impl<'p> Path<'p> {
-    /// construct a path
-    pub fn wrap(branches: &'p [Branch<'p>]) -> Self {
-        Path { branches }
-    }
+impl<'p, const ENTRY: bool> Path<'p, ENTRY> {
     /// construct an error indicating the last path step failed
-    pub fn error_full(&self, message: &'static str) -> PathError<'p> {
+    fn error_full(&self, message: &'static str) -> PathError<'p> {
         PathError {
             failed: &self.branches[..],
             message,
         }
     }
     /// construct an error indicating the given path step failed
-    pub fn error_at(&self, bad: usize, message: &'static str) -> PathError<'p> {
+    fn error_at(&self, bad: usize, message: &'static str) -> PathError<'p> {
         PathError {
             failed: &self.branches[..=bad],
             message,
         }
     }
-    /// return a copy of the Text item (or Err if it isn't a text).
-    pub fn text<'a>(&self, item: &Item<'a>) -> Result<Text<'a>, PathError<'p>> {
-        let Item::Text(text) = item else {
-            return Err(self.error_full("path does not end at Text"));
-        };
-        Ok(*text)
-    }
-    /// return a copy of the List item (or Err if it isn't a list).
-    pub fn list<'a>(&self, item: &Item<'a>) -> Result<List<'a>, PathError<'p>> {
-        let Item::List(list) = item else {
-            return Err(self.error_full("path does not end at List"));
-        };
-        Ok(*list)
-    }
-    /// return a copy of the Dict item (or Err if it isn't a dict).
-    pub fn dict<'a>(&self, item: &Item<'a>) -> Result<Dict<'a>, PathError<'p>> {
-        let Item::Dict(dict) = item else {
-            return Err(self.error_full("path does not end at Dict"));
-        };
-        Ok(*dict)
-    }
-    /// walk down a path that starts at a list
-    pub fn item_cell<'a>(&self, item: &Item<'a>) -> Result<&'a Cell<Item<'a>>, PathError<'p>>
-    where
-        'p: 'a,
-    {
-        if self.branches.is_empty() {
-            return Err(self.error_full("empty path can't be resolved"));
+}
+impl<'p> Path<'p, false> {
+    /// construct a path expected to end at an item in a list
+    pub fn new(branches: &'p [Branch<'p>]) -> Self {
+        let mut rev = branches.iter().rev();
+        match rev.next() {
+            Some(Branch::Text) | Some(Branch::List) | Some(Branch::Dict) => (),
+            _ => panic!("path must end with: Text|List|Dict"),
         }
-        let mut from = *item;
-        for (step, branch) in self.branches.iter().enumerate() {
-            match &from {
-                Item::Text(_text) => {
-                    return Err(self.error_at(step, "path ended prematurely by a text item"));
-                }
-                Item::List(list) => match branch {
-                    Branch::List(at) => match list.cells.get(*at) {
-                        None => return Err(self.error_at(step, "index out of bounds")),
-                        Some(found) => {
-                            if step + 1 == self.branches.len() {
-                                return Ok(found);
-                            }
-                            from = found.get();
-                        }
-                    },
-                    Branch::Dict(_) => {
-                        return Err(self.error_at(step, "path expected dict but found list"));
-                    }
-                },
-                Item::Dict(dict) => match branch {
-                    Branch::Dict(key) => {
-                        match key.find_linearly_in(dict.cells) {
-                            None => return Err(self.error_at(step, "key not found")),
-                            Some(found) => {
-                                from = dict.cells[found].get().item;
-                            }
-                        };
-                    }
-                    Branch::List(_) => {
-                        return Err(self.error_at(step, "path expected list but found dict"));
-                    }
-                },
+        match rev.next() {
+            Some(Branch::Item(_)) => (),
+            _ => panic!("path must end within an item in a list"),
+        }
+        while let Some(branch) = rev.next() {
+            match branch {
+                Branch::Item(_) | Branch::Entry(_) => (),
+                _ => panic!("Text|List|Dict can only be at end of path"),
             }
         }
-        Err(self.error_full("path did not end at an item inside a list"))
+        Path { branches }
     }
-    /// walk down a path that starts at a dict
-    pub fn entry_cell<'a>(&self, item: &Item<'a>) -> Result<&'a Cell<Entry<'a>>, PathError<'p>>
-    where
-        'p: 'a,
-    {
-        if self.branches.is_empty() {
-            return Err(self.error_full("empty path can't be resolved"));
-        }
-        let mut from = *item;
+    /// walk down a path that ends at an item in a list
+    pub fn walk<'a>(&self, mut item: Item<'a>) -> Result<&'a Cell<Item<'a>>, PathError<'p>> {
+        let mut cell: Option<&'a Cell<Item<'a>>> = None;
         for (step, branch) in self.branches.iter().enumerate() {
-            match &from {
-                Item::Text(_text) => {
-                    return Err(self.error_at(step, "path ended prematurely by a text item"));
+            match (branch, item) {
+                (Branch::Item(at), Item::List { cells, .. }) => {
+                    let Some(found) = cells.get(*at) else {
+                        return Err(self.error_at(step, "index out of bounds"));
+                    };
+                    cell = Some(found);
+                    item = found.get();
                 }
-                Item::List(list) => match branch {
-                    Branch::List(at) => match list.cells.get(*at) {
-                        None => return Err(self.error_at(step, "index out of bounds")),
-                        Some(found) => {
-                            from = found.get();
-                        }
-                    },
-                    Branch::Dict(_) => {
-                        return Err(self.error_at(step, "path expected dict but found list"));
-                    }
-                },
-                Item::Dict(dict) => match branch {
-                    Branch::Dict(key) => {
-                        match key.find_linearly_in(dict.cells) {
-                            None => return Err(self.error_at(step, "key not found")),
-                            Some(found) => {
-                                if step + 1 == self.branches.len() {
-                                    return Ok(&dict.cells[found]);
-                                }
-                                from = dict.cells[found].get().item;
-                            }
-                        };
-                    }
-                    Branch::List(_) => {
-                        return Err(self.error_at(step, "path expected list but found dict"));
-                    }
-                },
+                (Branch::Entry(key), Item::Dict { cells, .. }) => {
+                    let Some(found) = key.find_linearly_in(cells) else {
+                        return Err(self.error_at(step, "key not found"));
+                    };
+                    cell = None;
+                    item = cells[found].get().item;
+                }
+                (Branch::Text, Item::Text { .. })
+                | (Branch::List, Item::List { .. })
+                | (Branch::Dict, Item::Dict { .. }) => {
+                    return cell.ok_or_else(|| {
+                        self.error_full("path did not end at an item inside a list")
+                    });
+                }
+                _ => return Err(self.error_at(step, "wrong type of item")),
             }
         }
-        Err(self.error_full("path did not end at an entry inside a dict"))
+        panic!("impossible because of checks in Path::new");
+    }
+}
+impl<'p> Path<'p, true> {
+    /// construct a path expected to end at an entry in a dict
+    pub fn new(branches: &'p [Branch<'p>]) -> Self {
+        let mut rev = branches.iter().rev();
+        match rev.next() {
+            Some(Branch::Text) | Some(Branch::List) | Some(Branch::Dict) => (),
+            _ => panic!("path must end with: Text|List|Dict"),
+        }
+        match rev.next() {
+            Some(Branch::Entry(_)) => (),
+            _ => panic!("path must end within an entry in a dict"),
+        }
+        while let Some(branch) = rev.next() {
+            match branch {
+                Branch::Item(_) | Branch::Entry(_) => (),
+                _ => panic!("Text|List|Dict can only be at end of path"),
+            }
+        }
+        Path { branches }
+    }
+    /// walk down a path that ends at an item in a dict
+    pub fn walk<'a>(&self, mut item: Item<'a>) -> Result<&'a Cell<Entry<'a>>, PathError<'p>> {
+        let mut cell: Option<&'a Cell<Entry<'a>>> = None;
+        for (step, branch) in self.branches.iter().enumerate() {
+            match (branch, item) {
+                (Branch::Item(at), Item::List { cells, .. }) => {
+                    let Some(found) = cells.get(*at) else {
+                        return Err(self.error_at(step, "index out of bounds"));
+                    };
+                    cell = None;
+                    item = found.get();
+                }
+                (Branch::Entry(key), Item::Dict { cells, .. }) => {
+                    let Some(found) = key.find_linearly_in(cells) else {
+                        return Err(self.error_at(step, "key not found"));
+                    };
+                    let found = &cells[found];
+                    cell = Some(found);
+                    item = found.get().item;
+                }
+                (Branch::Text, Item::Text { .. })
+                | (Branch::List, Item::List { .. })
+                | (Branch::Dict, Item::Dict { .. }) => {
+                    return cell.ok_or_else(|| {
+                        self.error_full("path did not end at an entry inside a dict")
+                    });
+                }
+                _ => return Err(self.error_at(step, "wrong type of item")),
+            }
+        }
+        panic!("impossible because of checks in Path::new");
     }
 }

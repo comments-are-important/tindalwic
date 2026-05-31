@@ -5,17 +5,15 @@
 use core::cell::Cell;
 
 #[doc(inline)]
-/// traverse a path from the root down into the data structure.
-///
-/// the syntax is very close to that of the encoded data.
-pub use tindalwic_macros::walk;
+/// build a [walk::Path]
+pub use tindalwic_macros::path;
 
 #[doc(inline)]
 /// build an [Item] using a subset of the JSON syntax.
 ///
 /// this helps to write code snippets that make a structural change to a [File].
 /// a typical snippet would:
-///  + [walk!] into a [File] to the place to be changed,
+///  + [path!].walk([File].cells) to the place to be changed,
 ///  + use [json!] to build a new [Item],
 ///  + then use [core::cell::Cell::set] to affect the change.
 pub use tindalwic_macros::json;
@@ -35,11 +33,13 @@ pub mod bumpalo;
 #[cfg(feature = "serde")]
 pub mod serde;
 
+// ====================================================================================
+
 mod value {
     /// All primitive values in Tindalwic are string slice references, not owned.
     ///
     ///  + [Comment::value](super::Comment::value)
-    ///  + [Text::value](super::Text::value)
+    ///  + [Text::value](super::Item::Text::value)
     ///  + [Entry::key](super::Entry::key)
     ///
     /// They often contain embedded indentation because the parser is zero-copy from
@@ -173,7 +173,7 @@ pub use value::Value;
 impl<'a> Value<'a> {
     /// linear `O(n)` scan.
     // TODO: add link to `alloc` map view, say it "offers `O(1)`."
-    pub fn find_linearly_in(self, cells: &'a [Cell<Entry<'a>>]) -> Option<usize> {
+    pub fn find_linearly_in(self, cells: &'_ [Cell<Entry<'_>>]) -> Option<usize> {
         cells.iter().position(|cell| cell.get().key == self)
     }
 }
@@ -232,30 +232,6 @@ pub struct Comment<'a> {
 
 // ------------------------------------------------------------------------------------
 
-/// [Item::Text] wraps a sequence of lines of UTF-8, and optional epilog comment.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Text<'a> {
-    /// the string value
-    pub value: Value<'a>,
-    /// A Text can have a Comment after it.
-    pub epilog: Option<Comment<'a>>,
-}
-
-// ------------------------------------------------------------------------------------
-
-/// [Item::List] wraps a sequence of `Cell<Item>`, and optional prolog and epilog comments.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct List<'a> {
-    /// A List can have an introductory Comment.
-    pub prolog: Option<Comment<'a>>,
-    /// The contents of the Item::List.
-    pub cells: &'a [Cell<Item<'a>>],
-    /// A List can have a Comment after it.
-    pub epilog: Option<Comment<'a>>,
-}
-
-// ------------------------------------------------------------------------------------
-
 /// an association (from key to item) and its metadata.
 ///
 /// at the lowest level, these are stored in an array.
@@ -287,32 +263,50 @@ impl<'a> Entry<'a> {
     }
 }
 
-/// [Item::Dict] wraps a sequence of `Cell<Entry>`, and optional prolog and epilog comments.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Dict<'a> {
-    /// A Dict can have an introductory Comment.
-    pub prolog: Option<Comment<'a>>,
-    /// The contents of the Item::Dict.
-    pub cells: &'a [Cell<Entry<'a>>],
-    /// A Dict can have a Comment after it.
-    pub epilog: Option<Comment<'a>>,
-}
+// ------------------------------------------------------------------------------------
+
+/// the slice type for [Item::Dict::cells]
+pub type Entries<'a> = &'a [Cell<Entry<'a>>];
+/// the slice type for [Item::List::cells]
+pub type Items<'a> = &'a [Cell<Item<'a>>];
 
 // ------------------------------------------------------------------------------------
 
 /// the three Item variants
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Item<'a> {
-    /// a [Text] Item holds UTF-8 content
-    Text(Text<'a>),
-    /// a [List] Item is a linear array of [Item]
-    List(List<'a>),
-    /// a [Dict] Item is an associative array of [Entry]
-    Dict(Dict<'a>),
+    /// a [Value]
+    Text {
+        /// the string value
+        value: Value<'a>,
+        /// A Text can have a Comment after it.
+        epilog: Option<Comment<'a>>,
+    },
+    /// a linear array of [Item]
+    List {
+        /// A List can have an introductory Comment.
+        prolog: Option<Comment<'a>>,
+        /// The contents of the Item::List.
+        cells: Items<'a>,
+        /// A List can have a Comment after it.
+        epilog: Option<Comment<'a>>,
+    },
+    /// an associative array of [Entry]
+    Dict {
+        /// A Dict can have an introductory Comment.
+        prolog: Option<Comment<'a>>,
+        /// The contents of the Item::Dict.
+        cells: Entries<'a>,
+        /// A Dict can have a Comment after it.
+        epilog: Option<Comment<'a>>,
+    },
 }
 impl<'a> Default for Item<'a> {
     fn default() -> Self {
-        Item::Text(Text::default())
+        Item::Text {
+            value: Value::default(),
+            epilog: None,
+        }
     }
 }
 impl<'a> Item<'a> {
@@ -322,25 +316,26 @@ impl<'a> Item<'a> {
     }
     /// wrap a value (no epilog) into an Item::Text
     pub fn text(value: &'a str) -> Self {
-        Item::Text(Text {
+        Item::Text {
             value: value.into(),
-            ..Default::default()
-        })
+            epilog: None,
+        }
     }
-}
-impl<'a> From<Text<'a>> for Item<'a> {
-    fn from(value: Text<'a>) -> Self {
-        Item::Text(value)
+    /// wrap an array of cells of items into an Item::List
+    pub fn list(cells: Items<'a>) -> Self {
+        Item::List {
+            prolog: None,
+            cells,
+            epilog: None,
+        }
     }
-}
-impl<'a> From<List<'a>> for Item<'a> {
-    fn from(value: List<'a>) -> Self {
-        Item::List(value)
-    }
-}
-impl<'a> From<Dict<'a>> for Item<'a> {
-    fn from(value: Dict<'a>) -> Self {
-        Item::Dict(value)
+    /// wrap an array of cells of entries into an Item::Dict
+    pub fn dict(cells: Entries<'a>) -> Self {
+        Item::Dict {
+            prolog: None,
+            cells,
+            epilog: None,
+        }
     }
 }
 
@@ -356,8 +351,33 @@ pub struct File<'a> {
     /// A File can have an introductory Comment.
     pub prolog: Option<Comment<'a>>,
     /// The contents of the Item::File.
-    pub cells: &'a [Cell<Entry<'a>>],
+    pub cells: Entries<'a>,
 }
+impl<'a> File<'a> {
+    /// make an [Item::Dict] from self.prolog and self.cells
+    pub fn lower(&self) -> Item<'a> {
+        Item::Dict {
+            prolog: self.prolog,
+            cells: self.cells,
+            epilog: None,
+        }
+    }
+    /// take prolog and cells from an [Item::Dict] to make a new File.
+    ///
+    /// None if the item is not a dictionary.
+    pub fn raise(dict: &Item<'a>) -> Option<Self> {
+        match dict {
+            Item::Dict { prolog, cells, .. } => Some(File {
+                hashbang: None,
+                prolog: *prolog,
+                cells,
+            }),
+            _ => None,
+        }
+    }
+}
+
+// ====================================================================================
 
 #[cfg(test)]
 #[allow(unused_extern_crates)]
@@ -372,10 +392,10 @@ mod tests {
     fn rename() {
         json! {
             $crate = test_rename_of_tindalwic_dependency;
-            let empty = {}.unwrap();
+            let entries = {}.unwrap();
             completed.unwrap();
         }
-        assert!(empty.cells.is_empty());
+        assert!(entries.is_empty());
     }
 
     #[test]

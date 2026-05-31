@@ -2,7 +2,7 @@ extern crate alloc;
 
 use super::{CommentDe, CommentSer, ValueDe, ValueSer, seeded};
 use super::{DictFields, EntryFields, FileFields, ItemVariants, ListFields, TextFields};
-use crate::{Dict, Entry, File, Item, List, Text};
+use crate::{Comment, Entry, File, Item, Value};
 use alloc::string::{String, ToString};
 use core::cell::Cell;
 use serde::de::{Error, VariantAccess};
@@ -14,17 +14,54 @@ seeded! {
     impl Item {
         fn serialize() {
             match this {
-                Item::Text(text) => s.serialize_newtype_variant("Item", 0, "Text", &TextSer(*text)),
-                Item::List(list) => s.serialize_newtype_variant("Item", 1, "List", &ListSer(*list)),
-                Item::Dict(dict) => s.serialize_newtype_variant("Item", 2, "Dict", &DictSer(*dict)),
+                Item::Text { value, epilog } => {
+                    s.serialize_newtype_variant("Item", 0, "Text", &TextSer((*value, *epilog)))
+                }
+                Item::List {
+                    prolog,
+                    cells,
+                    epilog,
+                } => s.serialize_newtype_variant(
+                    "Item",
+                    1,
+                    "List",
+                    &ListSer((*prolog, cells, *epilog)),
+                ),
+                Item::Dict {
+                    prolog,
+                    cells,
+                    epilog,
+                } => s.serialize_newtype_variant(
+                    "Item",
+                    2,
+                    "Dict",
+                    &DictSer((*prolog, cells, *epilog)),
+                ),
             }
         }
         fn visit_enum() {
             let (this, access) = data.variant::<ItemVariants>()?;
             Ok(match this {
-                ItemVariants::Text => Item::Text(access.newtype_variant_seed(TextDe::of(arena))?),
-                ItemVariants::List => Item::List(access.newtype_variant_seed(ListDe::of(arena))?),
-                ItemVariants::Dict => Item::Dict(access.newtype_variant_seed(DictDe::of(arena))?),
+                ItemVariants::Text => {
+                    let (value, epilog) = access.newtype_variant_seed(TextDe::of(arena))?;
+                    Item::Text { value, epilog }
+                }
+                ItemVariants::List => {
+                    let (prolog, cells, epilog) = access.newtype_variant_seed(ListDe::of(arena))?;
+                    Item::List {
+                        prolog,
+                        cells,
+                        epilog,
+                    }
+                }
+                ItemVariants::Dict => {
+                    let (prolog, cells, epilog) = access.newtype_variant_seed(DictDe::of(arena))?;
+                    Item::Dict {
+                        prolog,
+                        cells,
+                        epilog,
+                    }
+                }
             })
         }
     }
@@ -35,19 +72,19 @@ seeded! {
     #[deserialize_struct]
     impl Text {
         fn serialize() {
+            let (this_value, this_epilog) = this;
             let mut fields = s.serialize_struct("Text", 2)?;
-            fields.serialize_field("value", &ValueSer(this.value))?;
-            fields.serialize_field("epilog", &CommentSer(this.epilog))?;
+            fields.serialize_field("value", &ValueSer(*this_value))?;
+            fields.serialize_field("epilog", &CommentSer(*this_epilog))?;
             fields.end()
         }
         fn visit_seq() {
             let err = || Error::invalid_length(2, &self);
-            Ok(Text {
-                value: seq.next_element_seed(ValueDe::of(arena))?.ok_or_else(err)?,
-                epilog: seq
-                    .next_element_seed(CommentDe::of(arena))?
+            Ok((
+                seq.next_element_seed(ValueDe::of(arena))?.ok_or_else(err)?,
+                seq.next_element_seed(CommentDe::of(arena))?
                     .ok_or_else(err)?,
-            })
+            ))
         }
         fn visit_map() {
             let mut value = None;
@@ -68,10 +105,10 @@ seeded! {
                     }
                 }
             }
-            Ok(Text {
-                value: value.ok_or_else(|| Error::missing_field("value"))?,
-                epilog: epilog.ok_or_else(|| Error::missing_field("epilog"))?,
-            })
+            Ok((
+                value.ok_or_else(|| Error::missing_field("value"))?,
+                epilog.ok_or_else(|| Error::missing_field("epilog"))?,
+            ))
         }
     }
 } // !seeded
@@ -96,9 +133,8 @@ seeded! {
                 count += 1;
             }
             Ok(arena
-                .list(count)
-                .map_err(|err| Error::custom(err.to_string()))?
-                .cells)
+                .items(count)
+                .map_err(|err| Error::custom(err.to_string()))?)
         }
     }
 } // !seeded
@@ -108,23 +144,22 @@ seeded! {
     #[deserialize_struct]
     impl List {
         fn serialize() {
+            let (this_prolog, this_cells, this_epilog) = this;
             let mut fields = s.serialize_struct("List", 3)?;
-            fields.serialize_field("prolog", &CommentSer(this.prolog))?;
-            fields.serialize_field("array", &ItemsSer(this.cells))?;
-            fields.serialize_field("epilog", &CommentSer(this.epilog))?;
+            fields.serialize_field("prolog", &CommentSer(*this_prolog))?;
+            fields.serialize_field("array", &ItemsSer(this_cells))?;
+            fields.serialize_field("epilog", &CommentSer(*this_epilog))?;
             fields.end()
         }
         fn visit_seq() {
             let err = || Error::invalid_length(3, &self);
-            Ok(List {
-                prolog: seq
-                    .next_element_seed(CommentDe::of(arena))?
+            Ok((
+                seq.next_element_seed(CommentDe::of(arena))?
                     .ok_or_else(err)?,
-                cells: seq.next_element_seed(ItemsDe::of(arena))?.ok_or_else(err)?,
-                epilog: seq
-                    .next_element_seed(CommentDe::of(arena))?
+                seq.next_element_seed(ItemsDe::of(arena))?.ok_or_else(err)?,
+                seq.next_element_seed(CommentDe::of(arena))?
                     .ok_or_else(err)?,
-            })
+            ))
         }
         fn visit_map() {
             let mut prolog = None;
@@ -152,11 +187,11 @@ seeded! {
                     }
                 }
             }
-            Ok(List {
-                prolog: prolog.ok_or_else(|| Error::missing_field("prolog"))?,
-                cells: array.ok_or_else(|| Error::missing_field("array"))?,
-                epilog: epilog.ok_or_else(|| Error::missing_field("epilog"))?,
-            })
+            Ok((
+                prolog.ok_or_else(|| Error::missing_field("prolog"))?,
+                array.ok_or_else(|| Error::missing_field("array"))?,
+                epilog.ok_or_else(|| Error::missing_field("epilog"))?,
+            ))
         }
     }
 } // !seeded
@@ -250,9 +285,8 @@ seeded! {
                 count += 1;
             }
             Ok(arena
-                .dict(count)
-                .map_err(|err| Error::custom(err.to_string()))?
-                .cells)
+                .entries(count)
+                .map_err(|err| Error::custom(err.to_string()))?)
         }
     }
 } // !seeded
@@ -262,10 +296,11 @@ seeded! {
     #[deserialize_struct]
     impl Dict {
         fn serialize() {
+            let (this_prolog, this_cells, this_epilog) = this;
             let mut fields = s.serialize_struct("Dict", 3)?;
-            fields.serialize_field("prolog", &CommentSer(this.prolog))?;
-            fields.serialize_field("array", &EntriesSer(this.cells))?;
-            fields.serialize_field("epilog", &CommentSer(this.epilog))?;
+            fields.serialize_field("prolog", &CommentSer(*this_prolog))?;
+            fields.serialize_field("array", &EntriesSer(this_cells))?;
+            fields.serialize_field("epilog", &CommentSer(*this_epilog))?;
             fields.end()
         }
         fn visit_map() {
@@ -294,25 +329,22 @@ seeded! {
                     }
                 }
             }
-            Ok(Dict {
-                prolog: prolog.ok_or_else(|| Error::missing_field("prolog"))?,
-                cells: array.ok_or_else(|| Error::missing_field("array"))?,
-                epilog: epilog.ok_or_else(|| Error::missing_field("epilog"))?,
-            })
+            Ok((
+                prolog.ok_or_else(|| Error::missing_field("prolog"))?,
+                array.ok_or_else(|| Error::missing_field("array"))?,
+                epilog.ok_or_else(|| Error::missing_field("epilog"))?,
+            ))
         }
         fn visit_seq() {
             let err = || Error::invalid_length(3, &self);
-            Ok(Dict {
-                prolog: seq
-                    .next_element_seed(CommentDe::of(arena))?
+            Ok((
+                seq.next_element_seed(CommentDe::of(arena))?
                     .ok_or_else(err)?,
-                cells: seq
-                    .next_element_seed(EntriesDe::of(arena))?
+                seq.next_element_seed(EntriesDe::of(arena))?
                     .ok_or_else(err)?,
-                epilog: seq
-                    .next_element_seed(CommentDe::of(arena))?
+                seq.next_element_seed(CommentDe::of(arena))?
                     .ok_or_else(err)?,
-            })
+            ))
         }
     }
 } // !seeded

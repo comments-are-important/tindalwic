@@ -51,7 +51,7 @@ httpd: must-run-outside
 
 # =====================================================================================
 
-all: fmt msrv main/test doc main/api main/llvm-lines webapp main/rand
+all: fmt doc main/test msrv main/api main/llvm-lines webapp main/rand
 .PHONY: all
 
 test: main/test main/rand
@@ -60,11 +60,11 @@ test: main/test main/rand
 main/test: must-run-inside
 	cd main
 	set -e
-	echo ====== default && cargo test
-	echo ====== alloc && cargo test --features alloc
-	echo ====== bumpalo && cargo test --features bumpalo
-	echo ====== serde && cargo test --features serde
-	echo ====== all && cargo test --all-features
+	echo ====== default ; cargo test
+	echo ====== alloc ; cargo test --features alloc
+	echo ====== bumpalo ; cargo test --features bumpalo
+	echo ====== serde ; cargo test --features serde
+	echo ====== all ; cargo test --all-features
 .PHONY: main/test
 
 main/rand: must-run-inside
@@ -140,9 +140,9 @@ fmt: nightly
 msrv: must-run-inside
 	set -e
 	cargo install --list | grep -q cargo-llvm-lines || cargo $(BINSTALL) cargo-msrv
-	echo macros $$(cargo msrv verify --output-format minimal --path macros)
-	echo main   $$(cargo msrv verify --output-format minimal --path main)
-	echo webapp $$(cargo msrv verify --output-format minimal --path webapp)
+	echo ====== macros ; cargo msrv verify --path macros
+	echo ====== main   ; cargo msrv verify --path main
+	echo ====== webapp ; cargo msrv verify --path webapp
 .PHONY: msrv
 
 # =====================================================================================

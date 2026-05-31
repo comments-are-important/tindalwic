@@ -2,7 +2,7 @@
 //! but you should probably not use these directly, macros are much easier.
 
 use crate::parse::{Builder, Input, ParseError, Reported};
-use crate::{Dict, Entry, File, Item, List};
+use crate::{Entries, Entry, File, Item, Items};
 
 use core::cell::Cell;
 
@@ -63,30 +63,22 @@ struct StackBuilder<'a> {
     entries: LowToHigh<'a, Entry<'a>>,
 }
 impl<'a> StackBuilder<'a> {
-    pub fn wrap(items: &'a [Cell<Item<'a>>], entries: &'a [Cell<Entry<'a>>]) -> Self {
+    pub fn wrap(items: Items<'a>, entries: Entries<'a>) -> Self {
         let items = LowToHigh::wrap(items);
         let entries = LowToHigh::wrap(entries);
         StackBuilder { items, entries }
     }
 }
 impl<'a> Builder<'a> for StackBuilder<'a> {
-    fn list(&self, count: usize) -> Result<List<'a>, ParseError> {
-        let Some(cells) = self.items.finish(count) else {
-            return Err(ParseError::Memory("not enough items to make that list"));
-        };
-        Ok(List {
-            cells,
-            ..Default::default()
-        })
+    fn items(&self, count: usize) -> Result<Items<'a>, ParseError> {
+        self.items
+            .finish(count)
+            .ok_or_else(|| ParseError::Memory("not enough items to make that list"))
     }
-    fn dict(&self, count: usize) -> Result<Dict<'a>, ParseError> {
-        let Some(cells) = self.entries.finish(count) else {
-            return Err(ParseError::Memory("not enough entries to make that dict"));
-        };
-        Ok(Dict {
-            cells,
-            ..Default::default()
-        })
+    fn entries(&self, count: usize) -> Result<Entries<'a>, ParseError> {
+        self.entries
+            .finish(count)
+            .ok_or_else(|| ParseError::Memory("not enough entries to make that dict"))
     }
     fn item(&self, item: Item<'a>) -> Result<(), ParseError> {
         self.items
@@ -128,12 +120,12 @@ impl<'a> Arena<'a> {
         }
     }
     /// after `count` calls to .item, call this to build a list of those.
-    pub fn list(&self, count: usize) -> Result<List<'a>, ParseError> {
-        self.builder.list(count)
+    pub fn list(&self, count: usize) -> Result<Items<'a>, ParseError> {
+        self.builder.items(count)
     }
     /// after `count` calls to .entry, call this to build a dict of those.
-    pub fn dict(&self, count: usize) -> Result<Dict<'a>, ParseError> {
-        self.builder.dict(count)
+    pub fn dict(&self, count: usize) -> Result<Entries<'a>, ParseError> {
+        self.builder.entries(count)
     }
     /// push an item into builder memory for future .list call to use.
     pub fn item(&self, item: Item<'a>) -> Result<(), ParseError> {
@@ -157,13 +149,11 @@ impl<'a> Arena<'a> {
     }
     /// push a list item into builder memory for future .list call to use.
     pub fn list_item(&self, count: usize) -> Result<(), ParseError> {
-        let list = self.list(count)?;
-        self.item(list.into())
+        self.item(Item::list(self.list(count)?))
     }
     /// push a dict item into builder memory for future .list call to use.
     pub fn dict_item(&self, count: usize) -> Result<(), ParseError> {
-        let dict = self.dict(count)?;
-        self.item(dict.into())
+        self.item(Item::dict(self.dict(count)?))
     }
     /// push a text entry into builder memory for future .dict call to use.
     pub fn text_entry(&self, key: &'a str, value: &'a str) -> Result<(), ParseError> {
@@ -171,13 +161,11 @@ impl<'a> Arena<'a> {
     }
     /// push a list entry into builder memory for future .dict call to use.
     pub fn list_entry(&self, key: &'a str, count: usize) -> Result<(), ParseError> {
-        let list = self.list(count)?;
-        self.keyed(key, list.into())
+        self.keyed(key, Item::list(self.list(count)?))
     }
     /// push a dict entry into builder memory for future .dict call to use.
     pub fn dict_entry(&self, key: &'a str, count: usize) -> Result<(), ParseError> {
-        let dict = self.dict(count)?;
-        self.keyed(key, dict.into())
+        self.keyed(key, Item::dict(self.dict(count)?))
     }
     /// call the parser on the provided content, panic if the content isn't legit.
     pub fn parse_or_panic(&self, content: &'a str) -> File<'a> {

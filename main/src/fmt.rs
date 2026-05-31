@@ -2,7 +2,7 @@
 
 use crate::Value;
 use crate::parse::ParseError;
-use crate::{Comment, Dict, Entry, File, Item, List, Text};
+use crate::{Comment, Entry, File, Item};
 
 use core::cell::Cell;
 use core::fmt::{Display, Formatter, Result, Write};
@@ -92,9 +92,10 @@ impl<'o, 'f> Output<'o, 'f> {
         }
         Ok(())
     }
-    fn one_liner_in_list<'a>(text: &Text<'a>) -> Option<&'a str> {
-        let only = text.value.only_line()?;
-        if text.value.is_empty() {
+
+    fn one_liner_in_list<'a>(value: &Value<'a>) -> Option<&'a str> {
+        let only = value.only_line()?;
+        if value.is_empty() {
             Some(only)
         } else if Output::special_first(only.as_bytes()[0]) {
             None
@@ -102,22 +103,9 @@ impl<'o, 'f> Output<'o, 'f> {
             Some(only)
         }
     }
-    fn text_in_list<'a>(&mut self, text: &Text<'a>) -> Result {
-        self.indent()?;
-        if let Some(slice) = Output::one_liner_in_list(text) {
-            self.out.write_str(slice)?;
-            self.out.write_char('\n')?;
-        } else {
-            self.out.write_str("<>\n")?;
-            self.indent += 1;
-            self.indent()?;
-            self.string(&text.value)?;
-            self.indent -= 1;
-        }
-        self.comment("#", &text.epilog)
-    }
-    fn one_liner_in_dict<'a>(text: &Text<'a>, key: &'_ str) -> Option<&'a str> {
-        let only = text.value.only_line()?;
+
+    fn one_liner_in_dict<'a>(value: &Value<'a>, key: &'_ str) -> Option<&'a str> {
+        let only = value.only_line()?;
         if key.is_empty() {
             Some(only)
         } else if key.contains('=') {
@@ -128,109 +116,54 @@ impl<'o, 'f> Output<'o, 'f> {
             Some(only)
         }
     }
-    fn text_in_dict<'a>(&mut self, key: &Value<'a>, text: &Text<'a>) -> Result {
-        self.indent()?;
-        if let Some(only) = key.only_line() {
-            if let Some(text) = Output::one_liner_in_dict(text, only) {
-                self.out.write_str(only)?;
-                self.out.write_char('=')?;
-                self.out.write_str(text)?;
-                self.out.write_char('\n')?;
-            } else {
-                self.out.write_char('<')?;
-                self.out.write_str(only)?;
-                self.out.write_str(">\n")?;
-                self.indent += 1;
-                self.indent()?;
-                self.string(&text.value)?;
-                self.indent -= 1;
-            }
-        } else {
-            self.out.write_char('@')?;
-            self.indent += 1;
-            self.string(key)?;
-            self.indent -= 1;
-            self.indent()?;
-            self.out.write_str("<>\n")?;
-            self.indent += 1;
-            self.indent()?;
-            self.string(&text.value)?;
-            self.indent -= 1;
-        }
-        self.comment("#", &text.epilog)
-    }
-    fn list_in_list<'a>(&mut self, list: &List<'a>) -> Result {
-        self.indent()?;
-        self.out.write_str("[]\n")?;
-        self.indent += 1;
-        self.comment("#", &list.prolog)?;
-        for cell in list.cells {
-            self.item_in_list(cell)?;
-        }
-        self.indent -= 1;
-        self.comment("#", &list.epilog)
-    }
-    fn list_in_dict<'a>(&mut self, key: &Value<'a>, list: &List<'a>) -> Result {
-        self.indent()?;
-        if let Some(only) = key.only_line() {
-            self.out.write_char('[')?;
-            self.out.write_str(only)?;
-            self.out.write_str("]\n")?;
-        } else {
-            self.out.write_char('@')?;
-            self.indent += 1;
-            self.string(key)?;
-            self.indent -= 1;
-            self.indent()?;
-            self.out.write_str("[]\n")?;
-        }
-        self.indent += 1;
-        self.comment("#", &list.prolog)?;
-        for cell in list.cells {
-            self.item_in_list(cell)?;
-        }
-        self.indent -= 1;
-        self.comment("#", &list.epilog)
-    }
-    fn dict_in_list<'a>(&mut self, dict: &Dict<'a>) -> Result {
-        self.indent()?;
-        self.out.write_str("{}\n")?;
-        self.indent += 1;
-        self.comment("#", &dict.prolog)?;
-        for cell in dict.cells {
-            self.entry_in_dict(cell)?;
-        }
-        self.indent -= 1;
-        self.comment("#", &dict.epilog)
-    }
-    fn dict_in_dict<'a>(&mut self, key: &Value<'a>, dict: &Dict<'a>) -> Result {
-        self.indent()?;
-        if let Some(only) = key.only_line() {
-            self.out.write_char('{')?;
-            self.out.write_str(only)?;
-            self.out.write_str("}\n")?;
-        } else {
-            self.out.write_char('@')?;
-            self.indent += 1;
-            self.string(key)?;
-            self.indent -= 1;
-            self.indent()?;
-            self.out.write_str("{}\n")?;
-        }
-        self.indent += 1;
-        self.comment("#", &dict.prolog)?;
-        for cell in dict.cells {
-            self.entry_in_dict(cell)?;
-        }
-        self.indent -= 1;
-        self.comment("#", &dict.epilog)
-    }
+
     fn item_in_list<'a>(&mut self, cell: &Cell<Item<'a>>) -> Result {
         let item = cell.get();
-        match item {
-            Item::Text(text) => self.text_in_list(&text),
-            Item::List(list) => self.list_in_list(&list),
-            Item::Dict(dict) => self.dict_in_list(&dict),
+        match &item {
+            Item::Text { value, epilog } => {
+                self.indent()?;
+                if let Some(slice) = Output::one_liner_in_list(value) {
+                    self.out.write_str(slice)?;
+                    self.out.write_char('\n')?;
+                } else {
+                    self.out.write_str("<>\n")?;
+                    self.indent += 1;
+                    self.indent()?;
+                    self.string(value)?;
+                    self.indent -= 1;
+                }
+                self.comment("#", epilog)
+            }
+            Item::List {
+                prolog,
+                cells,
+                epilog,
+            } => {
+                self.indent()?;
+                self.out.write_str("[]\n")?;
+                self.indent += 1;
+                self.comment("#", prolog)?;
+                for cell in *cells {
+                    self.item_in_list(cell)?;
+                }
+                self.indent -= 1;
+                self.comment("#", epilog)
+            }
+            Item::Dict {
+                prolog,
+                cells,
+                epilog,
+            } => {
+                self.indent()?;
+                self.out.write_str("{}\n")?;
+                self.indent += 1;
+                self.comment("#", prolog)?;
+                for cell in *cells {
+                    self.entry_in_dict(cell)?;
+                }
+                self.indent -= 1;
+                self.comment("#", epilog)
+            }
         }
     }
     fn entry_in_dict<'a>(&mut self, cell: &Cell<Entry<'a>>) -> Result {
@@ -241,9 +174,89 @@ impl<'o, 'f> Output<'o, 'f> {
         }
         self.comment("//", &entry.before)?;
         match &entry.item {
-            Item::Text(text) => self.text_in_dict(&entry.key, text),
-            Item::List(list) => self.list_in_dict(&entry.key, list),
-            Item::Dict(dict) => self.dict_in_dict(&entry.key, dict),
+            Item::Text { value, epilog } => {
+                self.indent()?;
+                if let Some(only) = entry.key.only_line() {
+                    if let Some(text) = Output::one_liner_in_dict(value, only) {
+                        self.out.write_str(only)?;
+                        self.out.write_char('=')?;
+                        self.out.write_str(text)?;
+                        self.out.write_char('\n')?;
+                    } else {
+                        self.out.write_char('<')?;
+                        self.out.write_str(only)?;
+                        self.out.write_str(">\n")?;
+                        self.indent += 1;
+                        self.indent()?;
+                        self.string(value)?;
+                        self.indent -= 1;
+                    }
+                } else {
+                    self.out.write_char('@')?;
+                    self.indent += 1;
+                    self.string(&entry.key)?;
+                    self.indent -= 1;
+                    self.indent()?;
+                    self.out.write_str("<>\n")?;
+                    self.indent += 1;
+                    self.indent()?;
+                    self.string(value)?;
+                    self.indent -= 1;
+                }
+                self.comment("#", epilog)
+            }
+            Item::List {
+                prolog,
+                cells,
+                epilog,
+            } => {
+                self.indent()?;
+                if let Some(only) = entry.key.only_line() {
+                    self.out.write_char('[')?;
+                    self.out.write_str(only)?;
+                    self.out.write_str("]\n")?;
+                } else {
+                    self.out.write_char('@')?;
+                    self.indent += 1;
+                    self.string(&entry.key)?;
+                    self.indent -= 1;
+                    self.indent()?;
+                    self.out.write_str("[]\n")?;
+                }
+                self.indent += 1;
+                self.comment("#", prolog)?;
+                for cell in *cells {
+                    self.item_in_list(cell)?;
+                }
+                self.indent -= 1;
+                self.comment("#", epilog)
+            }
+            Item::Dict {
+                prolog,
+                cells,
+                epilog,
+            } => {
+                self.indent()?;
+                if let Some(only) = entry.key.only_line() {
+                    self.out.write_char('{')?;
+                    self.out.write_str(only)?;
+                    self.out.write_str("}\n")?;
+                } else {
+                    self.out.write_char('@')?;
+                    self.indent += 1;
+                    self.string(&entry.key)?;
+                    self.indent -= 1;
+                    self.indent()?;
+                    self.out.write_str("{}\n")?;
+                }
+                self.indent += 1;
+                self.comment("#", prolog)?;
+                for cell in *cells {
+                    self.entry_in_dict(cell)?;
+                }
+                self.indent -= 1;
+                self.comment("#", epilog)
+            }
         }
     }
     fn file<'a>(&mut self, file: &File<'a>) -> Result {

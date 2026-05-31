@@ -18,7 +18,7 @@ use std::fmt::{self, Write};
 use tindalwic::bumpalo::Arena;
 use tindalwic::parse::ParseError;
 use tindalwic::serde::Verbose;
-use tindalwic::{Comment, Dict, Entry, File, Item, List};
+use tindalwic::{Comment, Entry, File, Item};
 
 /// a very blurry outline of some data. created first to be able to call the
 /// Arena/Builder API in the order it requires.
@@ -134,25 +134,26 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
     fn item(&mut self, shape: &Option<Silhouette>) -> Result<Item<'a>, ParseError> {
         Ok(if let Some(parent) = shape {
             if self.rng.random_ratio(1, 2) {
-                Item::Dict(self.dict(parent)?)
+                self.dict(parent)?
             } else {
-                Item::List(self.list(parent)?)
+                self.list(parent)?
             }
         } else {
             Item::text(self.value())
         })
     }
-    fn list(&mut self, shape: &Silhouette) -> Result<List<'a>, ParseError> {
+    fn list(&mut self, shape: &Silhouette) -> Result<Item<'a>, ParseError> {
         for kid in &shape.children {
             let item = self.item(kid)?;
             self.arena.item(item)?;
         }
-        let mut list = self.arena.list(shape.children.len())?;
-        list.prolog = self.comment();
-        list.epilog = self.comment();
-        Ok(list)
+        Ok(Item::List {
+            prolog: self.comment(),
+            cells: self.arena.list(shape.children.len())?,
+            epilog: self.comment(),
+        })
     }
-    fn dict(&mut self, shape: &Silhouette) -> Result<Dict<'a>, ParseError> {
+    fn dict(&mut self, shape: &Silhouette) -> Result<Item<'a>, ParseError> {
         for kid in &shape.children {
             let before = self.comment();
             let key = self.value().into();
@@ -164,19 +165,16 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
                 item,
             })?;
         }
-        let mut dict = self.arena.dict(shape.children.len())?;
-        dict.prolog = self.comment();
-        dict.epilog = self.comment();
-        Ok(dict)
+        Ok(Item::Dict {
+            prolog: self.comment(),
+            cells: self.arena.dict(shape.children.len())?,
+            epilog: self.comment(),
+        })
     }
     pub fn file(&mut self, size: usize) -> File<'a> {
         let shape = Silhouette::random(size, self.rng);
         let dict = self.dict(&shape).unwrap();
-        File {
-            cells: dict.cells,
-            hashbang: dict.epilog,
-            prolog: dict.prolog,
-        }
+        File::raise(&dict).unwrap()
     }
 }
 

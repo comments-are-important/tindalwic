@@ -2,8 +2,7 @@ extern crate alloc;
 
 use super::{CommentDe, CommentSer, ValueDe, ValueSer, seeded};
 use super::{DictFields, EntryFields, FileFields, ItemVariants, ListFields, TextFields};
-use crate::Value;
-use crate::{Dict, Entry, File, Item, List, Text};
+use crate::{Comment, Entry, File, Item, Value};
 use alloc::string::{String, ToString};
 use core::cell::Cell;
 use serde::de::{Error, VariantAccess};
@@ -15,17 +14,54 @@ seeded! {
     impl Item {
         fn serialize() {
             match this {
-                Item::Text(text) => s.serialize_newtype_variant("Item", 0, "Text", &TextSer(*text)),
-                Item::List(list) => s.serialize_newtype_variant("Item", 1, "List", &ListSer(*list)),
-                Item::Dict(dict) => s.serialize_newtype_variant("Item", 2, "Dict", &DictSer(*dict)),
+                Item::Text { value, epilog } => {
+                    s.serialize_newtype_variant("Item", 0, "Text", &TextSer((*value, *epilog)))
+                }
+                Item::List {
+                    prolog,
+                    cells,
+                    epilog,
+                } => s.serialize_newtype_variant(
+                    "Item",
+                    1,
+                    "List",
+                    &ListSer((*prolog, cells, *epilog)),
+                ),
+                Item::Dict {
+                    prolog,
+                    cells,
+                    epilog,
+                } => s.serialize_newtype_variant(
+                    "Item",
+                    2,
+                    "Dict",
+                    &DictSer((*prolog, cells, *epilog)),
+                ),
             }
         }
         fn visit_enum() {
             let (this, access) = data.variant::<ItemVariants>()?;
             Ok(match this {
-                ItemVariants::Text => Item::Text(access.newtype_variant_seed(TextDe::of(arena))?),
-                ItemVariants::List => Item::List(access.newtype_variant_seed(ListDe::of(arena))?),
-                ItemVariants::Dict => Item::Dict(access.newtype_variant_seed(DictDe::of(arena))?),
+                ItemVariants::Text => {
+                    let (value, epilog) = access.newtype_variant_seed(TextDe::of(arena))?;
+                    Item::Text { value, epilog }
+                }
+                ItemVariants::List => {
+                    let (prolog, cells, epilog) = access.newtype_variant_seed(ListDe::of(arena))?;
+                    Item::List {
+                        prolog,
+                        cells,
+                        epilog,
+                    }
+                }
+                ItemVariants::Dict => {
+                    let (prolog, cells, epilog) = access.newtype_variant_seed(DictDe::of(arena))?;
+                    Item::Dict {
+                        prolog,
+                        cells,
+                        epilog,
+                    }
+                }
             })
         }
     }
@@ -36,14 +72,15 @@ seeded! {
     #[deserialize_struct]
     impl Text {
         fn serialize() {
-            let value = !this.value.is_empty() as usize;
-            let epilog = this.epilog.is_some() as usize;
+            let (this_value, this_epilog) = this;
+            let value = !this_value.is_empty() as usize;
+            let epilog = this_epilog.is_some() as usize;
             let mut fields = s.serialize_struct("Text", value + epilog)?;
             if value != 0 {
-                fields.serialize_field("value", &ValueSer(this.value))?;
+                fields.serialize_field("value", &ValueSer(*this_value))?;
             }
             if epilog != 0 {
-                fields.serialize_field("epilog", &CommentSer(this.epilog))?;
+                fields.serialize_field("epilog", &CommentSer(*this_epilog))?;
             }
             fields.end()
         }
@@ -69,10 +106,7 @@ seeded! {
                     }
                 }
             }
-            Ok(Text {
-                value: value.unwrap_or_else(Value::default),
-                epilog: epilog.unwrap_or(None),
-            })
+            Ok((value.unwrap_or_else(Value::default), epilog.unwrap_or(None)))
         }
     }
 } // !seeded
@@ -97,9 +131,8 @@ seeded! {
                 count += 1;
             }
             Ok(arena
-                .list(count)
-                .map_err(|err| Error::custom(err.to_string()))?
-                .cells)
+                .items(count)
+                .map_err(|err| Error::custom(err.to_string()))?)
         }
     }
 } // !seeded
@@ -109,18 +142,19 @@ seeded! {
     #[deserialize_struct]
     impl List {
         fn serialize() {
-            let prolog = this.prolog.is_some() as usize;
-            let array = !this.cells.is_empty() as usize;
-            let epilog = this.epilog.is_some() as usize;
+            let (this_prolog, this_cells, this_epilog) = this;
+            let prolog = this_prolog.is_some() as usize;
+            let array = !this_cells.is_empty() as usize;
+            let epilog = this_epilog.is_some() as usize;
             let mut fields = s.serialize_struct("List", prolog + array + epilog)?;
             if prolog != 0 {
-                fields.serialize_field("prolog", &CommentSer(this.prolog))?;
+                fields.serialize_field("prolog", &CommentSer(*this_prolog))?;
             }
             if array != 0 {
-                fields.serialize_field("array", &ItemsSer(this.cells))?;
+                fields.serialize_field("array", &ItemsSer(this_cells))?;
             }
             if epilog != 0 {
-                fields.serialize_field("epilog", &CommentSer(this.epilog))?;
+                fields.serialize_field("epilog", &CommentSer(*this_epilog))?;
             }
             fields.end()
         }
@@ -153,11 +187,11 @@ seeded! {
                     }
                 }
             }
-            Ok(List {
-                prolog: prolog.unwrap_or(None),
-                cells: array.unwrap_or(&[]),
-                epilog: epilog.unwrap_or(None),
-            })
+            Ok((
+                prolog.unwrap_or(None),
+                array.unwrap_or(&[]),
+                epilog.unwrap_or(None),
+            ))
         }
     }
 } // !seeded
@@ -172,7 +206,7 @@ seeded! {
             let key = !this.key.is_empty() as usize;
             let item = match this.item {
                 // aggressive, maybe confusing, but appropriate for this mode.
-                Item::Text(text) => (text.epilog.is_some() || !text.value.is_empty()) as usize,
+                Item::Text { value, epilog } => (epilog.is_some() || !value.is_empty()) as usize,
                 _ => 1usize,
             };
             let mut fields = s.serialize_struct("Entry", gap + before + key + item)?;
@@ -257,9 +291,8 @@ seeded! {
                 count += 1;
             }
             Ok(arena
-                .dict(count)
-                .map_err(|err| Error::custom(err.to_string()))?
-                .cells)
+                .entries(count)
+                .map_err(|err| Error::custom(err.to_string()))?)
         }
     }
 } // !seeded
@@ -269,18 +302,19 @@ seeded! {
     #[deserialize_struct]
     impl Dict {
         fn serialize() {
-            let prolog = this.prolog.is_some() as usize;
-            let array = !this.cells.is_empty() as usize;
-            let epilog = this.epilog.is_some() as usize;
+            let (this_prolog, this_cells, this_epilog) = this;
+            let prolog = this_prolog.is_some() as usize;
+            let array = !this_cells.is_empty() as usize;
+            let epilog = this_epilog.is_some() as usize;
             let mut fields = s.serialize_struct("Dict", prolog + array + epilog)?;
             if prolog != 0 {
-                fields.serialize_field("prolog", &CommentSer(this.prolog))?;
+                fields.serialize_field("prolog", &CommentSer(*this_prolog))?;
             }
             if array != 0 {
-                fields.serialize_field("array", &EntriesSer(this.cells))?;
+                fields.serialize_field("array", &EntriesSer(this_cells))?;
             }
             if epilog != 0 {
-                fields.serialize_field("epilog", &CommentSer(this.epilog))?;
+                fields.serialize_field("epilog", &CommentSer(*this_epilog))?;
             }
             fields.end()
         }
@@ -310,11 +344,11 @@ seeded! {
                     }
                 }
             }
-            Ok(Dict {
-                prolog: prolog.unwrap_or(None),
-                cells: array.unwrap_or(&[]),
-                epilog: epilog.unwrap_or(None),
-            })
+            Ok((
+                prolog.unwrap_or(None),
+                array.unwrap_or(&[]),
+                epilog.unwrap_or(None),
+            ))
         }
         fn visit_seq() {
             Err(Error::custom("visitor wants seq of fields, use Verbose"))

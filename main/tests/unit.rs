@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use tindalwic::{Comment, Dict, Entry, File, Item, arena, json, walk};
+use tindalwic::{Comment, Entry, File, Item, arena, json, path};
 
 // #[test]
 // fn macro_failures() {
@@ -11,12 +11,6 @@ fn some_comment<'a>(value: &'a str) -> Option<Comment<'a>> {
     Some(Comment {
         value: value.into(),
     })
-}
-fn file<'a>(dict: &Dict<'a>) -> File<'a> {
-    File {
-        cells: dict.cells,
-        ..Default::default()
-    }
 }
 
 #[cfg(feature = "alloc")]
@@ -39,9 +33,9 @@ mod alloc_tests {
             let file: File = Neutered::bumpalo_seed(&arena).deserialize(&mut de).unwrap();
 
             json! {
-                let expected = {"key":"one\ntwo"}.unwrap();
+                let entries = {"key":"one\ntwo"}.unwrap();
             }
-            assert_eq!(file.cells, expected.cells);
+            assert_eq!(file.cells, entries);
         }
     }
 
@@ -67,7 +61,7 @@ mod alloc_tests {
 fn three_blank_comments() {
     let entry = Entry {
         before: some_comment(""),
-        item: Item::Dict(Dict::default()),
+        item: Item::dict(&[]),
         ..Default::default()
     };
     let entries = [core::cell::Cell::new(entry)];
@@ -92,9 +86,12 @@ fn text_stretch_bug() {
 #[test]
 fn two_lines() {
     json! {
-        let dict = {"key":"one\ntwo"}.unwrap();
+        let entries = {"key":"one\ntwo"}.unwrap();
     }
-    assert_eq!(file(&dict).to_string(), "<key>\n\tone\n\ttwo\n");
+    assert_eq!(
+        File::raise(&Item::dict(entries)).unwrap().to_string(),
+        "<key>\n\tone\n\ttwo\n"
+    );
 }
 
 #[test]
@@ -120,10 +117,10 @@ fn multi_line_key() {
 #[test]
 fn nested_lists() {
     json! {
-        let list = [[[["value"]]]].unwrap();
+        let items = [[[["value"]]]].unwrap();
     }
     let mut array = Entry::array::<1>();
-    array[0].get_mut().item = list.into();
+    array[0].get_mut().item = Item::list(items);
     let file = File {
         cells: &array[..],
         ..Default::default()
@@ -132,89 +129,108 @@ fn nested_lists() {
         file.to_string(),
         "[]\n\t[]\n\t\t[]\n\t\t\t[]\n\t\t\t\tvalue\n"
     );
-    walk! {
-        let text = [list][0][0][0]<0>.unwrap();
-    }
-    assert_eq!(Vec::from_iter(text.value.lines()), vec!["value"]);
+    let cell = path!({""}[0][0][0][0]Text).walk(file.lower()).unwrap();
+    let Item::Text { value, .. } = cell.get() else {
+        panic!("impossible because walk checks");
+    };
+    assert_eq!(Vec::from_iter(value.lines()), vec!["value"]);
 }
 
 #[test]
 fn nested_dicts() {
     json! {
-        let dict = {"1":"one","2":["two"],"a":{"b":{"c":{"d":{"k":"v"}}}}}.unwrap();
+        let entries = {"1":"one","2":["two"],"a":{"b":{"c":{"d":{"k":"v"}}}}}.unwrap();
     }
+    let dict = Item::dict(entries);
     let mut keys = Vec::new();
-    for entry in dict.cells {
+    for entry in entries {
         let entry = entry.get();
         keys.push(entry.key.lines().next().unwrap_or(""));
     }
     assert_eq!(keys, vec!["1", "2", "a"]);
     assert_eq!(
-        file(&dict).to_string(),
+        File::raise(&dict).unwrap().to_string(),
         "1=one\n[2]\n\ttwo\n{a}\n\t{b}\n\t\t{c}\n\t\t\t{d}\n\t\t\t\tk=v\n"
     );
-    walk! {
-        let text = {dict}{"a"}{"b"}{"c"}{"d"}<"k">.unwrap();
-    }
-    assert_eq!(Vec::from_iter(text.value.lines()), vec!["v"]);
+    let cell = path!({"a"}{"b"}{"c"}{"d"}{"k"}Text).walk(dict).unwrap();
+    let Item::Text { value, .. } = cell.get().item else {
+        panic!("impossible because walk checks");
+    };
+    assert_eq!(Vec::from_iter(value.lines()), vec!["v"]);
 }
 
 #[test]
 fn change_in_list() {
     json! {
-        let dict = {"a":{"b":["z"]}}.unwrap();
+        let entries = {"a":{"b":["z"]}}.unwrap();
     }
-    walk! {
-        let (_text, cell) = {dict}{"a"}["b"]<0>.unwrap();
-    }
+    let dict = Item::dict(entries);
+    let cell = path!({"a"}{"b"}[0]Text).walk(dict).unwrap();
+    let Item::Text { .. } = cell.get() else {
+        panic!("impossible because walk checks");
+    };
     cell.set(Item::text("c"));
-    assert_eq!(file(&dict).to_string(), "{a}\n\t[b]\n\t\tc\n");
+    assert_eq!(
+        File::raise(&dict).unwrap().to_string(),
+        "{a}\n\t[b]\n\t\tc\n"
+    );
 }
 
 #[test]
 fn change_in_dict() {
     json! {
-        let dict = {"a":[{"b":"z"}]}.unwrap();
+        let entries = {"a":[{"b":"z"}]}.unwrap();
     }
-    walk! {
-        let (_text, mut entry, cell) = {dict}["a"]{0}<"b">.unwrap();
-    }
+    let dict = Item::dict(entries);
+    let cell = path!({"a"}[0]{"b"}Text).walk(dict).unwrap();
+    let mut entry = cell.get();
     entry.item = Item::text("c");
     cell.set(entry);
-    assert_eq!(file(&dict).to_string(), "[a]\n\t{}\n\t\tb=c\n");
+    assert_eq!(
+        File::raise(&dict).unwrap().to_string(),
+        "[a]\n\t{}\n\t\tb=c\n"
+    );
 }
 
 #[test]
 fn inject_comments() {
     json! {
-        let dict = {"k":"v"}.unwrap();
+        let entries = {"k":"v"}.unwrap();
     }
-    walk! {
-        let (mut text, mut entry, cell) = {dict}<"k">.unwrap();
-    }
+    let dict = Item::dict(entries);
+    let cell = path!({"k"}Text).walk(dict).unwrap();
+    let mut entry = cell.get();
+    let Item::Text { value, .. } = entry.item else {
+        panic!("impossible because path checked");
+    };
+    let epilog = some_comment("c");
     entry.before = some_comment("b");
-    text.epilog = some_comment("c");
-    entry.item = Item::Text(text);
+    entry.item = Item::Text { value, epilog };
     cell.set(entry);
-    assert_eq!(file(&dict).to_string(), "//b\nk=v\n#c\n");
+    assert_eq!(File::raise(&dict).unwrap().to_string(), "//b\nk=v\n#c\n");
 }
 
 #[test]
 fn change_structure() {
     let key = "k";
     json! {
-        let changing = {"k":["v"]}.unwrap();
+        let entries = {key:["v"]}.unwrap();
     }
-    walk! {
-        let (mut resolved, cell) = {changing}[key]<0>.unwrap();
-    }
+    let dict = Item::dict(entries);
+    let cell = path!({key}[0]Text).walk(dict).unwrap();
+    let Item::Text { value, .. } = cell.get() else {
+        panic!("impossible because path checked");
+    };
     let b = String::from("b");
-    resolved.epilog = some_comment(&b);
+    let epilog = some_comment(&b);
     json! {
-        let patch = {"p":(resolved)}.unwrap();
+        let patch = {"p":(Item::Text { value, epilog })}.unwrap();
     }
-    cell.set(patch.into());
-    assert_eq!(file(&changing).to_string(), "[k]\n\t{}\n\t\tp=v\n\t\t#b\n")
+    cell.set(Item::dict(patch));
+    assert_eq!(
+        File::raise(&dict).unwrap().to_string(),
+        "[k]\n\t{}\n\t\tp=v\n\t\t#b\n"
+    )
 }
 
 /*

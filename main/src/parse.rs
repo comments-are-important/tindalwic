@@ -1,7 +1,6 @@
 //! everything related to converting bytes into a File
 
-use crate::Value;
-use crate::{Comment, Dict, Entry, File, Item, List, Text};
+use crate::{Comment, Entries, Entry, File, Item, Items, Value};
 
 /// parsing problems
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,11 +41,11 @@ pub(crate) trait Builder<'a> {
     /// push an item into builder memory for future .list call
     fn item(&self, item: Item<'a>) -> Result<(), ParseError>;
     /// create a list from the `count` most recently pushed items
-    fn list(&self, count: usize) -> Result<List<'a>, ParseError>;
+    fn items(&self, count: usize) -> Result<Items<'a>, ParseError>;
     /// push an entry into builder memory for future .dict call
     fn entry(&self, entry: Entry<'a>) -> Result<(), ParseError>;
     /// create a dict from the `count` most recently pushed entries
-    fn dict(&self, count: usize) -> Result<Dict<'a>, ParseError>;
+    fn entries(&self, count: usize) -> Result<Entries<'a>, ParseError>;
 }
 
 /// the "report" callback provided to the parser should return one of these
@@ -104,14 +103,18 @@ impl<'a, 'r> Input<'a, 'r> {
         }
         input.next(0)?;
         let hashbang = input.comment(0, b"#!")?;
-        let dict = input.entries(0, arena)?;
+        let prolog = input.comment(0, b"#")?;
+        let cells = input.entries(0, arena)?;
+        if input.start != usize::MAX {
+            input.report(ParseError::at(input.line, "unexpected leftovers?"))?;
+        }
         if !input.good {
             None
         } else {
             Some(File {
-                cells: dict.cells,
                 hashbang,
-                prolog: dict.prolog,
+                prolog,
+                cells,
             })
         }
     }
@@ -261,13 +264,13 @@ impl<'a, 'r> Input<'a, 'r> {
     /// current line has been recognized as beginning a Text, from a `<>` context on
     /// the previous line, or from shortcut syntax. `from` says where text begins.
     /// lenient - one-liners can stretch.
-    fn text(&mut self, indent: usize, from: usize) -> Option<Text<'a>> {
+    fn text(&mut self, indent: usize, from: usize) -> Option<Item<'a>> {
         let value = self.stretch(indent + 1, from)?;
         let epilog = self.comment(indent, b"#")?;
-        Some(Text { value, epilog })
+        Some(Item::Text { value, epilog })
     }
     /// text block follows current line. block might have zero lines.
-    fn text_block(&mut self, indent: usize) -> Option<Text<'a>> {
+    fn text_block(&mut self, indent: usize) -> Option<Item<'a>> {
         let end = self.end;
         if !self.stretch_once(indent + 1) {
             // zero lines in this block, take empty slice from this line
@@ -278,11 +281,16 @@ impl<'a, 'r> Input<'a, 'r> {
         }
     }
 
-    /// previous line opened a list context, so parse all the items in it.
-    /// None means insufficient space in Arena.
-    fn items(&mut self, indent: usize, arena: &dyn Builder<'a>) -> Option<List<'a>> {
+    /// previous line opened a list context, so parse all the lines in it.
+    fn list(&mut self, indent: usize, arena: &dyn Builder<'a>) -> Option<Item<'a>> {
+        Some(Item::List {
+            prolog: self.comment(indent + 1, b"#")?,
+            cells: self.items(indent + 1, arena)?,
+            epilog: self.comment(indent, b"#")?,
+        })
+    }
+    fn items(&mut self, indent: usize, arena: &dyn Builder<'a>) -> Option<Items<'a>> {
         let bytes = self.utf8.as_bytes();
-        let prolog = self.comment(indent, b"#")?;
         let mut count = 0usize;
         while self.start != usize::MAX {
             let mut item: Option<Item<'a>> = None;
@@ -291,7 +299,7 @@ impl<'a, 'r> Input<'a, 'r> {
             } else if self.first >= self.end {
                 // indentation-only is the shortcut for empty text
                 // TODO maybe too easily confused with gaps (require explicit `<>`)?
-                item = Some(self.text(indent, self.end)?.into());
+                item = Some(self.text(indent, self.end)?);
             } else {
                 let len = self.end - self.first;
                 match bytes[self.first] {
@@ -315,7 +323,7 @@ impl<'a, 'r> Input<'a, 'r> {
                             self.report(ParseError::at(self.line, "malformed `<>` in list"))?;
                             self.next(indent)?;
                         } else {
-                            item = Some(self.text_block(indent)?.into());
+                            item = Some(self.text_block(indent)?);
                         }
                     }
                     b'[' => {
@@ -324,7 +332,7 @@ impl<'a, 'r> Input<'a, 'r> {
                             self.next(indent)?;
                         } else {
                             self.next(indent + 1)?;
-                            item = Some(self.items(indent + 1, arena)?.into());
+                            item = Some(self.list(indent, arena)?);
                         }
                     }
                     b'{' => {
@@ -333,11 +341,11 @@ impl<'a, 'r> Input<'a, 'r> {
                             self.next(indent)?;
                         } else {
                             self.next(indent + 1)?;
-                            item = Some(self.entries(indent + 1, arena)?.into());
+                            item = Some(self.dict(indent, arena)?);
                         }
                     }
                     _ => {
-                        item = Some(self.text(indent, self.start + indent)?.into());
+                        item = Some(self.text(indent, self.start + indent)?);
                     }
                 }
             }
@@ -348,14 +356,8 @@ impl<'a, 'r> Input<'a, 'r> {
                 count += 1;
             }
         }
-        match arena.list(count) {
-            Ok(mut list) => {
-                if indent > 0 {
-                    list.epilog = self.comment(indent - 1, b"#")?;
-                }
-                list.prolog = prolog;
-                Some(list)
-            }
+        match arena.items(count) {
+            Ok(cells) => Some(cells),
             Err(err) => {
                 self.report(err)?;
                 None
@@ -363,11 +365,16 @@ impl<'a, 'r> Input<'a, 'r> {
         }
     }
 
-    /// previous line opened a dict context, so parse all the entries in it.
-    /// None means insufficient space in Arena.
-    fn entries(&mut self, indent: usize, arena: &dyn Builder<'a>) -> Option<Dict<'a>> {
+    /// previous line opened a dict context, so parse all the lines in it.
+    fn dict(&mut self, indent: usize, arena: &dyn Builder<'a>) -> Option<Item<'a>> {
+        Some(Item::Dict {
+            prolog: self.comment(indent + 1, b"#")?,
+            cells: self.entries(indent + 1, arena)?,
+            epilog: self.comment(indent, b"#")?,
+        })
+    }
+    fn entries(&mut self, indent: usize, arena: &dyn Builder<'a>) -> Option<Entries<'a>> {
         let bytes = self.utf8.as_bytes();
-        let prolog = self.comment(indent, b"#")?;
         let mut count = 0usize;
         while self.start != usize::MAX {
             let mut item: Option<Item<'a>> = None;
@@ -406,7 +413,7 @@ impl<'a, 'r> Input<'a, 'r> {
                         self.next(indent)?;
                     } else {
                         key = self.utf8[self.first + 1..self.end - 1].into();
-                        item = Some(self.text_block(indent)?.into());
+                        item = Some(self.text_block(indent)?);
                     }
                 }
                 b'[' => {
@@ -416,7 +423,7 @@ impl<'a, 'r> Input<'a, 'r> {
                     } else {
                         key = self.utf8[self.first + 1..self.end - 1].into();
                         self.next(indent + 1)?;
-                        item = Some(self.items(indent + 1, arena)?.into());
+                        item = Some(self.list(indent, arena)?);
                     }
                 }
                 b'@' => {
@@ -428,15 +435,15 @@ impl<'a, 'r> Input<'a, 'r> {
                     };
                     match marker {
                         (b'<', b'>') => {
-                            item = Some(self.text_block(indent)?.into());
+                            item = Some(self.text_block(indent)?);
                         }
                         (b'[', b']') => {
                             self.next(indent + 1)?;
-                            item = Some(self.items(indent + 1, arena)?.into());
+                            item = Some(self.list(indent, arena)?);
                         }
                         (b'{', b'}') => {
                             self.next(indent + 1)?;
-                            item = Some(self.entries(indent + 1, arena)?.into());
+                            item = Some(self.dict(indent, arena)?);
                         }
                         _ => {
                             self.report(ParseError::at(
@@ -454,7 +461,7 @@ impl<'a, 'r> Input<'a, 'r> {
                     } else {
                         key = self.utf8[self.first + 1..self.end - 1].into();
                         self.next(indent + 1)?;
-                        item = Some(self.entries(indent + 1, arena)?.into());
+                        item = Some(self.dict(indent, arena)?);
                     }
                 }
                 b'\t' => {
@@ -467,7 +474,7 @@ impl<'a, 'r> Input<'a, 'r> {
                         self.next(indent)?;
                     } else {
                         key = self.utf8[self.first..self.assign].into();
-                        item = Some(self.text(indent, self.assign + 1)?.into());
+                        item = Some(self.text(indent, self.assign + 1)?);
                     }
                 }
             }
@@ -485,14 +492,8 @@ impl<'a, 'r> Input<'a, 'r> {
                 self.report(ParseError::at(self.line, "gap/before but no item"))?;
             }
         }
-        match arena.dict(count) {
-            Ok(mut dict) => {
-                dict.prolog = prolog;
-                if indent > 0 {
-                    dict.epilog = self.comment(indent - 1, b"#")?;
-                }
-                Some(dict)
-            }
+        match arena.entries(count) {
+            Ok(cells) => Some(cells),
             Err(err) => {
                 self.report(err)?;
                 None
@@ -504,12 +505,12 @@ impl<'a, 'r> Input<'a, 'r> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{arena, walk};
+    use crate::arena;
 
     macro_rules! assert_lines_eq {
         // checking this gets repetitive without Vec
-        ($text:ident, $($line:literal),*) => {
-            let mut it = $text.value.lines();
+        ($value:ident, $($line:literal),*) => {
+            let mut it = $value.lines();
             $(assert_eq!(it.next(), Some($line));)*
             assert_eq!(it.next(), None);
         };
@@ -543,10 +544,10 @@ mod tests {
         let Some(position) = key.find_linearly_in(file.cells) else {
             panic!("no 'k' key found");
         };
-        let Item::Text(text) = file.cells[position].get().item else {
+        let Item::Text { value, .. } = file.cells[position].get().item else {
             panic!("not text?");
         };
-        assert_lines_eq!(text, "v");
+        assert_lines_eq!(value, "v");
     }
     #[test]
     fn sub_list() {
@@ -561,19 +562,19 @@ mod tests {
         let Some(position) = key.find_linearly_in(file.cells) else {
             panic!("no 'k' key found");
         };
-        let Item::List(list) = file.cells[position].get().item else {
+        let Item::List { cells, .. } = file.cells[position].get().item else {
             panic!("not list?");
         };
-        assert_eq!(list.cells.len(), 3);
-        let Item::Text(one) = list.cells[0].get() else {
+        assert_eq!(cells.len(), 3);
+        let Item::Text { value: one, .. } = cells[0].get() else {
             panic!("not text?");
         };
         assert_lines_eq!(one, "1");
-        let Item::Text(two) = list.cells[1].get() else {
+        let Item::Text { value: two, .. } = cells[1].get() else {
             panic!("not text?");
         };
         assert_lines_eq!(two, "2");
-        let Item::Text(three) = list.cells[2].get() else {
+        let Item::Text { value: three, .. } = cells[2].get() else {
             panic!("not text?");
         };
         assert_lines_eq!(three, "3");
@@ -586,9 +587,20 @@ mod tests {
         }
         let file = arena.parse_or_panic("{z}\n\t<k>\n\t\tv");
         assert!(arena.completed().is_some());
-        walk! { $crate = crate;
-            let v = (&file){"z"}<"k">.unwrap();
-        }
-        assert_lines_eq!(v, "v");
+        use crate::walk::*;
+
+        let Item::Text { value, .. } = Path::<true>::new(&[
+            Branch::Entry("z".into()),
+            Branch::Entry("k".into()),
+            Branch::Text,
+        ])
+        .walk(file.lower())
+        .unwrap()
+        .get()
+        .item
+        else {
+            panic!("not text?")
+        };
+        assert_lines_eq!(value, "v");
     }
 }

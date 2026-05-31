@@ -4,7 +4,7 @@ extern crate alloc;
 
 use crate::alloc::Intern;
 use crate::parse::{Builder, Input, ParseError, Reported};
-use crate::{Dict, Entry, File, Item, List};
+use crate::{Entries, Entry, File, Item, Items};
 use alloc::vec::Vec;
 use bumpalo::Bump;
 use core::cell::Cell;
@@ -42,23 +42,15 @@ pub(crate) struct HeapBuilder<'a> {
     bump: &'a Bump,
 }
 impl<'a> Builder<'a> for HeapBuilder<'a> {
-    fn list(&self, count: usize) -> Result<List<'a>, ParseError> {
-        let Some(cells) = self.items.finish(count, self.bump) else {
-            return Err(ParseError::Memory("not enough items to make that list"));
-        };
-        Ok(List {
-            cells,
-            ..Default::default()
-        })
+    fn items(&self, count: usize) -> Result<Items<'a>, ParseError> {
+        self.items
+            .finish(count, self.bump)
+            .ok_or_else(|| ParseError::Memory("not enough items to make that list"))
     }
-    fn dict(&self, count: usize) -> Result<Dict<'a>, ParseError> {
-        let Some(cells) = self.entries.finish(count, self.bump) else {
-            return Err(ParseError::Memory("not enough entries to make that dict"));
-        };
-        Ok(Dict {
-            cells,
-            ..Default::default()
-        })
+    fn entries(&self, count: usize) -> Result<Entries<'a>, ParseError> {
+        self.entries
+            .finish(count, self.bump)
+            .ok_or_else(|| ParseError::Memory("not enough entries to make that dict"))
     }
     fn item(&self, item: Item<'a>) -> Result<(), ParseError> {
         self.items
@@ -93,12 +85,12 @@ impl<'a> Arena<'a> {
         Arena { builder }
     }
     /// after `count` calls to .item, call this to build a list of those.
-    pub fn list(&self, count: usize) -> Result<List<'a>, ParseError> {
-        self.builder.list(count)
+    pub fn list(&self, count: usize) -> Result<Items<'a>, ParseError> {
+        self.builder.items(count)
     }
     /// after `count` calls to .entry, call this to build a dict of those.
-    pub fn dict(&self, count: usize) -> Result<Dict<'a>, ParseError> {
-        self.builder.dict(count)
+    pub fn dict(&self, count: usize) -> Result<Entries<'a>, ParseError> {
+        self.builder.entries(count)
     }
     /// push an item into builder memory for future .list call to use.
     pub fn item(&self, item: Item<'a>) -> Result<(), ParseError> {

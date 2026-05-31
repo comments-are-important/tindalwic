@@ -1,9 +1,10 @@
 extern crate alloc;
 
 use super::{ValueDe, ValueSer, seeded};
-use crate::{Dict, Entry, File, Item, List, Text};
+use crate::{Entry, File, Item};
 use alloc::format;
 use alloc::string::{String, ToString};
+use core::cell::Cell;
 use serde::de::Error;
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 
@@ -13,9 +14,9 @@ seeded! {
     impl Item {
         fn serialize() {
             match this {
-                Item::Text(text) => ValueSer(text.value).serialize(s),
-                Item::List(list) => ListSer(*list).serialize(s),
-                Item::Dict(dict) => DictSer(*dict).serialize(s),
+                Item::Text { value, .. } => ValueSer(*value).serialize(s),
+                Item::List { cells, .. } => ItemsSer(cells).serialize(s),
+                Item::Dict { cells, .. } => EntriesSer(cells).serialize(s),
             }
         }
         fn visit_bool() {
@@ -64,10 +65,10 @@ seeded! {
         fn visit_str() {
             // defaults for `_borrowed_str` and `_string` arrive here
             let value = ValueDe::of(arena).visit_str(v)?;
-            Ok(Item::Text(Text {
+            Ok(Item::Text {
                 value,
                 epilog: None,
-            }))
+            })
         }
         fn visit_bytes() {
             // defaults for `_borrowed_bytes` and `_byte_buf` arrive here
@@ -85,12 +86,10 @@ seeded! {
             Ok(Item::default())
         }
         fn visit_seq() {
-            let list = ListDe::of(arena).visit_seq(seq)?;
-            Ok(Item::List(list))
+            Ok(Item::list(ItemsDe::of(arena).visit_seq(seq)?))
         }
         fn visit_map() {
-            let dict = DictDe::of(arena).visit_map(map)?;
-            Ok(Item::Dict(dict))
+            Ok(Item::dict(EntriesDe::of(arena).visit_map(map)?))
         }
         // defaults for non-simple `_none`, `_some`, `_enum`, `_newtype_struct`
         // all return Err - there is no clear choice for them, and they are uncommon
@@ -101,10 +100,10 @@ seeded! {
 seeded! {
     #[expecting = "a list of neutered items"]
     #[deserialize_seq]
-    impl List {
+    impl Items {
         fn serialize() {
-            let mut seq = s.serialize_seq(Some(this.cells.len()))?;
-            for cell in this.cells.iter() {
+            let mut seq = s.serialize_seq(Some(this.len()))?;
+            for cell in this.iter() {
                 seq.serialize_element(&ItemSer(cell.get()))?;
             }
             seq.end()
@@ -118,7 +117,7 @@ seeded! {
                 count += 1;
             }
             arena
-                .list(count)
+                .items(count)
                 .map_err(|err| Error::custom(err.to_string()))
         }
     }
@@ -127,10 +126,10 @@ seeded! {
 seeded! {
     #[expecting = "a dictionary (string keys, neutered item values)"]
     #[deserialize_map]
-    impl Dict {
+    impl Entries {
         fn serialize() {
-            let mut map = s.serialize_map(Some(this.cells.len()))?;
-            for cell in this.cells.iter() {
+            let mut map = s.serialize_map(Some(this.len()))?;
+            for cell in this.iter() {
                 let Entry { key, item, .. } = cell.get();
                 let first = key.lines().next().unwrap_or(""); // TODO key.one_liner
                 map.serialize_entry(first, &ItemSer(item))?;
@@ -157,7 +156,7 @@ seeded! {
                 count += 1;
             }
             arena
-                .dict(count)
+                .entries(count)
                 .map_err(|err| Error::custom(err.to_string()))
         }
     }
@@ -168,17 +167,14 @@ seeded! {
     #[deserialize_map]
     impl File {
         fn serialize() {
-            DictSer(Dict {
-                cells: this.cells,
-                ..Default::default()
-            })
-            .serialize(s)
+            EntriesSer(this.cells).serialize(s)
         }
         fn visit_map() {
-            let dict = DictDe::of(arena).visit_map(map)?;
+            let cells = EntriesDe::of(arena).visit_map(map)?;
             Ok(File {
-                cells: dict.cells,
-                ..Default::default()
+                hashbang: None,
+                prolog: None,
+                cells,
             })
         }
     }
@@ -189,11 +185,7 @@ pub struct Neutered<'a>(pub File<'a>);
 impl<'a> Serialize for Neutered<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let Neutered(this) = self;
-        DictSer(Dict {
-            cells: this.cells,
-            ..Default::default()
-        })
-        .serialize(s)
+        FileSer(*this).serialize(s)
     }
 }
 #[cfg(feature = "bumpalo")]

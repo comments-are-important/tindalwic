@@ -20,6 +20,17 @@ impl Parse for SerDe {
             "Comment" => quote!(Option<Comment<'a>>),
             "Items" => quote!(&'a [Cell<Item<'a>>]),
             "Entries" => quote!(&'a [Cell<Entry<'a>>]),
+            "Text" => quote!((Value<'a>, Option<Comment<'a>>)),
+            "List" => quote!((
+                Option<Comment<'a>>,
+                &'a [Cell<Item<'a>>],
+                Option<Comment<'a>>
+            )),
+            "Dict" => quote!((
+                Option<Comment<'a>>,
+                &'a [Cell<Entry<'a>>],
+                Option<Comment<'a>>
+            )),
             _ => quote!(#kind<'a>),
         };
         let mut expecting = None;

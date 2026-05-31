@@ -174,7 +174,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
     pub fn file(&mut self, size: usize) -> File<'a> {
         let shape = Silhouette::random(size, self.rng);
         let dict = self.dict(&shape).unwrap();
-        File::raise(&dict).unwrap()
+        File::try_from_dict_without_epilog(&dict).unwrap()
     }
 }
 

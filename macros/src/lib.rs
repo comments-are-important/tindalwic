@@ -8,7 +8,7 @@
 //! Normally these macros emit code containing paths that start with `::tindalwic`.
 //! However, if your [Cargo.toml renames the dependency](https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html#renaming-dependencies-in-cargotoml)
 //! on `tindalwic` to a different _name_, then inform every macro call by writing, e.g.:
-//!     walk! {
+//!     json! {
 //!         $crate = name; // no `::` here
 //!         ....
 //!     }
@@ -17,7 +17,7 @@ use proc_macro::TokenStream as RawStream;
 use proc_macro2::{Delimiter, Span, TokenStream, TokenTree};
 use quote::{ToTokens, TokenStreamExt, quote};
 use std::cell::RefCell;
-use syn::parse::{Nothing, Parse, ParseStream, Parser};
+use syn::parse::{Parse, ParseStream, Parser};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::token::{Brace, Bracket, Paren};
@@ -42,13 +42,6 @@ mod path;
 #[proc_macro]
 pub fn path(input: RawStream) -> RawStream {
     let output = parse_macro_input!(input as DollarCrate<path::Path>);
-    quote!(#output).into()
-}
-
-mod walk;
-#[proc_macro]
-pub fn walk(input: RawStream) -> RawStream {
-    let output = parse_macro_input!(input as DollarCrate<walk::Walks>);
     quote!(#output).into()
 }
 
@@ -207,6 +200,11 @@ impl Group {
         group.set_span(open.span.join(close.span).unwrap_or(open.span));
         Ok(Group(group))
     }
+    // the now abandoned walk! macro used angle brackets in the input syntax,
+    // which aren't something you get free from syn::parse ... leaving the
+    // code here because it might become used later and pulling it out of git
+    // history can be a bit of work
+    #[expect(dead_code)]
     fn optional_angled(input: ParseStream) -> Result<Option<Self>> {
         Ok(if input.peek(Token![<]) {
             Some(Group::required_angled(input)?)
@@ -235,12 +233,6 @@ impl Parse for Variable {
     }
 }
 impl Variable {
-    fn new(name: &str) -> Self {
-        Variable {
-            mutable: false,
-            ident: Ident::new(name, Span::call_site()),
-        }
-    }
     fn hidden(name: &str) -> Self {
         Variable {
             mutable: false,

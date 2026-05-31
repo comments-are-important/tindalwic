@@ -89,7 +89,9 @@ fn two_lines() {
         let entries = {"key":"one\ntwo"}.unwrap();
     }
     assert_eq!(
-        File::raise(&Item::dict(entries)).unwrap().to_string(),
+        File::try_from_dict_without_epilog(&Item::dict(entries))
+            .unwrap()
+            .to_string(),
         "<key>\n\tone\n\ttwo\n"
     );
 }
@@ -129,9 +131,11 @@ fn nested_lists() {
         file.to_string(),
         "[]\n\t[]\n\t\t[]\n\t\t\t[]\n\t\t\t\tvalue\n"
     );
-    let cell = path!({""}[0][0][0][0]Text).walk(file.lower()).unwrap();
+    let cell = path!({""}[0][0][0][0]Text)
+        .walk(file.embed_without_hashbang())
+        .unwrap();
     let Item::Text { value, .. } = cell.get() else {
-        panic!("impossible because walk checks");
+        unreachable!("this destructuring always succeeds because path walk did");
     };
     assert_eq!(Vec::from_iter(value.lines()), vec!["value"]);
 }
@@ -149,12 +153,14 @@ fn nested_dicts() {
     }
     assert_eq!(keys, vec!["1", "2", "a"]);
     assert_eq!(
-        File::raise(&dict).unwrap().to_string(),
+        File::try_from_dict_without_epilog(&dict)
+            .unwrap()
+            .to_string(),
         "1=one\n[2]\n\ttwo\n{a}\n\t{b}\n\t\t{c}\n\t\t\t{d}\n\t\t\t\tk=v\n"
     );
     let cell = path!({"a"}{"b"}{"c"}{"d"}{"k"}Text).walk(dict).unwrap();
     let Item::Text { value, .. } = cell.get().item else {
-        panic!("impossible because walk checks");
+        unreachable!("this destructuring always succeeds because path walk did");
     };
     assert_eq!(Vec::from_iter(value.lines()), vec!["v"]);
 }
@@ -162,17 +168,20 @@ fn nested_dicts() {
 #[test]
 fn change_in_list() {
     json! {
-        let entries = {"a":{"b":["z"]}}.unwrap();
+        let entries = {"a":{"b":["v"]}}.unwrap();
     }
     let dict = Item::dict(entries);
     let cell = path!({"a"}{"b"}[0]Text).walk(dict).unwrap();
-    let Item::Text { .. } = cell.get() else {
-        panic!("impossible because walk checks");
+    let Item::Text { value, .. } = cell.get() else {
+        unreachable!("this destructuring always succeeds because path walk did");
     };
-    cell.set(Item::text("c"));
+    let epilog = some_comment("c");
+    cell.set(Item::Text { value, epilog });
     assert_eq!(
-        File::raise(&dict).unwrap().to_string(),
-        "{a}\n\t[b]\n\t\tc\n"
+        File::try_from_dict_without_epilog(&dict)
+            .unwrap()
+            .to_string(),
+        "{a}\n\t[b]\n\t\tv\n\t\t#c\n"
     );
 }
 
@@ -187,7 +196,9 @@ fn change_in_dict() {
     entry.item = Item::text("c");
     cell.set(entry);
     assert_eq!(
-        File::raise(&dict).unwrap().to_string(),
+        File::try_from_dict_without_epilog(&dict)
+            .unwrap()
+            .to_string(),
         "[a]\n\t{}\n\t\tb=c\n"
     );
 }
@@ -201,13 +212,18 @@ fn inject_comments() {
     let cell = path!({"k"}Text).walk(dict).unwrap();
     let mut entry = cell.get();
     let Item::Text { value, .. } = entry.item else {
-        panic!("impossible because path checked");
+        unreachable!("this destructuring always succeeds because path walk did");
     };
     let epilog = some_comment("c");
     entry.before = some_comment("b");
     entry.item = Item::Text { value, epilog };
     cell.set(entry);
-    assert_eq!(File::raise(&dict).unwrap().to_string(), "//b\nk=v\n#c\n");
+    assert_eq!(
+        File::try_from_dict_without_epilog(&dict)
+            .unwrap()
+            .to_string(),
+        "//b\nk=v\n#c\n"
+    );
 }
 
 #[test]
@@ -219,7 +235,7 @@ fn change_structure() {
     let dict = Item::dict(entries);
     let cell = path!({key}[0]Text).walk(dict).unwrap();
     let Item::Text { value, .. } = cell.get() else {
-        panic!("impossible because path checked");
+        unreachable!("this destructuring always succeeds because path walk did");
     };
     let b = String::from("b");
     let epilog = some_comment(&b);
@@ -228,24 +244,15 @@ fn change_structure() {
     }
     cell.set(Item::dict(patch));
     assert_eq!(
-        File::raise(&dict).unwrap().to_string(),
+        File::try_from_dict_without_epilog(&dict)
+            .unwrap()
+            .to_string(),
         "[k]\n\t{}\n\t\tp=v\n\t\t#b\n"
     )
 }
 
 /*
 // move to tests/macro_err/
-#[test]
-#[cfg(feature = "alloc")]
-fn json_text() {
-    // used to work but now gets red squiggled
-    json! {
-        let just_a_text = "hi".unwrap();
-        let just_a_copy = (just_a_text).unwrap();
-    }
-    assert_eq!(just_a_text.joined(), "hi");
-    assert_eq!(just_a_copy.joined(), "hi");
-}
 fn zzz() {
     let mut hi = String::from("hi");
     let mut root = tindalwic!([hi[..]]);

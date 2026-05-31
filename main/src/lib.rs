@@ -355,7 +355,7 @@ pub struct File<'a> {
 }
 impl<'a> File<'a> {
     /// make an [Item::Dict] from self.prolog and self.cells
-    pub fn lower(&self) -> Item<'a> {
+    pub fn embed_without_hashbang(&self) -> Item<'a> {
         Item::Dict {
             prolog: self.prolog,
             cells: self.cells,
@@ -365,7 +365,7 @@ impl<'a> File<'a> {
     /// take prolog and cells from an [Item::Dict] to make a new File.
     ///
     /// None if the item is not a dictionary.
-    pub fn raise(dict: &Item<'a>) -> Option<Self> {
+    pub fn try_from_dict_without_epilog(dict: &Item<'a>) -> Option<Self> {
         match dict {
             Item::Dict { prolog, cells, .. } => Some(File {
                 hashbang: None,

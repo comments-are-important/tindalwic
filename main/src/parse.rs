@@ -594,7 +594,7 @@ mod tests {
             Branch::Entry("k".into()),
             Branch::Text,
         ])
-        .walk(file.lower())
+        .walk(file.embed_without_hashbang())
         .unwrap()
         .get()
         .item

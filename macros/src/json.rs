@@ -101,26 +101,26 @@ impl JSONs {
             match item {
                 Item::Text(text) => {
                     tokens.extend(quote! {
-                        <dyn #tindalwic::parse::Builder>::push_text_item(&mut #ident, #text)#err;
+                        #tindalwic::parse::Parse::builder(&mut #ident).text_item(#text)#err;
                     });
                 }
                 Item::List(list) => {
                     self.list(list, err, tokens);
                     let count = list.len();
                     tokens.extend(quote! {
-                        <dyn #tindalwic::parse::Builder>::take_items_push_list_item(&mut #ident, #count)#err;
+                        #tindalwic::parse::Parse::builder(&mut #ident).list_item(#count)#err;
                     });
                 }
                 Item::Dict(dict) => {
                     self.dict(dict, err, tokens);
                     let count = dict.len();
                     tokens.extend(quote! {
-                        <dyn #tindalwic::parse::Builder>::take_entries_push_dict_item(&mut #ident, #count)#err;
+                        #tindalwic::parse::Parse::builder(&mut #ident).dict_item(#count)#err;
                     });
                 }
                 Item::Expr(expr) => {
                     tokens.extend(quote! {
-                        <dyn #tindalwic::parse::Builder>::push_item((&mut #ident, #expr).into())#err;
+                        #tindalwic::parse::Parse::builder(&mut #ident).push_item((#expr).into())#err;
                     });
                 }
             }
@@ -134,26 +134,26 @@ impl JSONs {
             match item {
                 Item::Text(text) => {
                     tokens.extend(quote! {
-                        <dyn #tindalwic::parse::Builder>::push_text_entry(&mut #ident, #key, #text)#err;
+                        #tindalwic::parse::Parse::builder(&mut #ident).text_entry(#key, #text)#err;
                     });
                 }
                 Item::List(list) => {
                     self.list(list, err, tokens);
                     let count = list.len();
                     tokens.extend(quote! {
-                        <dyn #tindalwic::parse::Builder>::take_items_push_list_entry(&mut #ident, #key, #count)#err;
+                        #tindalwic::parse::Parse::builder(&mut #ident).list_entry(#key, #count)#err;
                     });
                 }
                 Item::Dict(dict) => {
                     self.dict(dict, err, tokens);
                     let count = dict.len();
                     tokens.extend(quote! {
-                        <dyn #tindalwic::parse::Builder>::take_entries_push_dict_entry(&mut #ident, #key, #count)#err;
+                        #tindalwic::parse::Parse::builder(&mut #ident).dict_entry(#key, #count)#err;
                     });
                 }
                 Item::Expr(expr) => {
                     tokens.extend(quote! {
-                        <dyn #tindalwic::parse::Builder>::push_key_item_entry(&mut #ident, #key, (#expr).into())#err;
+                        #tindalwic::parse::Parse::builder(&mut #ident).associate(#key, (#expr).into())#err;
                     });
                 }
             }
@@ -177,14 +177,14 @@ impl ToTokens for JSONs {
                     self.list(list, err, tokens);
                     let count = list.len();
                     tokens.extend(quote! {
-                        let #name = <dyn #tindalwic::parse::Builder>::take_items(&mut #ident, #count)#err;
+                        let #name = #tindalwic::parse::Parse::builder(&mut #ident).finish_items(#count)#err;
                     });
                 }
                 Root::Dict(dict) => {
                     self.dict(dict, err, tokens);
                     let count = dict.len();
                     tokens.extend(quote! {
-                        let #name = <dyn #tindalwic::parse::Builder>::take_entries(&mut #ident, #count)#err;
+                        let #name = #tindalwic::parse::Parse::builder(&mut #ident).finish_entries(#count)#err;
                     });
                 }
             }

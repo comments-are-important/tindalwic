@@ -2,8 +2,7 @@
 
 extern crate alloc;
 
-use crate::alloc::Intern;
-use crate::parse::{Builder, ParseError, Reported};
+use crate::parse::{Build, Parse, ParseError, Reported};
 use crate::{Entries, Entry, File, Item, Items};
 use alloc::vec::Vec;
 use bumpalo::Bump;
@@ -24,7 +23,7 @@ impl<T: Copy> CellVec<T> {
         vec.push(value);
         Some(())
     }
-    fn take<'b>(&self, count: usize, bump: &'b Bump) -> Option<&'b [Cell<T>]> {
+    fn finish<'b>(&self, count: usize, bump: &'b Bump) -> Option<&'b [Cell<T>]> {
         let CellVec(cell) = self;
         // SAFETY: Cell instance is private, no ref to its Vec value leaks outside this
         // impl, except via this let, only as receiver in Vec methods, which are safe.
@@ -36,21 +35,51 @@ impl<T: Copy> CellVec<T> {
     }
 }
 
-/// a flavor of Arena that uses bumpalo to put things in the heap.
-/// TODO think about fleshing this out with more convenient methods.
-pub struct Arena<'a> {
+struct HeapBuilder<'a> {
     items: CellVec<Item<'a>>,
     entries: CellVec<Entry<'a>>,
     bump: &'a Bump,
 }
+impl<'a> Build<'a> for HeapBuilder<'a> {
+    fn finish_items(&mut self, count: usize) -> Result<Items<'a>, &'static str> {
+        self.items
+            .finish(count, self.bump)
+            .ok_or("not enough items to make that list")
+    }
+    fn finish_entries(&mut self, count: usize) -> Result<Entries<'a>, &'static str> {
+        self.entries
+            .finish(count, self.bump)
+            .ok_or("not enough entries to make that dict")
+    }
+    fn push_item(&mut self, item: Item<'a>) -> Result<(), &'static str> {
+        self.items.push(item).ok_or("no room for item")
+    }
+    fn push_entry(&mut self, entry: Entry<'a>) -> Result<(), &'static str> {
+        self.entries.push(entry).ok_or("no room for entry")
+    }
+    fn intern(&mut self, value: &'_ str) -> Result<&'a str, &'static str> {
+        Ok(self.bump.alloc_str(value))
+    }
+}
+
+/// a flavor of Arena that uses bumpalo to put things in the heap.
+pub struct Arena<'a> {
+    builder: HeapBuilder<'a>,
+}
+impl<'a> Parse<'a> for Arena<'a> {
+    fn builder(&mut self) -> &mut dyn Build<'a> {
+        &mut self.builder
+    }
+}
 impl<'a> Arena<'a> {
     /// the Bump needs an outside let binding so it lives long enough.
     pub fn new(bump: &'a Bump) -> Self {
-        Arena {
+        let builder = HeapBuilder {
             items: CellVec::new(),
             entries: CellVec::new(),
             bump,
-        }
+        };
+        Arena { builder }
     }
     /// call the parser on the provided content, collect first `count` errors.
     pub fn parse_collect(
@@ -62,7 +91,7 @@ impl<'a> Arena<'a> {
         Self: Sized,
     {
         let mut errors = Vec::new();
-        self.parse(content, &mut |err| {
+        self.report(content, &mut |err| {
             if errors.len() >= count {
                 return Reported::Abort;
             }
@@ -70,29 +99,6 @@ impl<'a> Arena<'a> {
             Reported::Continue
         })
         .ok_or_else(|| errors)
-    }
-}
-impl<'a> Intern<'a> for Arena<'a> {
-    fn str(&self, value: &'_ str) -> &'a str {
-        self.bump.alloc_str(value)
-    }
-}
-impl<'a> Builder<'a> for Arena<'a> {
-    fn take_items(&mut self, count: usize) -> Result<Items<'a>, &'static str> {
-        self.items
-            .take(count, self.bump)
-            .ok_or("not enough items to make that list")
-    }
-    fn take_entries(&mut self, count: usize) -> Result<Entries<'a>, &'static str> {
-        self.entries
-            .take(count, self.bump)
-            .ok_or("not enough entries to make that dict")
-    }
-    fn push_item(&mut self, item: Item<'a>) -> Result<(), &'static str> {
-        self.items.push(item).ok_or("no room for item")
-    }
-    fn push_entry(&mut self, entry: Entry<'a>) -> Result<(), &'static str> {
-        self.entries.push(entry).ok_or("no room for entry")
     }
 }
 
@@ -104,7 +110,7 @@ mod tests {
     fn parse_alloc() {
         let bump = Bump::new();
         let mut arena = Arena::new(&bump);
-        let file = arena.parse_or_panic("k=v\n");
+        let file = arena.panic("k=v\n");
         assert_eq!(file.to_string(), "k=v\n");
     }
     #[test]

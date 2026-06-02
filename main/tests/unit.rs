@@ -1,6 +1,6 @@
 #![allow(missing_docs)]
 
-use tindalwic::parse::Builder;
+use tindalwic::parse::Parse;
 use tindalwic::{Comment, Entry, File, Item, arena, json, path};
 
 // #[test]
@@ -31,9 +31,7 @@ mod alloc_tests {
             let mut arena = Arena::new(&bump);
 
             let mut de = serde_json::Deserializer::from_str(r#"{ "key":"one\ntwo" }"#);
-            let file: File = Neutered::bumpalo_seed(&mut arena)
-                .deserialize(&mut de)
-                .unwrap();
+            let file: File = Neutered::seed(&mut arena).deserialize(&mut de).unwrap();
 
             json! {
                 let entries = {"key":"one\ntwo"}.unwrap();
@@ -51,7 +49,7 @@ mod alloc_tests {
         arena! {
             let mut arena = <1dict>;
         }
-        let parsed = arena.parse_or_panic(&encoded);
+        let parsed = arena.panic(&encoded);
         assert!(parsed.hashbang.is_none());
         assert_eq!(
             Vec::from_iter(parsed.prolog.unwrap().value.lines()),
@@ -82,7 +80,7 @@ fn text_stretch_bug() {
     arena! {
         let mut arena = <1dict,1list>;
     }
-    let file = arena.parse_or_panic(content);
+    let file = arena.panic(content);
     assert_eq!(file.to_string(), content);
 }
 
@@ -105,18 +103,18 @@ fn multi_line_key() {
         let mut arena = <2dict>;
     }
     let data = "@one\n\ttwo\n<>\n\tv\n";
-    let file = arena.parse_or_panic(data);
+    let file = arena.panic(data);
     assert_eq!(file.to_string(), data);
     let report = &mut |err| {
         print!("{err}");
         tindalwic::parse::Reported::Continue
     };
-    assert!(arena.parse("@", report).is_none());
-    assert!(arena.parse("@k", report).is_none());
-    assert!(arena.parse("@k\n", report).is_none());
-    assert!(arena.parse("@k\n<", report).is_none());
-    assert!(arena.parse("@k\n<>", report).is_some());
-    assert!(arena.parse("@k\n<x>", report).is_none());
+    assert!(arena.report("@", report).is_none());
+    assert!(arena.report("@k", report).is_none());
+    assert!(arena.report("@k\n", report).is_none());
+    assert!(arena.report("@k\n<", report).is_none());
+    assert!(arena.report("@k\n<>", report).is_some());
+    assert!(arena.report("@k\n<x>", report).is_none());
 }
 
 #[test]

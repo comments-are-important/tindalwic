@@ -24,47 +24,73 @@ seeded! {
             Ok(Item::text(value))
         }
         fn visit_i8() {
-            Ok(Item::text(arena.str(&format!("{:?}", v))))
+            Ok(Item::text(
+                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+            ))
         }
         fn visit_i16() {
-            Ok(Item::text(arena.str(&format!("{:?}", v))))
+            Ok(Item::text(
+                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+            ))
         }
         fn visit_i32() {
-            Ok(Item::text(arena.str(&format!("{:?}", v))))
+            Ok(Item::text(
+                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+            ))
         }
         fn visit_i64() {
-            Ok(Item::text(arena.str(&format!("{:?}", v))))
+            Ok(Item::text(
+                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+            ))
         }
         fn visit_i128() {
-            Ok(Item::text(arena.str(&format!("{:?}", v))))
+            Ok(Item::text(
+                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+            ))
         }
         fn visit_u8() {
-            Ok(Item::text(arena.str(&format!("{:?}", v))))
+            Ok(Item::text(
+                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+            ))
         }
         fn visit_u16() {
-            Ok(Item::text(arena.str(&format!("{:?}", v))))
+            Ok(Item::text(
+                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+            ))
         }
         fn visit_u32() {
-            Ok(Item::text(arena.str(&format!("{:?}", v))))
+            Ok(Item::text(
+                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+            ))
         }
         fn visit_u64() {
-            Ok(Item::text(arena.str(&format!("{:?}", v))))
+            Ok(Item::text(
+                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+            ))
         }
         fn visit_u128() {
-            Ok(Item::text(arena.str(&format!("{:?}", v))))
+            Ok(Item::text(
+                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+            ))
         }
         fn visit_f32() {
-            Ok(Item::text(arena.str(&format!("{:?}", v))))
+            Ok(Item::text(
+                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+            ))
         }
         fn visit_f64() {
-            Ok(Item::text(arena.str(&format!("{:?}", v))))
+            Ok(Item::text(
+                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+            ))
         }
         fn visit_char() {
-            Ok(Item::text(arena.str(&v.to_string())))
+            Ok(Item::text(
+                build.intern(&v.to_string()).map_err(Error::custom)?,
+            ))
         }
         fn visit_str() {
             // defaults for `_borrowed_str` and `_string` arrive here
-            let value = ValueDe::of(arena).visit_str(v)?;
+            let value = ValueDe::of(build).visit_str(v)?;
             Ok(Item::Text {
                 value,
                 epilog: None,
@@ -75,10 +101,10 @@ seeded! {
             if v.is_ascii() {
                 // SAFETY: Verified it is ASCII.
                 let value = unsafe { str::from_utf8_unchecked(v) };
-                Ok(Item::text(arena.str(value)))
+                Ok(Item::text(build.intern(value).map_err(Error::custom)?))
             } else {
                 let value: String = v.iter().map(|&b| char::from(b)).collect();
-                Ok(Item::text(arena.str(&value)))
+                Ok(Item::text(build.intern(&value).map_err(Error::custom)?))
             }
         }
         fn visit_unit() {
@@ -86,10 +112,10 @@ seeded! {
             Ok(Item::default())
         }
         fn visit_seq() {
-            Ok(Item::list(ItemsDe::of(arena).visit_seq(seq)?))
+            Ok(Item::list(ItemsDe::of(build).visit_seq(seq)?))
         }
         fn visit_map() {
-            Ok(Item::dict(EntriesDe::of(arena).visit_map(map)?))
+            Ok(Item::dict(EntriesDe::of(build).visit_map(map)?))
         }
         // defaults for non-simple `_none`, `_some`, `_enum`, `_newtype_struct`
         // all return Err - there is no clear choice for them, and they are uncommon
@@ -110,15 +136,11 @@ seeded! {
         }
         fn visit_seq() {
             let mut count = 0usize;
-            while let Some(item) = seq.next_element_seed(ItemDe::of(arena))? {
-                arena
-                    .push_item(item)
-                    .map_err(|err| Error::custom(err.to_string()))?;
+            while let Some(item) = seq.next_element_seed(ItemDe::of(build))? {
+                build.push_item(item).map_err(Error::custom)?;
                 count += 1;
             }
-            arena
-                .take_items(count)
-                .map_err(|err| Error::custom(err.to_string()))
+            build.finish_items(count).map_err(Error::custom)
         }
     }
 } // !seeded
@@ -138,25 +160,22 @@ seeded! {
         }
         fn visit_map() {
             let mut count = 0usize;
-            while let Some(key) = map.next_key_seed(ValueDe::of(arena))? {
-                let item = map.next_value_seed(ItemDe::of(arena))?;
-                arena
-                    .push_entry(Entry {
-                        key: if let Some(slice) = key.verbatim(0) {
-                            slice
-                        } else {
-                            arena.str(&key.joined())
-                        }
-                        .into(),
-                        item,
-                        ..Default::default()
-                    })
-                    .map_err(|err| Error::custom(err.to_string()))?;
+            while let Some(key) = map.next_key_seed(ValueDe::of(build))? {
+                let item = map.next_value_seed(ItemDe::of(build))?;
+                let entry = Entry {
+                    key: if let Some(slice) = key.verbatim(0) {
+                        slice
+                    } else {
+                        build.intern(&key.joined()).map_err(Error::custom)?
+                    }
+                    .into(),
+                    item,
+                    ..Default::default()
+                };
+                build.push_entry(entry).map_err(Error::custom)?;
                 count += 1;
             }
-            arena
-                .take_entries(count)
-                .map_err(|err| Error::custom(err.to_string()))
+            build.finish_entries(count).map_err(Error::custom)
         }
     }
 } // !seeded
@@ -169,7 +188,7 @@ seeded! {
             EntriesSer(this.cells).serialize(s)
         }
         fn visit_map() {
-            let cells = EntriesDe::of(arena).visit_map(map)?;
+            let cells = EntriesDe::of(build).visit_map(map)?;
             Ok(File {
                 hashbang: None,
                 prolog: None,
@@ -187,18 +206,15 @@ impl<'a> Serialize for Neutered<'a> {
         FileSer(*this).serialize(s)
     }
 }
-#[cfg(feature = "bumpalo")]
-mod bumpalo {
-    use super::{File, FileDe, Neutered};
-    use crate::alloc::Intern;
-    use crate::parse::Builder;
-    impl<'a> Neutered<'a> {
-        /// call thusly: `Neutered::bumpalo_seed(&arena).deserialize(...)`
-        pub fn bumpalo_seed<'de, 'ib, IB: Intern<'a> + Builder<'a>>(
-            arena: &'ib mut IB,
-        ) -> impl serde::de::DeserializeSeed<'de, Value = File<'a>> + use<'de, 'a, 'ib, IB>
-        {
-            FileDe::of(arena)
-        }
+impl<'a> Neutered<'a> {
+    /// call thusly: `Neutered::seed(&mut parse).deserialize(...)`
+    /// the deserialize will likely fail unless parse.builder() supports intern
+    pub fn seed<'de, 'b, P: crate::parse::Parse<'a>>(
+        parse: &'b mut P,
+    ) -> impl serde::de::DeserializeSeed<'de, Value = File<'a>> + 'b
+    where
+        'a: 'b,
+    {
+        FileDe::of(parse.builder())
     }
 }

@@ -3,7 +3,7 @@ extern crate alloc;
 use super::{CommentDe, CommentSer, ValueDe, ValueSer, seeded};
 use super::{DictFields, EntryFields, FileFields, ItemVariants, ListFields, TextFields};
 use crate::{Comment, Entry, File, Item, Value};
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use core::cell::Cell;
 use serde::de::{Error, VariantAccess};
 use serde::ser::{Serialize, SerializeSeq, SerializeStruct, Serializer};
@@ -43,11 +43,11 @@ seeded! {
             let (this, access) = data.variant::<ItemVariants>()?;
             Ok(match this {
                 ItemVariants::Text => {
-                    let (value, epilog) = access.newtype_variant_seed(TextDe::of(arena))?;
+                    let (value, epilog) = access.newtype_variant_seed(TextDe::of(build))?;
                     Item::Text { value, epilog }
                 }
                 ItemVariants::List => {
-                    let (prolog, cells, epilog) = access.newtype_variant_seed(ListDe::of(arena))?;
+                    let (prolog, cells, epilog) = access.newtype_variant_seed(ListDe::of(build))?;
                     Item::List {
                         prolog,
                         cells,
@@ -55,7 +55,7 @@ seeded! {
                     }
                 }
                 ItemVariants::Dict => {
-                    let (prolog, cells, epilog) = access.newtype_variant_seed(DictDe::of(arena))?;
+                    let (prolog, cells, epilog) = access.newtype_variant_seed(DictDe::of(build))?;
                     Item::Dict {
                         prolog,
                         cells,
@@ -96,13 +96,13 @@ seeded! {
                         if value.is_some() {
                             return Err(Error::duplicate_field("value"));
                         }
-                        value = Some(map.next_value_seed(ValueDe::of(arena))?);
+                        value = Some(map.next_value_seed(ValueDe::of(build))?);
                     }
                     TextFields::Epilog => {
                         if epilog.is_some() {
                             return Err(Error::duplicate_field("epilog"));
                         }
-                        epilog = Some(map.next_value_seed(CommentDe::of(arena))?);
+                        epilog = Some(map.next_value_seed(CommentDe::of(build))?);
                     }
                 }
             }
@@ -124,15 +124,11 @@ seeded! {
         }
         fn visit_seq() {
             let mut count = 0usize;
-            while let Some(item) = seq.next_element_seed(ItemDe::of(arena))? {
-                arena
-                    .push_item(item)
-                    .map_err(|err| Error::custom(err.to_string()))?;
+            while let Some(item) = seq.next_element_seed(ItemDe::of(build))? {
+                build.push_item(item).map_err(Error::custom)?;
                 count += 1;
             }
-            Ok(arena
-                .take_items(count)
-                .map_err(|err| Error::custom(err.to_string()))?)
+            Ok(build.finish_items(count).map_err(Error::custom)?)
         }
     }
 } // !seeded
@@ -171,19 +167,19 @@ seeded! {
                         if prolog.is_some() {
                             return Err(Error::duplicate_field("prolog"));
                         }
-                        prolog = Some(map.next_value_seed(CommentDe::of(arena))?);
+                        prolog = Some(map.next_value_seed(CommentDe::of(build))?);
                     }
                     ListFields::Array => {
                         if array.is_some() {
                             return Err(Error::duplicate_field("array"));
                         }
-                        array = Some(map.next_value_seed(ItemsDe::of(arena))?);
+                        array = Some(map.next_value_seed(ItemsDe::of(build))?);
                     }
                     ListFields::Epilog => {
                         if epilog.is_some() {
                             return Err(Error::duplicate_field("epilog"));
                         }
-                        epilog = Some(map.next_value_seed(CommentDe::of(arena))?);
+                        epilog = Some(map.next_value_seed(CommentDe::of(build))?);
                     }
                 }
             }
@@ -245,19 +241,24 @@ seeded! {
                         if before.is_some() {
                             return Err(Error::duplicate_field("before"));
                         }
-                        before = Some(map.next_value_seed(CommentDe::of(arena))?);
+                        before = Some(map.next_value_seed(CommentDe::of(build))?);
                     }
                     EntryFields::Key => {
                         if key.is_some() {
                             return Err(Error::duplicate_field("key"));
                         }
-                        key = Some(arena.str(&map.next_value::<String>()?).into());
+                        key = Some(
+                            build
+                                .intern(&map.next_value::<String>()?)
+                                .map_err(Error::custom)?
+                                .into(),
+                        );
                     }
                     EntryFields::Item => {
                         if item.is_some() {
                             return Err(Error::duplicate_field("item"));
                         }
-                        item = Some(map.next_value_seed(ItemDe::of(arena))?);
+                        item = Some(map.next_value_seed(ItemDe::of(build))?);
                     }
                 }
             }
@@ -284,15 +285,11 @@ seeded! {
         }
         fn visit_seq() {
             let mut count = 0usize;
-            while let Some(entry) = seq.next_element_seed(EntryDe::of(arena))? {
-                arena
-                    .push_entry(entry)
-                    .map_err(|err| Error::custom(err.to_string()))?;
+            while let Some(entry) = seq.next_element_seed(EntryDe::of(build))? {
+                build.push_entry(entry).map_err(Error::custom)?;
                 count += 1;
             }
-            Ok(arena
-                .take_entries(count)
-                .map_err(|err| Error::custom(err.to_string()))?)
+            Ok(build.finish_entries(count).map_err(Error::custom)?)
         }
     }
 } // !seeded
@@ -328,19 +325,19 @@ seeded! {
                         if prolog.is_some() {
                             return Err(Error::duplicate_field("prolog"));
                         }
-                        prolog = Some(map.next_value_seed(CommentDe::of(arena))?);
+                        prolog = Some(map.next_value_seed(CommentDe::of(build))?);
                     }
                     DictFields::Array => {
                         if array.is_some() {
                             return Err(Error::duplicate_field("array"));
                         }
-                        array = Some(map.next_value_seed(EntriesDe::of(arena))?);
+                        array = Some(map.next_value_seed(EntriesDe::of(build))?);
                     }
                     DictFields::Epilog => {
                         if epilog.is_some() {
                             return Err(Error::duplicate_field("epilog"));
                         }
-                        epilog = Some(map.next_value_seed(CommentDe::of(arena))?);
+                        epilog = Some(map.next_value_seed(CommentDe::of(build))?);
                     }
                 }
             }
@@ -386,19 +383,19 @@ seeded! {
                         if hashbang.is_some() {
                             return Err(Error::duplicate_field("hashbang"));
                         }
-                        hashbang = Some(map.next_value_seed(CommentDe::of(arena))?);
+                        hashbang = Some(map.next_value_seed(CommentDe::of(build))?);
                     }
                     FileFields::Prolog => {
                         if prolog.is_some() {
                             return Err(Error::duplicate_field("prolog"));
                         }
-                        prolog = Some(map.next_value_seed(CommentDe::of(arena))?);
+                        prolog = Some(map.next_value_seed(CommentDe::of(build))?);
                     }
                     FileFields::Array => {
                         if array.is_some() {
                             return Err(Error::duplicate_field("array"));
                         }
-                        array = Some(map.next_value_seed(EntriesDe::of(arena))?);
+                        array = Some(map.next_value_seed(EntriesDe::of(build))?);
                     }
                 }
             }
@@ -422,18 +419,15 @@ impl<'a> Serialize for Compact<'a> {
         FileSer(*this).serialize(s)
     }
 }
-#[cfg(feature = "bumpalo")]
-mod bumpalo {
-    use super::{Compact, File, FileDe};
-    use crate::alloc::Intern;
-    use crate::parse::Builder;
-    impl<'a> Compact<'a> {
-        /// call thusly: `Compact::bumpalo_seed(&arena).deserialize(...)`
-        pub fn bumpalo_seed<'de, 'ib, IB: Intern<'a> + Builder<'a>>(
-            arena: &'ib mut IB,
-        ) -> impl serde::de::DeserializeSeed<'de, Value = File<'a>> + use<'de, 'a, 'ib, IB>
-        {
-            FileDe::of(arena)
-        }
+impl<'a> Compact<'a> {
+    /// call thusly: `Compact::seed(&build).deserialize(...)`
+    /// the deserialize will likely fail unless parse.builder() supports intern
+    pub fn seed<'de, 'b, P: crate::parse::Parse<'a>>(
+        parse: &'b mut P,
+    ) -> impl serde::de::DeserializeSeed<'de, Value = File<'a>> + 'b
+    where
+        'a: 'b,
+    {
+        FileDe::of(parse.builder())
     }
 }

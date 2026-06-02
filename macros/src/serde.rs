@@ -107,7 +107,7 @@ impl Parse for SerDe {
                     visitors.extend(quote! {
                         fn #ident #signature {
                             #[allow(unused)]
-                            let #de(arena, _) = self;
+                            let #de(build) = self;
                             #(#body)*
                         }
                     });
@@ -259,27 +259,27 @@ impl ToTokens for SerDe {
         let tindalwic = tindalwic();
         tokens.extend(quote! {
             struct #ser <'a>(#value);
-            impl <'a> #ser <'a> { const EXPECTING: &'static str = #expecting; }
             impl <'a> ::serde::ser::Serialize for #ser <'a> {
                 fn serialize<S: ::serde::ser::Serializer>(&self,s:S)->Result<S::Ok,S::Error> {
                     let #ser(this) = self;
                     #serialize
                 }
             }
-            struct #de<'a, 'ib, IB: #tindalwic::alloc::Intern<'a> + #tindalwic::parse::Builder<'a>>(&'ib mut IB, ::core::marker::PhantomData<&'a()>);
-            impl<'a, 'ib, IB: #tindalwic::alloc::Intern<'a> + #tindalwic::parse::Builder<'a>> #de<'a,'ib, IB> {
-                fn of(arena:&'ib mut IB) -> Self { #de(arena, ::core::marker::PhantomData) }
+            struct #de<'a, 'b>(&'b mut dyn #tindalwic::parse::Build<'a>);
+            impl<'a, 'b> #de<'a,'b> {
+                const EXPECTING: &'static str = #expecting;
+                fn of(build:&'b mut dyn #tindalwic::parse::Build<'a>) -> Self { #de(build) }
             }
-            impl<'de, 'a, 'ib, IB: #tindalwic::alloc::Intern<'a> + #tindalwic::parse::Builder<'a>> ::serde::de::DeserializeSeed<'de> for #de<'a, 'ib, IB> {
+            impl<'de, 'a, 'b> ::serde::de::DeserializeSeed<'de> for #de<'a, 'b> {
                 type Value = #value ;
                 fn deserialize<D: ::serde::de::Deserializer<'de>>(self,d:D)->Result<Self::Value,D::Error>{
                     d.#deserialize
                 }
             }
-            impl<'de, 'a,'ib, IB: #tindalwic::alloc::Intern<'a> + #tindalwic::parse::Builder<'a>> ::serde::de::Visitor<'de> for #de<'a, 'ib, IB> {
+            impl<'de, 'a, 'b> ::serde::de::Visitor<'de> for #de<'a, 'b> {
                 type Value = #value ;
                 fn expecting(&self, out: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
-                    out.write_str(#ser::EXPECTING)
+                    out.write_str(#de::EXPECTING)
                 }
                 #visitors
             }

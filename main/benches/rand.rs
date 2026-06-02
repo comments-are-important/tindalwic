@@ -6,7 +6,6 @@
 //! the same number of times.
 
 #![allow(missing_docs)]
-#![warn(unused)]
 
 use assert_json_diff::assert_json_eq;
 use bumpalo::Bump;
@@ -16,7 +15,7 @@ use rand::rngs::SmallRng;
 use rand::{Rng, RngExt, SeedableRng};
 use std::fmt::{self, Write};
 use tindalwic::bumpalo::Arena;
-use tindalwic::parse::{Builder, ParseError};
+use tindalwic::parse::{Parse, ParseError};
 use tindalwic::serde::Verbose;
 use tindalwic::{Comment, Entry, File, Item};
 
@@ -145,13 +144,17 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
     fn list(&mut self, shape: &Silhouette) -> Result<Item<'a>, ParseError> {
         for kid in &shape.children {
             let item = self.item(kid)?;
-            self.arena.push_item(item).map_err(ParseError::Memory)?;
+            self.arena
+                .builder()
+                .push_item(item)
+                .map_err(ParseError::Memory)?;
         }
         Ok(Item::List {
             prolog: self.comment(),
             cells: self
                 .arena
-                .take_items(shape.children.len())
+                .builder()
+                .finish_items(shape.children.len())
                 .map_err(ParseError::Memory)?,
             epilog: self.comment(),
         })
@@ -162,6 +165,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
             let key = self.value().into();
             let item = self.item(kid)?;
             self.arena
+                .builder()
                 .push_entry(Entry {
                     gap: self.rng.random_bool(0.2),
                     before,
@@ -174,7 +178,8 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
             prolog: self.comment(),
             cells: self
                 .arena
-                .take_entries(shape.children.len())
+                .builder()
+                .finish_entries(shape.children.len())
                 .map_err(ParseError::Memory)?,
             epilog: self.comment(),
         })
@@ -202,7 +207,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             };
             let original: File = random.file(32);
             let encoded = original.to_string();
-            let parsed = arena.parse_or_panic(&encoded);
+            let parsed = arena.panic(&encoded);
             if original != parsed {
                 println!("\n{original:?}\n===\n{encoded}===");
                 assert_json_eq!(Verbose(original), Verbose(parsed));

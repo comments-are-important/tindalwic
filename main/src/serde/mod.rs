@@ -11,6 +11,7 @@ pub use verbose::Verbose;
 use crate::{Comment, Value};
 use serde::Deserialize;
 use serde::de::DeserializeSeed;
+use serde::de::Error;
 
 use tindalwic_macros::serialize_deserialize_seed_visit as seeded;
 // normally rustfmt would skip over everything inside the macro invocation,
@@ -32,7 +33,7 @@ seeded! {
             }
         }
         fn visit_str() {
-            Ok(arena.str(v).into())
+            Ok(build.intern(v).map_err(Error::custom)?.into())
         }
     }
 } // !seeded
@@ -51,7 +52,7 @@ seeded! {
             Ok(None)
         }
         fn visit_some() {
-            ValueDe::of(arena)
+            ValueDe::of(build)
                 .deserialize(d)
                 .map(|value| Some(Comment { value }))
         }

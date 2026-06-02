@@ -37,76 +37,73 @@ impl ParseError {
 }
 
 /// used by parser to create items
-pub trait Builder<'a> {
-    /// push an item into builder memory for future .take_items call
+pub trait Build<'a> {
+    /// push an item for a future .finish_items to use.
     fn push_item(&mut self, item: Item<'a>) -> Result<(), &'static str>;
-    /// create a list from the `count` most recently pushed items
-    fn take_items(&mut self, count: usize) -> Result<Items<'a>, &'static str>;
-    /// push an entry into builder memory for future .take_entries call
+    /// create an [Items] from the `count` most recently pushed items.
+    fn finish_items(&mut self, count: usize) -> Result<Items<'a>, &'static str>;
+    /// push an entry for a future .finish_entries to use.
     fn push_entry(&mut self, entry: Entry<'a>) -> Result<(), &'static str>;
-    /// create a dict from the `count` most recently pushed entries
-    fn take_entries(&mut self, count: usize) -> Result<Entries<'a>, &'static str>;
-    /// push a text item into builder memory for future .take_items call to use.
-    fn push_text_item(&mut self, value: &'a str) -> Result<(), &'static str> {
+    /// create an [Entries] from the `count` most recently pushed entries.
+    fn finish_entries(&mut self, count: usize) -> Result<Entries<'a>, &'static str>;
+    /// push an [Item::Text] (no metadata) for a future .finish_items to use.
+    fn text_item(&mut self, value: &'a str) -> Result<(), &'static str> {
         self.push_item(Item::text(value))
     }
-    /// push a list item into builder memory for future .take_items call to use.
-    fn take_items_push_list_item(&mut self, count: usize) -> Result<(), &'static str> {
-        let items = self.take_items(count)?;
+    /// push an [Item::List] (no metadata) for a future .finish_items to use.
+    fn list_item(&mut self, count: usize) -> Result<(), &'static str> {
+        let items = self.finish_items(count)?;
         self.push_item(Item::list(items))
     }
-    /// push a dict item into builder memory for future .take_items call to use.
-    fn take_entries_push_dict_item(&mut self, count: usize) -> Result<(), &'static str> {
-        let entries = self.take_entries(count)?;
+    /// push an [Item::Dict] (no metadata) for a future .finish_items to use.
+    fn dict_item(&mut self, count: usize) -> Result<(), &'static str> {
+        let entries = self.finish_entries(count)?;
         self.push_item(Item::dict(entries))
     }
-    /// push a text entry into builder memory for future .take_entries call to use.
-    fn push_text_entry(&mut self, key: &'a str, value: &'a str) -> Result<(), &'static str> {
-        self.push_key_item_entry(key, Item::text(value))
+    /// push a `key` -> [Item::Text] association (no metadata) for a future .finish_entries to use.
+    fn text_entry(&mut self, key: &'a str, value: &'a str) -> Result<(), &'static str> {
+        self.associate(key, Item::text(value))
     }
-    /// push a list entry into builder memory for future .take_entries call to use.
-    fn take_items_push_list_entry(
-        &mut self,
-        key: &'a str,
-        count: usize,
-    ) -> Result<(), &'static str> {
-        let items = self.take_items(count)?;
-        self.push_key_item_entry(key, Item::list(items))
+    /// push a `key` -> [Item::List] association (no metadata) for a future .finish_entries to use.
+    fn list_entry(&mut self, key: &'a str, count: usize) -> Result<(), &'static str> {
+        let items = self.finish_items(count)?;
+        self.associate(key, Item::list(items))
     }
-    /// push a dict entry into builder memory for future .take_entries call to use.
-    fn take_entries_push_dict_entry(
-        &mut self,
-        key: &'a str,
-        count: usize,
-    ) -> Result<(), &'static str> {
-        let entries = self.take_entries(count)?;
-        self.push_key_item_entry(key, Item::dict(entries))
+    /// push a `key` -> [Item::Dict] association (no metadata) for a future .finish_entries to use.
+    fn dict_entry(&mut self, key: &'a str, count: usize) -> Result<(), &'static str> {
+        let entries = self.finish_entries(count)?;
+        self.associate(key, Item::dict(entries))
     }
-    /// push an entry without metadata into builder memory for future .take_entries call to use
-    fn push_key_item_entry(&mut self, key: &'a str, item: Item<'a>) -> Result<(), &'static str> {
+    /// push a `key` -> `item` association (no metadata) for a future .finish_entries to use
+    fn associate(&mut self, key: &'a str, item: Item<'a>) -> Result<(), &'static str> {
         self.push_entry(Entry {
             key: key.into(),
             item,
             ..Default::default()
         })
     }
+    /// default is an Err because intern needs alloc
+    #[allow(unused_variables)]
+    fn intern(&mut self, value: &'_ str) -> Result<&'a str, &'static str> {
+        Err("intern not supported")
+    }
+}
+
+/// provide a Builder to get access to parsing
+pub trait Parse<'a> {
+    /// get a builder for the parser to use
+    fn builder(&mut self) -> &mut dyn Build<'a>;
     /// call the parser on the provided content, with a callback for errors.
-    fn parse(
+    fn report(
         &mut self,
         content: &'a str,
         report: &'_ mut dyn FnMut(ParseError) -> Reported,
-    ) -> Option<File<'a>>
-    where
-        Self: Sized,
-    {
-        Input::parse(self, content, report)
+    ) -> Option<File<'a>> {
+        Input::parse(self.builder(), content, report)
     }
     /// call the parser on the provided content, panic if the content isn't legit.
-    fn parse_or_panic(&mut self, content: &'a str) -> File<'a>
-    where
-        Self: Sized,
-    {
-        self.parse(content, &mut |error| panic!("{error}"))
+    fn panic(&mut self, content: &'a str) -> File<'a> {
+        self.report(content, &mut |error| panic!("{error}"))
             .expect("panic should have already happened in report")
     }
 }
@@ -121,7 +118,7 @@ pub enum Reported {
 }
 
 /// start at provided offset, count tab chars.
-pub(crate) fn indentation(bytes: &[u8], start: usize, limit: usize) -> usize {
+pub(super) fn indentation(bytes: &[u8], start: usize, limit: usize) -> usize {
     let mut offset = start;
     while offset < limit && bytes[offset] == b'\t' {
         offset += 1;
@@ -143,7 +140,7 @@ struct Input<'a, 'r> {
 impl<'a, 'r> Input<'a, 'r> {
     /// None means the arena is too small (or the UTF-8 is way too big).
     pub fn parse(
-        arena: &mut dyn Builder<'a>,
+        arena: &mut dyn Build<'a>,
         utf8: &'a str,
         mut report: impl FnMut(ParseError) -> Reported + 'r,
     ) -> Option<File<'a>> {
@@ -170,7 +167,7 @@ impl<'a, 'r> Input<'a, 'r> {
         let prolog = input.comment(0, b"#")?;
         let cells = input.entries(0, arena)?;
         if input.start != usize::MAX {
-            input.report(ParseError::at(input.line, "unexpected leftovers?"))?;
+            input.report(ParseError::at(input.line, "unexpected leftovers"))?;
         }
         if !input.good {
             None
@@ -346,14 +343,14 @@ impl<'a, 'r> Input<'a, 'r> {
     }
 
     /// previous line opened a list context, so parse all the lines in it.
-    fn list(&mut self, indent: usize, arena: &mut dyn Builder<'a>) -> Option<Item<'a>> {
+    fn list(&mut self, indent: usize, arena: &mut dyn Build<'a>) -> Option<Item<'a>> {
         Some(Item::List {
             prolog: self.comment(indent + 1, b"#")?,
             cells: self.items(indent + 1, arena)?,
             epilog: self.comment(indent, b"#")?,
         })
     }
-    fn items(&mut self, indent: usize, arena: &mut dyn Builder<'a>) -> Option<Items<'a>> {
+    fn items(&mut self, indent: usize, arena: &mut dyn Build<'a>) -> Option<Items<'a>> {
         let bytes = self.utf8.as_bytes();
         let mut count = 0usize;
         while self.start != usize::MAX {
@@ -423,7 +420,7 @@ impl<'a, 'r> Input<'a, 'r> {
         if count == 0 {
             Some(&[])
         } else {
-            match arena.take_items(count) {
+            match arena.finish_items(count) {
                 Ok(cells) => Some(cells),
                 Err(err) => {
                     self.report(ParseError::Memory(err))?;
@@ -434,14 +431,14 @@ impl<'a, 'r> Input<'a, 'r> {
     }
 
     /// previous line opened a dict context, so parse all the lines in it.
-    fn dict(&mut self, indent: usize, arena: &mut dyn Builder<'a>) -> Option<Item<'a>> {
+    fn dict(&mut self, indent: usize, arena: &mut dyn Build<'a>) -> Option<Item<'a>> {
         Some(Item::Dict {
             prolog: self.comment(indent + 1, b"#")?,
             cells: self.entries(indent + 1, arena)?,
             epilog: self.comment(indent, b"#")?,
         })
     }
-    fn entries(&mut self, indent: usize, arena: &mut dyn Builder<'a>) -> Option<Entries<'a>> {
+    fn entries(&mut self, indent: usize, arena: &mut dyn Build<'a>) -> Option<Entries<'a>> {
         let bytes = self.utf8.as_bytes();
         let mut count = 0usize;
         while self.start != usize::MAX {
@@ -563,7 +560,7 @@ impl<'a, 'r> Input<'a, 'r> {
         if count == 0 {
             Some(&[])
         } else {
-            match arena.take_entries(count) {
+            match arena.finish_entries(count) {
                 Ok(cells) => Some(cells),
                 Err(err) => {
                     self.report(ParseError::Memory(err))?;
@@ -594,7 +591,7 @@ mod tests {
             $crate = crate;
             let mut arena = <10dict,10list>;
         }
-        let file = arena.parse_or_panic("");
+        let file = arena.panic("");
         assert!(!arena.completed().is_some());
         assert!(file.hashbang.is_none());
         assert!(file.prolog.is_none());
@@ -607,7 +604,7 @@ mod tests {
             $crate = crate;
             let mut arena = <1dict>;
         }
-        let file = arena.parse_or_panic("k=v");
+        let file = arena.panic("k=v");
         assert!(arena.completed().is_some());
         assert!(file.hashbang.is_none());
         assert!(file.prolog.is_none());
@@ -627,7 +624,7 @@ mod tests {
             $crate = crate;
             let mut arena = <3list,1dict>;
         }
-        let file = arena.parse_or_panic("[k]\n\t1\n\t2\n\t3");
+        let file = arena.panic("[k]\n\t1\n\t2\n\t3");
         assert!(arena.completed().is_some());
         assert_eq!(file.cells.len(), 1);
         let key: Value<'_> = "k".into();
@@ -657,7 +654,7 @@ mod tests {
             $crate = crate;
             let mut arena = <2dict>;
         }
-        let file = arena.parse_or_panic("{z}\n\t<k>\n\t\tv");
+        let file = arena.panic("{z}\n\t<k>\n\t\tv");
         assert!(arena.completed().is_some());
         use crate::walk::*;
 

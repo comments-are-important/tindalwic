@@ -85,15 +85,15 @@ pub fn into_tindalwic(
     let bump = Bump::new();
     let mut arena = Arena::new(&bump);
     match (&mode[..], &format[..]) {
-        ("Neutered", "JSON") => from_json(&input, Neutered::bumpalo_seed(&mut arena)),
-        ("Neutered", "TOML") => from_toml(&input, Neutered::bumpalo_seed(&mut arena)),
-        ("Neutered", "YAML") => from_yaml(&input, Neutered::bumpalo_seed(&mut arena)),
-        ("Compact", "JSON") => from_json(&input, Compact::bumpalo_seed(&mut arena)),
-        ("Compact", "TOML") => from_toml(&input, Compact::bumpalo_seed(&mut arena)),
-        ("Compact", "YAML") => from_yaml(&input, Compact::bumpalo_seed(&mut arena)),
-        ("Verbose", "JSON") => from_json(&input, Verbose::bumpalo_seed(&mut arena)),
-        ("Verbose", "TOML") => from_toml(&input, Verbose::bumpalo_seed(&mut arena)),
-        ("Verbose", "YAML") => from_yaml(&input, Verbose::bumpalo_seed(&mut arena)),
+        ("Neutered", "JSON") => from_json(&input, Neutered::seed(&mut arena)),
+        ("Neutered", "TOML") => from_toml(&input, Neutered::seed(&mut arena)),
+        ("Neutered", "YAML") => from_yaml(&input, Neutered::seed(&mut arena)),
+        ("Compact", "JSON") => from_json(&input, Compact::seed(&mut arena)),
+        ("Compact", "TOML") => from_toml(&input, Compact::seed(&mut arena)),
+        ("Compact", "YAML") => from_yaml(&input, Compact::seed(&mut arena)),
+        ("Verbose", "JSON") => from_json(&input, Verbose::seed(&mut arena)),
+        ("Verbose", "TOML") => from_toml(&input, Verbose::seed(&mut arena)),
+        ("Verbose", "YAML") => from_yaml(&input, Verbose::seed(&mut arena)),
         _ => Err("bad parameters".to_string()),
     }
     .map(|f| f.to_string())

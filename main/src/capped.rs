@@ -1,7 +1,7 @@
 //! macros depend on these, so must be public.
 //! but you should probably not use these directly, macros are much easier.
 
-use crate::parse::Builder;
+use crate::parse::{Build, Parse};
 use crate::{Entries, Entry, Item, Items};
 
 use core::cell::Cell;
@@ -35,7 +35,7 @@ impl<'a, T> LowToHigh<'a, T> {
         self.next += 1;
         Some(())
     }
-    fn take(&mut self, count: usize) -> Option<&'a [Cell<T>]> {
+    fn finish(&mut self, count: usize) -> Option<&'a [Cell<T>]> {
         if self.next < count || self.next > self.done {
             return None;
         }
@@ -54,46 +54,59 @@ impl<'a, T> LowToHigh<'a, T> {
     }
 }
 
+struct StackBuilder<'a> {
+    items: LowToHigh<'a, Item<'a>>,
+    entries: LowToHigh<'a, Entry<'a>>,
+}
+impl<'a> StackBuilder<'a> {
+    pub fn wrap(items: Items<'a>, entries: Entries<'a>) -> Self {
+        let items = LowToHigh::wrap(items);
+        let entries = LowToHigh::wrap(entries);
+        StackBuilder { items, entries }
+    }
+}
 /// a flavor of Arena that uses fixed-size array slices.
 /// the arrays can live in the stack.
 pub struct Arena<'a> {
-    items: LowToHigh<'a, Item<'a>>,
-    entries: LowToHigh<'a, Entry<'a>>,
+    builder: StackBuilder<'a>,
+}
+impl<'a> Parse<'a> for Arena<'a> {
+    fn builder(&mut self) -> &mut dyn Build<'a> {
+        &mut self.builder
+    }
 }
 impl<'a> Arena<'a> {
     /// provide the storage
     pub fn wrap(items: &'a [Cell<Item<'a>>], entries: &'a [Cell<Entry<'a>>]) -> Self {
-        Arena {
-            items: LowToHigh::wrap(items),
-            entries: LowToHigh::wrap(entries),
-        }
+        let builder = StackBuilder::wrap(items, entries);
+        Arena { builder }
     }
     /// returns count of items that can still fit.
     pub fn item_slots(&self) -> usize {
-        self.items.done - self.items.next
+        self.builder.items.done - self.builder.items.next
     }
     /// returns count of entries that can still fit.
     pub fn entry_slots(&self) -> usize {
-        self.entries.done - self.entries.next
+        self.builder.entries.done - self.builder.entries.next
     }
     /// the json! macro uses this as a sanity check that no space gets wasted.
     pub fn completed(&self) -> Option<()> {
-        if self.items.done == 0 && self.entries.done == 0 {
+        if self.builder.items.done == 0 && self.builder.entries.done == 0 {
             Some(())
         } else {
             None
         }
     }
 }
-impl<'a> Builder<'a> for Arena<'a> {
-    fn take_items(&mut self, count: usize) -> Result<Items<'a>, &'static str> {
+impl<'a> Build<'a> for StackBuilder<'a> {
+    fn finish_items(&mut self, count: usize) -> Result<Items<'a>, &'static str> {
         self.items
-            .take(count)
+            .finish(count)
             .ok_or_else(|| "not enough items to make that list")
     }
-    fn take_entries(&mut self, count: usize) -> Result<Entries<'a>, &'static str> {
+    fn finish_entries(&mut self, count: usize) -> Result<Entries<'a>, &'static str> {
         self.entries
-            .take(count)
+            .finish(count)
             .ok_or_else(|| "not enough entries to make that dict")
     }
     fn push_item(&mut self, item: Item<'a>) -> Result<(), &'static str> {

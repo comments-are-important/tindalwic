@@ -44,7 +44,7 @@ impl<'a> Item<'a> {
 
 /// companion to parse::Builder allowing arena to intern values
 #[allow(dead_code)] // used in bumpalo feature
-pub(crate) trait Intern<'a> {
+pub trait Intern<'a> {
     /// intern a str slice
     fn str(&self, value: &'_ str) -> &'a str;
 }

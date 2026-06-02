@@ -51,7 +51,7 @@ httpd: must-run-outside
 
 # =====================================================================================
 
-all: fmt doc main/test msrv main/api main/llvm-lines webapp main/rand
+all: fmt doc main/test main/api main/llvm-lines webapp msrv main/rand
 .PHONY: all
 
 test: main/test main/rand
@@ -108,14 +108,16 @@ nightly: must-run-inside
 
 main/api: nightly
 	cargo install --list | grep -q cargo-public-api || cargo $(BINSTALL) cargo-public-api
-	mkdir -p target
+	mkdir -p target/public-api/{all,default}
 	cd main
-	cargo public-api -sss --all-features --target-dir ../target/public-api \
+	cargo public-api --target-dir ../target/public-api/default \
+	  >../target/public-api/tindalwic.api
+	cargo public-api -sss --all-features --target-dir ../target/public-api/all \
 	  | sed -E -e 's=^impl (.*)=|\1|impl|=' \
 	  | sed -E -e 's=^(impl<[^>]+>) (.*)=|\2|\1|=' \
 	  | sed -E -e 's=^pub (enum|fn|const fn|mod|struct|use|type) (&?)(.*)=|\3|\2\1|=' \
 	  | sed -E -e 's=^pub (.*)=|\1|property|=' \
-	  | LC_ALL=C sort -u >../target/public-api/tindalwic.org
+	  | LC_ALL=C sort -u >../target/public-api/tindalwic-all.org
 .PHONY: main/api
 
 main/llvm-lines: must-run-inside

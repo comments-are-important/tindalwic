@@ -16,7 +16,7 @@ use rand::rngs::SmallRng;
 use rand::{Rng, RngExt, SeedableRng};
 use std::fmt::{self, Write};
 use tindalwic::bumpalo::Arena;
-use tindalwic::parse::ParseError;
+use tindalwic::parse::{Builder, ParseError};
 use tindalwic::serde::Verbose;
 use tindalwic::{Comment, Entry, File, Item};
 
@@ -145,11 +145,14 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
     fn list(&mut self, shape: &Silhouette) -> Result<Item<'a>, ParseError> {
         for kid in &shape.children {
             let item = self.item(kid)?;
-            self.arena.item(item)?;
+            self.arena.push_item(item).map_err(ParseError::Memory)?;
         }
         Ok(Item::List {
             prolog: self.comment(),
-            cells: self.arena.list(shape.children.len())?,
+            cells: self
+                .arena
+                .take_items(shape.children.len())
+                .map_err(ParseError::Memory)?,
             epilog: self.comment(),
         })
     }
@@ -158,16 +161,21 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
             let before = self.comment();
             let key = self.value().into();
             let item = self.item(kid)?;
-            self.arena.entry(Entry {
-                gap: self.rng.random_bool(0.2),
-                before,
-                key,
-                item,
-            })?;
+            self.arena
+                .push_entry(Entry {
+                    gap: self.rng.random_bool(0.2),
+                    before,
+                    key,
+                    item,
+                })
+                .map_err(ParseError::Memory)?;
         }
         Ok(Item::Dict {
             prolog: self.comment(),
-            cells: self.arena.dict(shape.children.len())?,
+            cells: self
+                .arena
+                .take_entries(shape.children.len())
+                .map_err(ParseError::Memory)?,
             epilog: self.comment(),
         })
     }

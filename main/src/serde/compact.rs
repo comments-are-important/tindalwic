@@ -126,12 +126,12 @@ seeded! {
             let mut count = 0usize;
             while let Some(item) = seq.next_element_seed(ItemDe::of(arena))? {
                 arena
-                    .item(item)
+                    .push_item(item)
                     .map_err(|err| Error::custom(err.to_string()))?;
                 count += 1;
             }
             Ok(arena
-                .items(count)
+                .take_items(count)
                 .map_err(|err| Error::custom(err.to_string()))?)
         }
     }
@@ -286,12 +286,12 @@ seeded! {
             let mut count = 0usize;
             while let Some(entry) = seq.next_element_seed(EntryDe::of(arena))? {
                 arena
-                    .entry(entry)
+                    .push_entry(entry)
                     .map_err(|err| Error::custom(err.to_string()))?;
                 count += 1;
             }
             Ok(arena
-                .entries(count)
+                .take_entries(count)
                 .map_err(|err| Error::custom(err.to_string()))?)
         }
     }
@@ -423,14 +423,17 @@ impl<'a> Serialize for Compact<'a> {
     }
 }
 #[cfg(feature = "bumpalo")]
-impl<'a> Compact<'a> {
-    /// call thusly: `Compact::bumpalo_seed(&arena).deserialize(...)`
-    pub fn bumpalo_seed<'de>(
-        arena: &'de crate::bumpalo::Arena<'a>,
-    ) -> impl serde::de::DeserializeSeed<'de, Value = File<'a>>
-    where
-        'a: 'de,
-    {
-        FileDe::of(&arena.builder)
+mod bumpalo {
+    use super::{Compact, File, FileDe};
+    use crate::alloc::Intern;
+    use crate::parse::Builder;
+    impl<'a> Compact<'a> {
+        /// call thusly: `Compact::bumpalo_seed(&arena).deserialize(...)`
+        pub fn bumpalo_seed<'de, 'ib, IB: Intern<'a> + Builder<'a>>(
+            arena: &'ib mut IB,
+        ) -> impl serde::de::DeserializeSeed<'de, Value = File<'a>> + use<'de, 'a, 'ib, IB>
+        {
+            FileDe::of(arena)
+        }
     }
 }

@@ -3,7 +3,7 @@
 extern crate alloc;
 
 use crate::alloc::Intern;
-use crate::parse::{Builder, Input, ParseError, Reported};
+use crate::parse::{Builder, ParseError, Reported};
 use crate::{Entries, Entry, File, Item, Items};
 use alloc::vec::Vec;
 use bumpalo::Bump;
@@ -24,7 +24,7 @@ impl<T: Copy> CellVec<T> {
         vec.push(value);
         Some(())
     }
-    fn finish<'b>(&self, count: usize, bump: &'b Bump) -> Option<&'b [Cell<T>]> {
+    fn take<'b>(&self, count: usize, bump: &'b Bump) -> Option<&'b [Cell<T>]> {
         let CellVec(cell) = self;
         // SAFETY: Cell instance is private, no ref to its Vec value leaks outside this
         // impl, except via this let, only as receiver in Vec methods, which are safe.
@@ -36,87 +36,33 @@ impl<T: Copy> CellVec<T> {
     }
 }
 
-pub(crate) struct HeapBuilder<'a> {
+/// a flavor of Arena that uses bumpalo to put things in the heap.
+/// TODO think about fleshing this out with more convenient methods.
+pub struct Arena<'a> {
     items: CellVec<Item<'a>>,
     entries: CellVec<Entry<'a>>,
     bump: &'a Bump,
 }
-impl<'a> Builder<'a> for HeapBuilder<'a> {
-    fn items(&self, count: usize) -> Result<Items<'a>, ParseError> {
-        self.items
-            .finish(count, self.bump)
-            .ok_or_else(|| ParseError::Memory("not enough items to make that list"))
-    }
-    fn entries(&self, count: usize) -> Result<Entries<'a>, ParseError> {
-        self.entries
-            .finish(count, self.bump)
-            .ok_or_else(|| ParseError::Memory("not enough entries to make that dict"))
-    }
-    fn item(&self, item: Item<'a>) -> Result<(), ParseError> {
-        self.items
-            .push(item)
-            .ok_or_else(|| ParseError::Memory("no room for item"))
-    }
-    fn entry(&self, entry: Entry<'a>) -> Result<(), ParseError> {
-        self.entries
-            .push(entry)
-            .ok_or_else(|| ParseError::Memory("no room for entry"))
-    }
-}
-impl<'a> Intern<'a> for HeapBuilder<'a> {
-    fn str(&self, value: &'_ str) -> &'a str {
-        self.bump.alloc_str(value)
-    }
-}
-
-/// a flavor of Arena that uses bumpalo to put things in the heap.
-/// TODO think about fleshing this out with more convenient methods.
-pub struct Arena<'a> {
-    pub(crate) builder: HeapBuilder<'a>,
-}
 impl<'a> Arena<'a> {
     /// the Bump needs an outside let binding so it lives long enough.
     pub fn new(bump: &'a Bump) -> Self {
-        let builder = HeapBuilder {
+        Arena {
             items: CellVec::new(),
             entries: CellVec::new(),
             bump,
-        };
-        Arena { builder }
-    }
-    /// after `count` calls to .item, call this to build a list of those.
-    pub fn list(&self, count: usize) -> Result<Items<'a>, ParseError> {
-        self.builder.items(count)
-    }
-    /// after `count` calls to .entry, call this to build a dict of those.
-    pub fn dict(&self, count: usize) -> Result<Entries<'a>, ParseError> {
-        self.builder.entries(count)
-    }
-    /// push an item into builder memory for future .list call to use.
-    pub fn item(&self, item: Item<'a>) -> Result<(), ParseError> {
-        self.builder.item(item)
-    }
-    /// push an entry into builder memory for future .dict call to use.
-    pub fn entry(&self, entry: Entry<'a>) -> Result<(), ParseError> {
-        self.builder.entry(entry)
-    }
-    /// copy a str into the bump
-    pub fn str(&self, value: &'_ str) -> &'a str {
-        self.builder.str(value)
-    }
-    /// call the parser on the provided content, panic if the content isn't legit.
-    pub fn parse_or_panic(&self, content: &'a str) -> File<'a> {
-        self.parse(content, |error| panic!("{error}"))
-            .expect("panic should have already happened in report")
+        }
     }
     /// call the parser on the provided content, collect first `count` errors.
     pub fn parse_collect(
-        &self,
+        &mut self,
         content: &'a str,
         count: usize,
-    ) -> Result<File<'a>, Vec<ParseError>> {
+    ) -> Result<File<'a>, Vec<ParseError>>
+    where
+        Self: Sized,
+    {
         let mut errors = Vec::new();
-        self.parse(content, |err| {
+        self.parse(content, &mut |err| {
             if errors.len() >= count {
                 return Reported::Abort;
             }
@@ -125,13 +71,28 @@ impl<'a> Arena<'a> {
         })
         .ok_or_else(|| errors)
     }
-    /// call the parser on the provided content, with a callback for errors.
-    pub fn parse<F: FnMut(ParseError) -> Reported>(
-        &self,
-        content: &'a str,
-        report: F,
-    ) -> Option<File<'a>> {
-        Input::parse(&self.builder, content, report)
+}
+impl<'a> Intern<'a> for Arena<'a> {
+    fn str(&self, value: &'_ str) -> &'a str {
+        self.bump.alloc_str(value)
+    }
+}
+impl<'a> Builder<'a> for Arena<'a> {
+    fn take_items(&mut self, count: usize) -> Result<Items<'a>, &'static str> {
+        self.items
+            .take(count, self.bump)
+            .ok_or("not enough items to make that list")
+    }
+    fn take_entries(&mut self, count: usize) -> Result<Entries<'a>, &'static str> {
+        self.entries
+            .take(count, self.bump)
+            .ok_or("not enough entries to make that dict")
+    }
+    fn push_item(&mut self, item: Item<'a>) -> Result<(), &'static str> {
+        self.items.push(item).ok_or("no room for item")
+    }
+    fn push_entry(&mut self, entry: Entry<'a>) -> Result<(), &'static str> {
+        self.entries.push(entry).ok_or("no room for entry")
     }
 }
 
@@ -142,14 +103,14 @@ mod tests {
     #[test]
     fn parse_alloc() {
         let bump = Bump::new();
-        let arena = Arena::new(&bump);
+        let mut arena = Arena::new(&bump);
         let file = arena.parse_or_panic("k=v\n");
         assert_eq!(file.to_string(), "k=v\n");
     }
     #[test]
     fn invalid() {
         let bump = Bump::new();
-        let arena = Arena::new(&bump);
+        let mut arena = Arena::new(&bump);
         let Err(errors) = arena.parse_collect("nope", usize::MAX) else {
             panic!("got a file expected parse error")
         };

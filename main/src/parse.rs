@@ -37,18 +37,82 @@ impl ParseError {
 }
 
 /// used by parser to create items
-pub(crate) trait Builder<'a> {
-    /// push an item into builder memory for future .list call
-    fn item(&self, item: Item<'a>) -> Result<(), ParseError>;
+pub trait Builder<'a> {
+    /// push an item into builder memory for future .take_items call
+    fn push_item(&mut self, item: Item<'a>) -> Result<(), &'static str>;
     /// create a list from the `count` most recently pushed items
-    fn items(&self, count: usize) -> Result<Items<'a>, ParseError>;
-    /// push an entry into builder memory for future .dict call
-    fn entry(&self, entry: Entry<'a>) -> Result<(), ParseError>;
+    fn take_items(&mut self, count: usize) -> Result<Items<'a>, &'static str>;
+    /// push an entry into builder memory for future .take_entries call
+    fn push_entry(&mut self, entry: Entry<'a>) -> Result<(), &'static str>;
     /// create a dict from the `count` most recently pushed entries
-    fn entries(&self, count: usize) -> Result<Entries<'a>, ParseError>;
+    fn take_entries(&mut self, count: usize) -> Result<Entries<'a>, &'static str>;
+    /// push a text item into builder memory for future .take_items call to use.
+    fn push_text_item(&mut self, value: &'a str) -> Result<(), &'static str> {
+        self.push_item(Item::text(value))
+    }
+    /// push a list item into builder memory for future .take_items call to use.
+    fn take_items_push_list_item(&mut self, count: usize) -> Result<(), &'static str> {
+        let items = self.take_items(count)?;
+        self.push_item(Item::list(items))
+    }
+    /// push a dict item into builder memory for future .take_items call to use.
+    fn take_entries_push_dict_item(&mut self, count: usize) -> Result<(), &'static str> {
+        let entries = self.take_entries(count)?;
+        self.push_item(Item::dict(entries))
+    }
+    /// push a text entry into builder memory for future .take_entries call to use.
+    fn push_text_entry(&mut self, key: &'a str, value: &'a str) -> Result<(), &'static str> {
+        self.push_key_item_entry(key, Item::text(value))
+    }
+    /// push a list entry into builder memory for future .take_entries call to use.
+    fn take_items_push_list_entry(
+        &mut self,
+        key: &'a str,
+        count: usize,
+    ) -> Result<(), &'static str> {
+        let items = self.take_items(count)?;
+        self.push_key_item_entry(key, Item::list(items))
+    }
+    /// push a dict entry into builder memory for future .take_entries call to use.
+    fn take_entries_push_dict_entry(
+        &mut self,
+        key: &'a str,
+        count: usize,
+    ) -> Result<(), &'static str> {
+        let entries = self.take_entries(count)?;
+        self.push_key_item_entry(key, Item::dict(entries))
+    }
+    /// push an entry without metadata into builder memory for future .take_entries call to use
+    fn push_key_item_entry(&mut self, key: &'a str, item: Item<'a>) -> Result<(), &'static str> {
+        self.push_entry(Entry {
+            key: key.into(),
+            item,
+            ..Default::default()
+        })
+    }
+    /// call the parser on the provided content, with a callback for errors.
+    fn parse(
+        &mut self,
+        content: &'a str,
+        report: &'_ mut dyn FnMut(ParseError) -> Reported,
+    ) -> Option<File<'a>>
+    where
+        Self: Sized,
+    {
+        Input::parse(self, content, report)
+    }
+    /// call the parser on the provided content, panic if the content isn't legit.
+    fn parse_or_panic(&mut self, content: &'a str) -> File<'a>
+    where
+        Self: Sized,
+    {
+        self.parse(content, &mut |error| panic!("{error}"))
+            .expect("panic should have already happened in report")
+    }
 }
 
 /// the "report" callback provided to the parser should return one of these
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reported {
     /// tell parser to give up
     Abort,
@@ -65,7 +129,7 @@ pub(crate) fn indentation(bytes: &[u8], start: usize, limit: usize) -> usize {
     offset - start
 }
 
-pub(crate) struct Input<'a, 'r> {
+struct Input<'a, 'r> {
     utf8: &'a str, // entire tindalwic encoded content
     line: usize,   // the number of the current line
     start: usize,  // start of current line, `MAX` means finished
@@ -79,7 +143,7 @@ pub(crate) struct Input<'a, 'r> {
 impl<'a, 'r> Input<'a, 'r> {
     /// None means the arena is too small (or the UTF-8 is way too big).
     pub fn parse(
-        arena: &dyn Builder<'a>,
+        arena: &mut dyn Builder<'a>,
         utf8: &'a str,
         mut report: impl FnMut(ParseError) -> Reported + 'r,
     ) -> Option<File<'a>> {
@@ -282,14 +346,14 @@ impl<'a, 'r> Input<'a, 'r> {
     }
 
     /// previous line opened a list context, so parse all the lines in it.
-    fn list(&mut self, indent: usize, arena: &dyn Builder<'a>) -> Option<Item<'a>> {
+    fn list(&mut self, indent: usize, arena: &mut dyn Builder<'a>) -> Option<Item<'a>> {
         Some(Item::List {
             prolog: self.comment(indent + 1, b"#")?,
             cells: self.items(indent + 1, arena)?,
             epilog: self.comment(indent, b"#")?,
         })
     }
-    fn items(&mut self, indent: usize, arena: &dyn Builder<'a>) -> Option<Items<'a>> {
+    fn items(&mut self, indent: usize, arena: &mut dyn Builder<'a>) -> Option<Items<'a>> {
         let bytes = self.utf8.as_bytes();
         let mut count = 0usize;
         while self.start != usize::MAX {
@@ -350,30 +414,34 @@ impl<'a, 'r> Input<'a, 'r> {
                 }
             }
             if let Some(item) = item {
-                if let Err(err) = arena.item(item) {
-                    self.report(err)?;
+                if let Err(err) = arena.push_item(item) {
+                    self.report(ParseError::Memory(err))?;
                 }
                 count += 1;
             }
         }
-        match arena.items(count) {
-            Ok(cells) => Some(cells),
-            Err(err) => {
-                self.report(err)?;
-                None
+        if count == 0 {
+            Some(&[])
+        } else {
+            match arena.take_items(count) {
+                Ok(cells) => Some(cells),
+                Err(err) => {
+                    self.report(ParseError::Memory(err))?;
+                    None
+                }
             }
         }
     }
 
     /// previous line opened a dict context, so parse all the lines in it.
-    fn dict(&mut self, indent: usize, arena: &dyn Builder<'a>) -> Option<Item<'a>> {
+    fn dict(&mut self, indent: usize, arena: &mut dyn Builder<'a>) -> Option<Item<'a>> {
         Some(Item::Dict {
             prolog: self.comment(indent + 1, b"#")?,
             cells: self.entries(indent + 1, arena)?,
             epilog: self.comment(indent, b"#")?,
         })
     }
-    fn entries(&mut self, indent: usize, arena: &dyn Builder<'a>) -> Option<Entries<'a>> {
+    fn entries(&mut self, indent: usize, arena: &mut dyn Builder<'a>) -> Option<Entries<'a>> {
         let bytes = self.utf8.as_bytes();
         let mut count = 0usize;
         while self.start != usize::MAX {
@@ -479,24 +547,28 @@ impl<'a, 'r> Input<'a, 'r> {
                 }
             }
             if let Some(item) = item {
-                if let Err(err) = arena.entry(Entry {
+                if let Err(err) = arena.push_entry(Entry {
                     gap,
                     before,
                     key,
                     item,
                 }) {
-                    self.report(err)?;
+                    self.report(ParseError::Memory(err))?;
                 }
                 count += 1;
             } else if gap || before.is_some() {
                 self.report(ParseError::at(self.line, "gap/before but no item"))?;
             }
         }
-        match arena.entries(count) {
-            Ok(cells) => Some(cells),
-            Err(err) => {
-                self.report(err)?;
-                None
+        if count == 0 {
+            Some(&[])
+        } else {
+            match arena.take_entries(count) {
+                Ok(cells) => Some(cells),
+                Err(err) => {
+                    self.report(ParseError::Memory(err))?;
+                    None
+                }
             }
         }
     }

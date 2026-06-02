@@ -2,6 +2,7 @@
 
 use crate::Value;
 use crate::parse::ParseError;
+use crate::walk::PathError;
 use crate::{Comment, Entry, File, Item};
 
 use core::cell::Cell;
@@ -22,6 +23,35 @@ impl Display for ParseError {
                     write!(out, "{}-{}: {}", start, end - 1, message)
                 }
             }
+        }
+    }
+}
+impl<'p> Display for PathError<'p> {
+    fn fmt(&self, out: &mut Formatter<'_>) -> Result {
+        out.write_str("walk failed: ")?;
+        for branch in self.failed {
+            match branch {
+                crate::walk::Branch::Item(at) => write!(out, "[{}]", at)?,
+                crate::walk::Branch::Entry(key) => write!(out, "{{{}}}", key)?,
+                crate::walk::Branch::Text => out.write_str("Text")?,
+                crate::walk::Branch::List => out.write_str("List")?,
+                crate::walk::Branch::Dict => out.write_str("Dict")?,
+            }
+        }
+        Ok(())
+    }
+}
+
+/// the string value (without indentation, *not* the encoded form).
+impl<'a> Display for Value<'a> {
+    fn fmt(&self, out: &mut Formatter<'_>) -> Result {
+        if let Some(verbatim) = self.verbatim(0) {
+            out.write_str(verbatim)
+        } else {
+            for line in self.lines() {
+                out.write_str(line)?;
+            }
+            Ok(())
         }
     }
 }

@@ -79,7 +79,7 @@ seeded! {
             fields.end()
         }
         fn visit_seq() {
-            let err = || Error::invalid_length(2, &self);
+            let err = || Error::invalid_length(2, &TextSer::EXPECTING);
             Ok((
                 seq.next_element_seed(ValueDe::of(arena))?.ok_or_else(err)?,
                 seq.next_element_seed(CommentDe::of(arena))?
@@ -128,12 +128,12 @@ seeded! {
             let mut count = 0usize;
             while let Some(item) = seq.next_element_seed(ItemDe::of(arena))? {
                 arena
-                    .item(item)
+                    .push_item(item)
                     .map_err(|err| Error::custom(err.to_string()))?;
                 count += 1;
             }
             Ok(arena
-                .items(count)
+                .take_items(count)
                 .map_err(|err| Error::custom(err.to_string()))?)
         }
     }
@@ -152,7 +152,7 @@ seeded! {
             fields.end()
         }
         fn visit_seq() {
-            let err = || Error::invalid_length(3, &self);
+            let err = || Error::invalid_length(3, &ListSer::EXPECTING);
             Ok((
                 seq.next_element_seed(CommentDe::of(arena))?
                     .ok_or_else(err)?,
@@ -210,7 +210,7 @@ seeded! {
             fields.end()
         }
         fn visit_seq() {
-            let err = || Error::invalid_length(4, &self);
+            let err = || Error::invalid_length(4, &EntrySer::EXPECTING);
             Ok(Entry {
                 gap: seq.next_element()?.ok_or_else(err)?,
                 before: seq
@@ -280,12 +280,12 @@ seeded! {
             let mut count = 0usize;
             while let Some(entry) = seq.next_element_seed(EntryDe::of(arena))? {
                 arena
-                    .entry(entry)
+                    .push_entry(entry)
                     .map_err(|err| Error::custom(err.to_string()))?;
                 count += 1;
             }
             Ok(arena
-                .entries(count)
+                .take_entries(count)
                 .map_err(|err| Error::custom(err.to_string()))?)
         }
     }
@@ -336,7 +336,7 @@ seeded! {
             ))
         }
         fn visit_seq() {
-            let err = || Error::invalid_length(3, &self);
+            let err = || Error::invalid_length(3, &DictSer::EXPECTING);
             Ok((
                 seq.next_element_seed(CommentDe::of(arena))?
                     .ok_or_else(err)?,
@@ -393,7 +393,7 @@ seeded! {
             })
         }
         fn visit_seq() {
-            let err = || Error::invalid_length(3, &self);
+            let err = || Error::invalid_length(3, &FileSer::EXPECTING);
             Ok(File {
                 hashbang: seq
                     .next_element_seed(CommentDe::of(arena))?
@@ -418,14 +418,17 @@ impl<'a> Serialize for Verbose<'a> {
     }
 }
 #[cfg(feature = "bumpalo")]
-impl<'a> Verbose<'a> {
-    /// call thusly: `Verbose::bumpalo_seed(&arena).deserialize(...)`
-    pub fn bumpalo_seed<'de>(
-        arena: &'de crate::bumpalo::Arena<'a>,
-    ) -> impl serde::de::DeserializeSeed<'de, Value = File<'a>>
-    where
-        'a: 'de,
-    {
-        FileDe::of(&arena.builder)
+mod bumpalo {
+    use super::{File, FileDe, Verbose};
+    use crate::alloc::Intern;
+    use crate::parse::Builder;
+    impl<'a> Verbose<'a> {
+        /// call thusly: `Verbose::bumpalo_seed(&arena).deserialize(...)`
+        pub fn bumpalo_seed<'de, 'ib, IB: Intern<'a> + Builder<'a>>(
+            arena: &'ib mut IB,
+        ) -> impl serde::de::DeserializeSeed<'de, Value = File<'a>> + use<'de, 'a, 'ib, IB>
+        {
+            FileDe::of(arena)
+        }
     }
 }

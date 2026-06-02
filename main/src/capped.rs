@@ -1,8 +1,8 @@
 //! macros depend on these, so must be public.
 //! but you should probably not use these directly, macros are much easier.
 
-use crate::parse::{Builder, Input, ParseError, Reported};
-use crate::{Entries, Entry, File, Item, Items};
+use crate::parse::Builder;
+use crate::{Entries, Entry, Item, Items};
 
 use core::cell::Cell;
 
@@ -15,170 +15,92 @@ use core::cell::Cell;
 /// but keep siblings together by transferring, as group, from low to high.
 struct LowToHigh<'a, T> {
     cells: &'a [Cell<T>],
-    next: Cell<usize>,
-    done: Cell<usize>,
+    next: usize,
+    done: usize,
 }
 impl<'a, T> LowToHigh<'a, T> {
     fn wrap(cells: &'a [Cell<T>]) -> Self {
         LowToHigh {
             cells,
-            next: 0.into(),
-            done: cells.len().into(),
+            next: 0,
+            done: cells.len(),
         }
     }
-    fn push(&self, value: T) -> Option<()> {
+    fn push(&mut self, value: T) -> Option<()> {
         if self.next >= self.done {
             return None;
         }
-        let next = self.next.get();
+        let next = self.next;
         self.cells[next].set(value);
-        self.next.set(next + 1);
+        self.next += 1;
         Some(())
     }
-    fn finish(&self, count: usize) -> Option<&'a [Cell<T>]> {
-        let next = self.next.get();
-        let done = self.done.get();
-        if next < count || next > done {
+    fn take(&mut self, count: usize) -> Option<&'a [Cell<T>]> {
+        if self.next < count || self.next > self.done {
             return None;
         }
-        if next == done {
-            let both = next - count;
-            self.next.set(both);
-            self.done.set(both);
+        if self.next == self.done {
+            let both = self.next - count;
+            self.next = both;
+            self.done = both;
             return Some(&self.cells[both..both + count]);
         }
-        let next = next - count;
-        let done = done - count;
+        self.next -= count;
+        self.done -= count;
         for offset in (0..count).rev() {
-            self.cells[next + offset].swap(&self.cells[done + offset]);
+            self.cells[self.next + offset].swap(&self.cells[self.done + offset]);
         }
-        self.next.set(next);
-        self.done.set(done);
-        Some(&self.cells[done..done + count])
-    }
-}
-
-struct StackBuilder<'a> {
-    items: LowToHigh<'a, Item<'a>>,
-    entries: LowToHigh<'a, Entry<'a>>,
-}
-impl<'a> StackBuilder<'a> {
-    pub fn wrap(items: Items<'a>, entries: Entries<'a>) -> Self {
-        let items = LowToHigh::wrap(items);
-        let entries = LowToHigh::wrap(entries);
-        StackBuilder { items, entries }
-    }
-}
-impl<'a> Builder<'a> for StackBuilder<'a> {
-    fn items(&self, count: usize) -> Result<Items<'a>, ParseError> {
-        self.items
-            .finish(count)
-            .ok_or_else(|| ParseError::Memory("not enough items to make that list"))
-    }
-    fn entries(&self, count: usize) -> Result<Entries<'a>, ParseError> {
-        self.entries
-            .finish(count)
-            .ok_or_else(|| ParseError::Memory("not enough entries to make that dict"))
-    }
-    fn item(&self, item: Item<'a>) -> Result<(), ParseError> {
-        self.items
-            .push(item)
-            .ok_or_else(|| ParseError::Memory("no room for item"))
-    }
-    fn entry(&self, entry: Entry<'a>) -> Result<(), ParseError> {
-        self.entries
-            .push(entry)
-            .ok_or_else(|| ParseError::Memory("no room for entry"))
+        Some(&self.cells[self.done..self.done + count])
     }
 }
 
 /// a flavor of Arena that uses fixed-size array slices.
 /// the arrays can live in the stack.
 pub struct Arena<'a> {
-    builder: StackBuilder<'a>,
+    items: LowToHigh<'a, Item<'a>>,
+    entries: LowToHigh<'a, Entry<'a>>,
 }
 impl<'a> Arena<'a> {
     /// provide the storage
     pub fn wrap(items: &'a [Cell<Item<'a>>], entries: &'a [Cell<Entry<'a>>]) -> Self {
-        let builder = StackBuilder::wrap(items, entries);
-        Arena { builder }
+        Arena {
+            items: LowToHigh::wrap(items),
+            entries: LowToHigh::wrap(entries),
+        }
     }
     /// returns count of items that can still fit.
     pub fn item_slots(&self) -> usize {
-        self.builder.items.done.get() - self.builder.items.next.get()
+        self.items.done - self.items.next
     }
     /// returns count of entries that can still fit.
     pub fn entry_slots(&self) -> usize {
-        self.builder.entries.done.get() - self.builder.entries.next.get()
+        self.entries.done - self.entries.next
     }
     /// the json! macro uses this as a sanity check that no space gets wasted.
     pub fn completed(&self) -> Option<()> {
-        if self.builder.items.done.get() == 0 && self.builder.entries.done.get() == 0 {
+        if self.items.done == 0 && self.entries.done == 0 {
             Some(())
         } else {
             None
         }
     }
-    /// after `count` calls to .item, call this to build a list of those.
-    pub fn list(&self, count: usize) -> Result<Items<'a>, ParseError> {
-        self.builder.items(count)
+}
+impl<'a> Builder<'a> for Arena<'a> {
+    fn take_items(&mut self, count: usize) -> Result<Items<'a>, &'static str> {
+        self.items
+            .take(count)
+            .ok_or_else(|| "not enough items to make that list")
     }
-    /// after `count` calls to .entry, call this to build a dict of those.
-    pub fn dict(&self, count: usize) -> Result<Entries<'a>, ParseError> {
-        self.builder.entries(count)
+    fn take_entries(&mut self, count: usize) -> Result<Entries<'a>, &'static str> {
+        self.entries
+            .take(count)
+            .ok_or_else(|| "not enough entries to make that dict")
     }
-    /// push an item into builder memory for future .list call to use.
-    pub fn item(&self, item: Item<'a>) -> Result<(), ParseError> {
-        self.builder.item(item)
+    fn push_item(&mut self, item: Item<'a>) -> Result<(), &'static str> {
+        self.items.push(item).ok_or_else(|| "no room for item")
     }
-    /// push an entry into builder memory for future .dict call to use.
-    pub fn entry(&self, entry: Entry<'a>) -> Result<(), ParseError> {
-        self.builder.entry(entry)
-    }
-    /// push an entry into builder memory for future .dict call to use.
-    pub fn keyed(&self, key: &'a str, item: Item<'a>) -> Result<(), ParseError> {
-        self.entry(Entry {
-            key: key.into(),
-            item,
-            ..Default::default()
-        })
-    }
-    /// push a text item into builder memory for future .list call to use.
-    pub fn text_item(&self, value: &'a str) -> Result<(), ParseError> {
-        self.item(Item::text(value))
-    }
-    /// push a list item into builder memory for future .list call to use.
-    pub fn list_item(&self, count: usize) -> Result<(), ParseError> {
-        self.item(Item::list(self.list(count)?))
-    }
-    /// push a dict item into builder memory for future .list call to use.
-    pub fn dict_item(&self, count: usize) -> Result<(), ParseError> {
-        self.item(Item::dict(self.dict(count)?))
-    }
-    /// push a text entry into builder memory for future .dict call to use.
-    pub fn text_entry(&self, key: &'a str, value: &'a str) -> Result<(), ParseError> {
-        self.keyed(key, Item::text(value))
-    }
-    /// push a list entry into builder memory for future .dict call to use.
-    pub fn list_entry(&self, key: &'a str, count: usize) -> Result<(), ParseError> {
-        self.keyed(key, Item::list(self.list(count)?))
-    }
-    /// push a dict entry into builder memory for future .dict call to use.
-    pub fn dict_entry(&self, key: &'a str, count: usize) -> Result<(), ParseError> {
-        self.keyed(key, Item::dict(self.dict(count)?))
-    }
-    /// call the parser on the provided content, panic if the content isn't legit.
-    pub fn parse_or_panic(&self, content: &'a str) -> File<'a> {
-        self.parse(content, |error| panic!("{error}"))
-            .expect("panic should have already happened in report")
-    }
-    /// call the parser on the provided content, with a callback for errors.
-    pub fn parse<F: FnMut(ParseError) -> Reported>(
-        &self,
-        content: &'a str,
-        report: F,
-    ) -> Option<File<'a>> {
-        Input::parse(&self.builder, content, report)
+    fn push_entry(&mut self, entry: Entry<'a>) -> Result<(), &'static str> {
+        self.entries.push(entry).ok_or_else(|| "no room for entry")
     }
 }
 

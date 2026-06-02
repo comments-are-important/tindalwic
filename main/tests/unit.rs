@@ -1,5 +1,6 @@
 #![allow(missing_docs)]
 
+use tindalwic::parse::Builder;
 use tindalwic::{Comment, Entry, File, Item, arena, json, path};
 
 // #[test]
@@ -27,10 +28,12 @@ mod alloc_tests {
         #[test]
         fn deserialize_file_from_json() {
             let bump = Bump::new();
-            let arena = Arena::new(&bump);
+            let mut arena = Arena::new(&bump);
 
             let mut de = serde_json::Deserializer::from_str(r#"{ "key":"one\ntwo" }"#);
-            let file: File = Neutered::bumpalo_seed(&arena).deserialize(&mut de).unwrap();
+            let file: File = Neutered::bumpalo_seed(&mut arena)
+                .deserialize(&mut de)
+                .unwrap();
 
             json! {
                 let entries = {"key":"one\ntwo"}.unwrap();
@@ -104,7 +107,7 @@ fn multi_line_key() {
     let data = "@one\n\ttwo\n<>\n\tv\n";
     let file = arena.parse_or_panic(data);
     assert_eq!(file.to_string(), data);
-    let report = |err| {
+    let report = &mut |err| {
         print!("{err}");
         tindalwic::parse::Reported::Continue
     };

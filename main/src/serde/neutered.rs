@@ -112,12 +112,12 @@ seeded! {
             let mut count = 0usize;
             while let Some(item) = seq.next_element_seed(ItemDe::of(arena))? {
                 arena
-                    .item(item)
+                    .push_item(item)
                     .map_err(|err| Error::custom(err.to_string()))?;
                 count += 1;
             }
             arena
-                .items(count)
+                .take_items(count)
                 .map_err(|err| Error::custom(err.to_string()))
         }
     }
@@ -138,11 +138,10 @@ seeded! {
         }
         fn visit_map() {
             let mut count = 0usize;
-            while let Some((key, item)) =
-                map.next_entry_seed(ValueDe::of(arena), ItemDe::of(arena))?
-            {
+            while let Some(key) = map.next_key_seed(ValueDe::of(arena))? {
+                let item = map.next_value_seed(ItemDe::of(arena))?;
                 arena
-                    .entry(Entry {
+                    .push_entry(Entry {
                         key: if let Some(slice) = key.verbatim(0) {
                             slice
                         } else {
@@ -156,7 +155,7 @@ seeded! {
                 count += 1;
             }
             arena
-                .entries(count)
+                .take_entries(count)
                 .map_err(|err| Error::custom(err.to_string()))
         }
     }
@@ -189,14 +188,17 @@ impl<'a> Serialize for Neutered<'a> {
     }
 }
 #[cfg(feature = "bumpalo")]
-impl<'a> Neutered<'a> {
-    /// call thusly: `Neutered::bumpalo_seed(&arena).deserialize(...)`
-    pub fn bumpalo_seed<'de>(
-        arena: &'de crate::bumpalo::Arena<'a>,
-    ) -> impl serde::de::DeserializeSeed<'de, Value = File<'a>>
-    where
-        'a: 'de,
-    {
-        FileDe::of(&arena.builder)
+mod bumpalo {
+    use super::{File, FileDe, Neutered};
+    use crate::alloc::Intern;
+    use crate::parse::Builder;
+    impl<'a> Neutered<'a> {
+        /// call thusly: `Neutered::bumpalo_seed(&arena).deserialize(...)`
+        pub fn bumpalo_seed<'de, 'ib, IB: Intern<'a> + Builder<'a>>(
+            arena: &'ib mut IB,
+        ) -> impl serde::de::DeserializeSeed<'de, Value = File<'a>> + use<'de, 'a, 'ib, IB>
+        {
+            FileDe::of(arena)
+        }
     }
 }

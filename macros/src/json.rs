@@ -95,63 +95,65 @@ impl Parse for JSONs {
 /// bindings that get pulled in to the closure by the Item::Expr expansions.
 impl JSONs {
     fn list<P>(&self, list: &Punctuated<Item, P>, err: &Propagate, tokens: &mut TokenStream) {
+        let tindalwic = tindalwic();
         let ident = &self.arena.name.ident;
         for item in list {
             match item {
                 Item::Text(text) => {
                     tokens.extend(quote! {
-                        #ident.text_item(#text)#err;
+                        <dyn #tindalwic::parse::Builder>::push_text_item(&mut #ident, #text)#err;
                     });
                 }
                 Item::List(list) => {
                     self.list(list, err, tokens);
                     let count = list.len();
                     tokens.extend(quote! {
-                        #ident.list_item(#count)#err;
+                        <dyn #tindalwic::parse::Builder>::take_items_push_list_item(&mut #ident, #count)#err;
                     });
                 }
                 Item::Dict(dict) => {
                     self.dict(dict, err, tokens);
                     let count = dict.len();
                     tokens.extend(quote! {
-                        #ident.dict_item(#count)#err;
+                        <dyn #tindalwic::parse::Builder>::take_entries_push_dict_item(&mut #ident, #count)#err;
                     });
                 }
                 Item::Expr(expr) => {
                     tokens.extend(quote! {
-                        #ident.item((#expr).into())#err;
+                        <dyn #tindalwic::parse::Builder>::push_item((&mut #ident, #expr).into())#err;
                     });
                 }
             }
         }
     }
     fn dict<P>(&self, dict: &Punctuated<Entry, P>, err: &Propagate, tokens: &mut TokenStream) {
+        let tindalwic = tindalwic();
         let ident = &self.arena.name.ident;
         for entry in dict {
             let Entry { key, item } = entry;
             match item {
                 Item::Text(text) => {
                     tokens.extend(quote! {
-                        #ident.text_entry(#key, #text)#err;
+                        <dyn #tindalwic::parse::Builder>::push_text_entry(&mut #ident, #key, #text)#err;
                     });
                 }
                 Item::List(list) => {
                     self.list(list, err, tokens);
                     let count = list.len();
                     tokens.extend(quote! {
-                        #ident.list_entry(#key, #count)#err;
+                        <dyn #tindalwic::parse::Builder>::take_items_push_list_entry(&mut #ident, #key, #count)#err;
                     });
                 }
                 Item::Dict(dict) => {
                     self.dict(dict, err, tokens);
                     let count = dict.len();
                     tokens.extend(quote! {
-                        #ident.dict_entry(#key, #count)#err;
+                        <dyn #tindalwic::parse::Builder>::take_entries_push_dict_entry(&mut #ident, #key, #count)#err;
                     });
                 }
                 Item::Expr(expr) => {
                     tokens.extend(quote! {
-                        #ident.keyed(#key, (#expr).into())#err;
+                        <dyn #tindalwic::parse::Builder>::push_key_item_entry(&mut #ident, #key, (#expr).into())#err;
                     });
                 }
             }
@@ -166,6 +168,7 @@ impl ToTokens for JSONs {
             completed,
         } = self;
         tokens.extend(quote!(#arena));
+        let tindalwic = tindalwic();
         let ident = &self.arena.name.ident;
         for json in statements {
             let JSON { name, root, err } = json;
@@ -174,14 +177,14 @@ impl ToTokens for JSONs {
                     self.list(list, err, tokens);
                     let count = list.len();
                     tokens.extend(quote! {
-                        let #name = #ident.list(#count)#err;
+                        let #name = <dyn #tindalwic::parse::Builder>::take_items(&mut #ident, #count)#err;
                     });
                 }
                 Root::Dict(dict) => {
                     self.dict(dict, err, tokens);
                     let count = dict.len();
                     tokens.extend(quote! {
-                        let #name = #ident.dict(#count)#err;
+                        let #name = <dyn #tindalwic::parse::Builder>::take_entries(&mut #ident, #count)#err;
                     });
                 }
             }

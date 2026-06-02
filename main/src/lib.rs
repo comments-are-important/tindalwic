@@ -173,7 +173,7 @@ pub use value::Value;
 impl<'a> Value<'a> {
     /// linear `O(n)` scan.
     // TODO: add link to `alloc` map view, say it "offers `O(1)`."
-    pub fn find_linearly_in(self, cells: &'_ [Cell<Entry<'_>>]) -> Option<usize> {
+    pub fn find_linearly_in(self, cells: Entries<'_>) -> Option<usize> {
         cells.iter().position(|cell| cell.get().key == self)
     }
 }
@@ -224,7 +224,7 @@ impl<'a> core::hash::Hash for Value<'a> {
 /// assert_eq!(html, "<p>with <del>strikethrough</del> extension</p>");
 /// # }
 /// ```
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Comment<'a> {
     /// the string value
     pub value: Value<'a>,
@@ -235,7 +235,7 @@ pub struct Comment<'a> {
 /// an association (from key to item) and its metadata.
 ///
 /// at the lowest level, these are stored in an array.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Entry<'a> {
     /// a key can have a blank line before it (before its comment)
     pub gap: bool,
@@ -273,7 +273,7 @@ pub type Items<'a> = &'a [Cell<Item<'a>>];
 // ------------------------------------------------------------------------------------
 
 /// the three Item variants
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Item<'a> {
     /// a [Value]
     Text {
@@ -344,7 +344,7 @@ impl<'a> Item<'a> {
 /// the outermost context.
 ///
 /// similar to a [Item::Dict], but with different comments.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct File<'a> {
     /// A File can start with a Unix `#!` Comment.
     pub hashbang: Option<Comment<'a>>,

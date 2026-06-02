@@ -1,7 +1,7 @@
-//! supporting code for the walk! macro.
+//! supporting code for the path! macro.
 //! everything here must be pub so macro can use it,
 //! but using these directly is not recommended.
-//! using walk! is much easier.
+//! using path! is much easier.
 
 use crate::{Entry, Item, Value};
 use core::cell::Cell;
@@ -28,6 +28,8 @@ pub struct PathError<'p> {
     /// English description of the problem
     pub message: &'static str,
 }
+impl<'p> core::error::Error for PathError<'p> {}
+
 /// a sequence of Branch built and used by the walk macro.
 ///
 /// the ENTRY parameter determines the Cell inner type of `Ok` walk:

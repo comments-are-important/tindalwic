@@ -107,12 +107,15 @@ nightly: must-run-inside
 .PHONY: nightly
 
 main/api: nightly
+	set -e
 	cargo install --list | grep -q cargo-public-api || cargo $(BINSTALL) cargo-public-api
 	mkdir -p target/public-api/{all,default}
 	cd main
 	cargo public-api --target-dir ../target/public-api/default \
-	  >../target/public-api/tindalwic.api
-	cargo public-api -sss --all-features --target-dir ../target/public-api/all \
+	  >../target/public-api/tindalwic-default.api
+	cargo public-api --all-features --target-dir ../target/public-api/all \
+	  >../target/public-api/tindalwic-all.api
+	cat ../target/public-api/tindalwic-all.api \
 	  | sed -E -e 's=^impl (.*)=|\1|impl|=' \
 	  | sed -E -e 's=^(impl<[^>]+>) (.*)=|\2|\1|=' \
 	  | sed -E -e 's=^pub (enum|fn|const fn|mod|struct|use|type) (&?)(.*)=|\3|\2\1|=' \

@@ -216,10 +216,11 @@ impl<'a> core::hash::Hash for Value<'a> {
 ///     value: "with ~strikethrough~ extension".into(),
 /// };
 ///
-/// let html = markdown::to_html_with_options(&comment.joined(), &markdown::Options::gfm()).expect(
-///     "should never error, according to:
+/// let html = markdown::to_html_with_options(&comment.value.joined(), &markdown::Options::gfm())
+///     .expect(
+///         "should never error, according to:
 ///      <https://docs.rs/markdown/latest/markdown/fn.to_html_with_options.html#errors>",
-/// );
+///     );
 ///
 /// assert_eq!(html, "<p>with <del>strikethrough</del> extension</p>");
 /// # }

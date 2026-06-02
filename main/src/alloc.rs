@@ -2,7 +2,7 @@
 
 extern crate alloc;
 
-use crate::{Comment, Item, Value};
+use crate::Value;
 use alloc::string::String;
 
 impl<'a> Value<'a> {
@@ -11,33 +11,16 @@ impl<'a> Value<'a> {
         if let Some(slice) = self.verbatim(0) {
             String::from(slice)
         } else {
-            let mut result = String::new(); //with_capacity(self.len());
-            for line in self.lines() {
-                result.push_str(line);
-                result.push('\n');
+            let mut result = String::with_capacity(self.byte_count());
+            let mut iter = self.lines();
+            if let Some(first) = iter.next() {
+                result.push_str(first)
             }
-            if !result.is_empty() {
-                result.truncate(result.len() - 1);
+            for more in iter {
+                result.push('\n');
+                result.push_str(more);
             }
             result
-        }
-    }
-}
-
-impl<'a> Comment<'a> {
-    /// Allocates a [String], filled with the UTF-8 copied from `self`.
-    pub fn joined(&self) -> String {
-        self.value.joined()
-    }
-}
-
-impl<'a> Item<'a> {
-    /// Allocates a [String], filled with the UTF-8 copied from `self`.
-    pub fn joined(&self) -> Option<String> {
-        if let Item::Text { value, .. } = self {
-            Some(value.joined())
-        } else {
-            None
         }
     }
 }

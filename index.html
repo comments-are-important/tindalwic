@@ -34,14 +34,22 @@
         }
 
         body {
-            padding: 10px 20px;
+            padding: 10px 20px 0 20px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .aspect {
+            flex: 1;
+            min-height: 0;
             overflow: hidden;
             display: flex;
             flex-direction: column;
         }
 
         @media (min-aspect-ratio: 1/1) {
-            body {
+            .aspect {
                 flex-direction: row;
             }
         }
@@ -49,6 +57,7 @@
         .data {
             flex: 1;
             min-height: 0;
+            min-width: 0;
             padding: 10px 20px;
             display: flex;
             flex-direction: column;
@@ -63,6 +72,7 @@
         .cm-editor {
             flex: 1;
             min-height: 0;
+            min-width: 0;
         }
 
         .cm-editor.hidden {
@@ -73,30 +83,40 @@
         .cm-scroller {
             overflow: auto;
         }
+
+        #version {
+            text-align: center;
+            font-size: small;
+            color: #eee;
+        }
     </style>
 </head>
 
 <body>
-    <div id="ours" class="data">
-        <select id="mode">
-            <option value="Neutered">Tindalwic - neutered</option>
-            <option value="Compact">Tindalwic - compact</option>
-            <option value="Verbose">Tindalwic - verbose</option>
-        </select>
-        <pre id="theirErr" class="err hidden"></pre>
+    <div class="aspect">
+        <div id="ours" class="data">
+            <select id="mode">
+                <option value="Neutered">Tindalwic - neutered</option>
+                <option value="Compact">Tindalwic - compact</option>
+                <option value="Verbose">Tindalwic - verbose</option>
+            </select>
+            <pre id="theirErr" class="err hidden"></pre>
+        </div>
+        <div id="theirs" class="data">
+            <select id="format">
+                <option value="JSON">JSON</option>
+                <option value="TOML">TOML</option>
+                <option value="YAML">YAML</option>
+            </select>
+            <pre id="ourErr" class="err hidden"></pre>
+        </div>
     </div>
-    <div id="theirs" class="data">
-        <select id="format">
-            <option value="JSON">JSON</option>
-            <option value="TOML">TOML</option>
-            <option value="YAML">YAML</option>
-        </select>
-        <pre id="ourErr" class="err hidden"></pre>
-    </div>
+    <span id="version"></span>
 
     <script type="module">
-        import init, { from_tindalwic, into_tindalwic } from './tindalwic_webapp.js';
+        import init, { from_tindalwic, into_tindalwic, version } from './tindalwic_webapp.js';
         await init();
+        document.getElementById("version").innerText = version();
         import { basicSetup } from "codemirror";
         import { EditorView, keymap } from "@codemirror/view";
         import { EditorState, Compartment } from "@codemirror/state";
@@ -130,6 +150,21 @@
                 languageConf.of(languageExtensions.JSON)
             ]
         });
+        let scrolling = false;
+        function scroll() {
+            if (scrolling) return; // avoid the rebound
+            scrolling = true;
+            const that = (this == ourView.scrollDOM) ? theirView.scrollDOM : ourView.scrollDOM;
+            const thatVertical = (that.scrollHeight - that.clientHeight);
+            const thisVertical = (this.scrollHeight - this.clientHeight) || 1;
+            that.scrollTop = this.scrollTop * thatVertical / thisVertical;
+            const thatHorizontal = (that.scrollWidth - that.clientWidth);
+            const thisHorizontal = (this.scrollWidth - this.clientWidth) || 1;
+            that.scrollLeft = this.scrollLeft * thatHorizontal / thisHorizontal;
+            requestAnimationFrame(() => { scrolling = false; });
+        }
+        ourView.scrollDOM.addEventListener('scroll', scroll);
+        theirView.scrollDOM.addEventListener('scroll', scroll);
         const ourErr = document.getElementById('ourErr');
         const theirErr = document.getElementById('theirErr');
         function reset() {

@@ -33,6 +33,9 @@ pub mod bumpalo;
 #[cfg(feature = "serde")]
 pub mod serde;
 
+/// the semver plus the git fingerprint
+pub const VERSION: &str = env!("TINDALWIC_VERSION");
+
 // ====================================================================================
 
 mod value {

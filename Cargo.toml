@@ -4,7 +4,7 @@ default-members = ["macros", "main"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.4.0"
 edition = "2021"
 rust-version = "1.81"
 authors = ["Comments Are Important <comments.are.important@gmail.com>"]

@@ -11,6 +11,11 @@ fn initialize() {
     console_error_panic_hook::set_once();
 }
 
+#[wasm_bindgen]
+pub fn version() -> String {
+    tindalwic::VERSION.to_string()
+}
+
 fn into_json<T: ?Sized + Serialize>(value: &T) -> Result<String, String> {
     serde_json::to_string_pretty(value).map_err(|e| e.to_string())
 }

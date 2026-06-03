@@ -44,7 +44,6 @@ down: must-run-outside
 .PHONY: down
 
 httpd: must-run-outside
-	cp webapp/favicon.ico target
 	cd target
 	python -m http.server >&http.server.log
 .PHONY: httpd
@@ -95,6 +94,7 @@ webapp: must-run-inside
 	    --out-dir webapp-dev $$WASM/debug/$$NAME.wasm
 	wasm-bindgen --target web --no-typescript --remove-name-section --remove-producers-section \
 	    --out-dir webapp-release $$WASM/release-small/$$NAME.wasm
+	cp ../webapp/favicon.ico ./
 	cp ../webapp/{index.html,favicon.ico} webapp-dev/
 	cp ../webapp/{index.html,favicon.ico} webapp-release/
 	cargo install --list | grep -q wasm-opt || cargo $(BINSTALL) wasm-opt
@@ -144,7 +144,7 @@ fmt: nightly
 
 msrv: must-run-inside
 	set -e
-	cargo install --list | grep -q cargo-llvm-lines || cargo $(BINSTALL) cargo-msrv
+	cargo install --list | grep -q cargo-msrv || cargo $(BINSTALL) cargo-msrv
 	echo ====== macros ; cargo msrv verify --path macros
 	echo ====== main   ; cargo msrv verify --path main
 	echo ====== webapp ; cargo msrv verify --path webapp

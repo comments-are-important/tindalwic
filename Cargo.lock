@@ -704,7 +704,7 @@ dependencies = [
 
 [[package]]
 name = "tindalwic"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "assert-json-diff",
  "bumpalo",
@@ -719,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "tindalwic-macros"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -728,7 +728,7 @@ dependencies = [
 
 [[package]]
 name = "tindalwic-webapp"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "bumpalo",
  "console_error_panic_hook",

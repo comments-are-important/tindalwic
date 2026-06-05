@@ -2,11 +2,10 @@ extern crate alloc;
 
 use super::{CommentDe, CommentSer, ValueDe, ValueSer, seeded};
 use super::{DictFields, EntryFields, FileFields, ItemVariants, ListFields, TextFields};
-use crate::{Comment, Entry, File, Item, Value};
+use crate::{Entry, File, Item, Value};
 use ::serde::de::{Error as _, VariantAccess as _};
 use ::serde::ser::{SerializeSeq as _, SerializeStruct as _};
 use alloc::string::String;
-use core::cell::Cell;
 
 seeded! {
     #[expecting = "a compact Item (Text, List, or Dict)"]

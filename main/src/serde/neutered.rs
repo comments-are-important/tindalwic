@@ -1,11 +1,10 @@
 extern crate alloc;
 
-use super::{ValueDe, ValueSer, seeded};
-use crate::{Entries, Entry, File, Item, Items};
+use super::{ValueDe, ValueOff, ValueSer, seeded};
+use crate::{Entry, File, Item};
 use ::serde::ser::{SerializeMap as _, SerializeSeq as _};
 use alloc::format;
 use alloc::string::{String, ToString};
-use core::cell::Cell;
 use serde::de::Error as _;
 use serde::de::value::{MapDeserializer, SeqDeserializer};
 
@@ -15,13 +14,9 @@ seeded! {
     impl Item {
         fn offer() {
             match this {
-                Item::Text { value, .. } => ValueSer(value).deserialize_any(v),
-                Item::List { cells, .. } => {
-                    v.visit_seq(SeqDeserializer::new(ItemsSer::iter(cells)))
-                }
-                Item::Dict { cells, .. } => {
-                    v.visit_map(MapDeserializer::new(EntriesSer::iter(cells)))
-                }
+                Item::Text { value, .. } => ValueOff(input, value).deserialize_any(v),
+                Item::List { cells, .. } => ItemsOff(input, cells).deserialize_any(v),
+                Item::Dict { cells, .. } => EntriesOff(input, cells).deserialize_any(v),
             }
         }
         fn serialize() {
@@ -137,6 +132,11 @@ seeded! {
     #[expecting = "a list of neutered items"]
     #[deserialize_seq]
     impl Items {
+        fn offer() {
+            v.visit_seq(SeqDeserializer::new(
+                this.iter().map(|cell| ItemOff(input, cell.get())),
+            ))
+        }
         fn serialize() {
             let mut seq = s.serialize_seq(Some(this.len()))?;
             for cell in this.iter() {
@@ -154,16 +154,17 @@ seeded! {
         }
     }
 } // !seeded
-impl<'a> ItemsSer<'a> {
-    fn iter(cells: Items<'a>) -> impl Iterator<Item = ItemSer<'a>> {
-        cells.iter().map(|cell| ItemSer(cell.get()))
-    }
-}
 
 seeded! {
     #[expecting = "a dictionary (string keys, neutered item values)"]
     #[deserialize_map]
     impl Entries {
+        fn offer() {
+            v.visit_map(MapDeserializer::new(this.iter().map(|cell| {
+                let Entry { key, item, .. } = cell.get();
+                (ValueOff(input, key), ItemOff(input, item))
+            })))
+        }
         fn serialize() {
             let mut map = s.serialize_map(Some(this.len()))?;
             for cell in this.iter() {
@@ -194,21 +195,13 @@ seeded! {
         }
     }
 } // !seeded
-impl<'a> EntriesSer<'a> {
-    fn iter(cells: Entries<'a>) -> impl Iterator<Item = (ValueSer<'a>, ItemSer<'a>)> {
-        cells.iter().map(|cell| {
-            let Entry { key, item, .. } = cell.get();
-            (ValueSer(key), ItemSer(item))
-        })
-    }
-}
 
 seeded! {
     #[expecting = "a file (string keys, neutered item values)"]
     #[deserialize_map]
     impl File {
         fn offer() {
-            v.visit_map(MapDeserializer::new(EntriesSer::iter(this.cells)))
+            EntriesOff(input, this.cells).deserialize_any(v)
         }
         fn serialize() {
             EntriesSer(this.cells).serialize(s)
@@ -246,25 +239,21 @@ impl<'a> Neutered<'a> {
 }
 #[cfg(feature = "bumpalo")]
 mod bumpalo {
-    use super::{FileSer, Neutered};
+    use super::{FileOff, Neutered};
     use crate::serde::err::{Error, Result};
     use serde::de::Error as _;
     impl<'a> Neutered<'a> {
         /// unpack tindalwic data into any type that can visit {map,seq,str}
-        pub fn from_str<'de, T: serde::Deserialize<'de>>(s: &'de str) -> Result<T> {
+        pub fn from_str<'de, T: serde::Deserialize<'de>>(input: &'de str) -> Result<T> {
             let bump = bumpalo::Bump::new();
             let mut arena = crate::bumpalo::Arena::new(&bump);
             let file = arena
-                .describe_errors(s, usize::MAX)
+                .describe_errors(input, usize::MAX)
                 .map_err(Error::custom)?;
-            let value = T::deserialize(FileSer(file))?;
+            let value = T::deserialize(FileOff(input, file))?;
             Ok(value)
         }
         // pub fn to_string<T: ?Sized + Serialize>(value: &T) -> OurResult<String> {
-        //     let bump = bumpalo::Bump::new();
-        //     let mut arena = crate::bumpalo::Arena::new(&bump);
-        //     value.serialize(serializer)
-        //     let file = Neutered::seed(&mut arena).deserialize(deserializer)
         //     let mut buf = String::new();
         //     to_writer(&mut buf, value)?;
         //     Ok(buf)

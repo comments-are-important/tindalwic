@@ -8,7 +8,7 @@ pub use compact::Compact;
 pub use neutered::Neutered;
 pub use verbose::Verbose;
 
-use crate::{Comment, Value};
+use crate::Comment;
 use serde::de::DeserializeSeed as _;
 
 use tindalwic_macros::serialize_deserialize_seed_visit as seeded;
@@ -24,7 +24,14 @@ seeded! {
     #[deserialize_str]
     impl Value {
         fn offer() {
-            // arena Value instances don't live long enough to visit_borrowed_str
+            if let Some(slice) = this.verbatim(0) {
+                let base = input.as_ptr() as usize;
+                let start = slice.as_ptr() as usize;
+                if base <= start && start < base + input.len() {
+                    let offset = start - base;
+                    return v.visit_borrowed_str(&input[offset..offset + slice.len()]);
+                }
+            }
             v.visit_string(this.joined())
         }
         fn serialize() {

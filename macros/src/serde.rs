@@ -1,39 +1,73 @@
 use super::*;
+use syn::Stmt;
+
+struct Body(Vec<Stmt>);
+impl ToTokens for Body {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        for stmt in self.0.iter() {
+            stmt.to_tokens(tokens);
+        }
+    }
+}
+
+struct Method {
+    signature: TokenStream,
+    body: Body,
+}
+
+struct Visitors<'v> {
+    visitors: &'v Vec<Method>,
+    de: &'v Ident,
+}
+impl<'v> ToTokens for Visitors<'v> {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let Visitors { visitors, de } = *self;
+        for visitor in visitors {
+            let Method { signature, body } = visitor;
+            tokens.extend(quote! {
+                #signature {
+                    #[allow(unused)]
+                    let #de(build) = self;
+                    #body
+                }
+            });
+        }
+    }
+}
 
 pub(super) struct SerDe {
-    ser: Ident,
-    de: Ident,
+    kind: Ident,
     value: TokenStream,
     expecting: TokenStream,
     deserialize: TokenStream,
-    //accept: Option<TokenStream>,
-    offer: Option<TokenStream>,
-    serialize: TokenStream,
-    visitors: TokenStream,
+    //accept: Option<Body>,
+    offer: Option<Body>,
+    serialize: Body,
+    visitors: Vec<Method>,
 }
 impl Parse for SerDe {
     fn parse(input: ParseStream) -> Result<Self> {
         let ii: ItemImpl = input.parse()?;
         let kind = SerDe::validate_parse(&ii)?;
-        let kind_str = kind.to_string();
-        let ser = Ident::new(&format!("{kind_str}Ser"), Span::call_site());
-        let de = Ident::new(&format!("{kind_str}De"), Span::call_site());
-        let value = match &kind_str[..] {
-            "Comment" => quote!(Option<Comment<'a>>),
-            "Items" => quote!(&'a [Cell<Item<'a>>]),
-            "Entries" => quote!(&'a [Cell<Entry<'a>>]),
-            "Text" => quote!((Value<'a>, Option<Comment<'a>>)),
+        let kind_slice = &kind.to_string()[..];
+        let tindalwic = tindalwic();
+        let value = match kind_slice {
+            "Comment" => quote!(Option<#tindalwic::Comment<'a>>),
+            "Text" => quote!((
+                #tindalwic::Value<'a>,
+                Option<#tindalwic::Comment<'a>>
+            )),
             "List" => quote!((
-                Option<Comment<'a>>,
-                &'a [Cell<Item<'a>>],
-                Option<Comment<'a>>
+                Option<#tindalwic::Comment<'a>>,
+                &'a [core::cell::Cell<#tindalwic::Item<'a>>],
+                Option<#tindalwic::Comment<'a>>
             )),
             "Dict" => quote!((
-                Option<Comment<'a>>,
-                &'a [Cell<Entry<'a>>],
-                Option<Comment<'a>>
+                Option<#tindalwic::Comment<'a>>,
+                &'a [core::cell::Cell<#tindalwic::Entry<'a>>],
+                Option<#tindalwic::Comment<'a>>
             )),
-            _ => quote!(#kind<'a>),
+            _ => quote!(#tindalwic::#kind<'a>),
         };
         let mut expecting = None;
         let mut deserialize = None;
@@ -63,7 +97,7 @@ impl Parse for SerDe {
                         return Err(Error::new_spanned(path, "too many deserialize"));
                     }
                     deserialize = Some(match &ident.to_string()[..] {
-                        "deserialize_enum" | "deserialize_struct" => match &kind_str[..] {
+                        "deserialize_enum" | "deserialize_struct" => match kind_slice {
                             "Item" => quote!(#ident("Item",&["Text","List","Dict"],self)),
                             "Text" => quote!(#ident("Text",&["value","epilog"],self)),
                             "List" => quote!(#ident("List",&["prolog","items","epilog"],self)),
@@ -88,46 +122,39 @@ impl Parse for SerDe {
         let Some(deserialize) = deserialize else {
             return Err(Error::new_spanned(ii.impl_token, "need: #[deserialize_*]"));
         };
-        let mut accept = None;
+        // let mut accept = None;
         let mut offer = None;
         let mut serialize = None;
-        let mut visitors = TokenStream::new();
+        let mut visitors = Vec::new();
         for item in &ii.items {
             let ImplItem::Fn(f) = item else {
                 return Err(Error::new_spanned(item, "not allowed"));
             };
             match &f.sig.ident.to_string()[..] {
-                "accept" => {
-                    if accept.is_some() {
-                        return Err(Error::new_spanned(f, "duplicate"));
-                    }
-                    let body = SerDe::validate_func(&f)?.stmts;
-                    accept = Some(quote!(#(#body)*));
-                }
+                // "accept" => {
+                //     if accept.is_some() {
+                //         return Err(Error::new_spanned(f, "duplicate"));
+                //     }
+                //     accept = Some(SerDe::validate_func(&f)?.stmts);
+                // }
                 "offer" => {
                     if offer.is_some() {
                         return Err(Error::new_spanned(f, "duplicate"));
                     }
-                    let body = SerDe::validate_func(&f)?.stmts;
-                    offer = Some(quote!(#(#body)*));
+                    offer = Some(Body(SerDe::validate_func(&f)?.stmts));
                 }
                 "serialize" => {
                     if serialize.is_some() {
                         return Err(Error::new_spanned(f, "duplicate"));
                     }
-                    let body = SerDe::validate_func(&f)?.stmts;
-                    serialize = Some(quote!(#(#body)*));
+                    serialize = Some(Body(SerDe::validate_func(&f)?.stmts));
                 }
                 name if name.starts_with("visit_") => {
                     let ident = &f.sig.ident;
-                    let signature = SerDe::visitor_sig(&f);
-                    let body = SerDe::validate_func(&f)?.stmts;
-                    visitors.extend(quote! {
-                        fn #ident #signature {
-                            #[allow(unused)]
-                            let #de(build) = self;
-                            #(#body)*
-                        }
+                    let sig = SerDe::visitor_sig(&f);
+                    visitors.push(Method {
+                        signature: quote!(fn #ident #sig),
+                        body: Body(SerDe::validate_func(&f)?.stmts),
                     });
                 }
                 _ => {
@@ -143,8 +170,7 @@ impl Parse for SerDe {
             return Err(Error::new(missing, "need: fn serialize() {...}"));
         };
         return Ok(SerDe {
-            ser,
-            de,
+            kind,
             value,
             expecting,
             deserialize,
@@ -268,8 +294,7 @@ impl SerDe {
 impl ToTokens for SerDe {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let SerDe {
-            ser,
-            de,
+            kind,
             value,
             expecting,
             deserialize,
@@ -280,6 +305,10 @@ impl ToTokens for SerDe {
             ..
         } = self;
         let tindalwic = tindalwic();
+        let kind_slice = &kind.to_string()[..];
+        let ser = Ident::new(&format!("{kind_slice}Ser"), Span::call_site());
+        let de = Ident::new(&format!("{kind_slice}De"), Span::call_site());
+        let visitors = Visitors { visitors, de: &de };
         tokens.extend(quote! {
             struct #ser <'a>(#value);
             impl <'a> ::serde::ser::Serialize for #ser <'a> {
@@ -308,17 +337,19 @@ impl ToTokens for SerDe {
             }
         });
         if let Some(offer) = offer {
+            let off = Ident::new(&format!("{kind_slice}Off"), Span::call_site());
             tokens.extend(quote! {
-                impl<'de, 'a> ::serde::de::IntoDeserializer<'de, #tindalwic::serde::err::Error> for #ser<'a> {
+                struct #off <'de, 'a>(&'de str, #value);
+                impl<'de, 'a> ::serde::de::IntoDeserializer<'de, #tindalwic::serde::err::Error> for #off<'de, 'a> {
                     type Deserializer = Self;
                     fn into_deserializer(self) -> Self::Deserializer {
                         self
                     }
                 }
-                impl<'de, 'a> ::serde::Deserializer<'de> for #ser<'a> {
+                impl<'de, 'a> ::serde::Deserializer<'de> for #off<'de, 'a> {
                     type Error = #tindalwic::serde::err::Error;
                     fn deserialize_any<V: ::serde::de::Visitor<'de>>(self, v: V) -> Result<V::Value, Self::Error> {
-                        let #ser(this) = self;
+                        let #off(input, this) = self;
                         #offer
                     }
                     serde::forward_to_deserialize_any! {

@@ -1,8 +1,5 @@
 #![allow(missing_docs)]
 
-#[cfg(all(feature = "bumpalo", feature = "serde"))]
-use std::borrow::Cow;
-
 use tindalwic::parse::Parse;
 use tindalwic::{Comment, Entry, File, Item, arena, json, path};
 
@@ -255,28 +252,31 @@ fn change_structure() {
     )
 }
 
-#[derive(::serde::Deserialize, PartialEq, Debug)]
 #[cfg(all(feature = "bumpalo", feature = "serde"))]
-struct S<'a> {
-    x: Cow<'a, str>,
-}
-#[test]
-#[cfg(all(feature = "bumpalo", feature = "serde"))]
-fn deserializer() {
-    use serde_json::{Value, json};
-    use tindalwic::serde::Neutered;
-    assert_eq!(
-        Neutered::from_str::<Value>("k=v").unwrap(),
-        json!({"k": "v"})
-    );
-    assert_eq!(
-        Neutered::from_str::<Value>("[xs]\n\ta\n\tb").unwrap(),
-        json!({"xs": ["a", "b"]})
-    );
-    assert_eq!(
-        Neutered::from_str::<S>("x=hi").unwrap(),
-        S { x: "hi".into() }
-    );
+mod borrow {
+
+    #[derive(::serde::Deserialize, PartialEq, Debug)]
+    struct S<'a> {
+        x: &'a str,
+    }
+
+    #[test]
+    fn deserializer() {
+        use serde_json::{Value, json};
+        use tindalwic::serde::Neutered;
+        assert_eq!(
+            Neutered::from_str::<Value>("k=v").unwrap(),
+            json!({"k": "v"})
+        );
+        assert_eq!(
+            Neutered::from_str::<Value>("[xs]\n\ta\n\tb").unwrap(),
+            json!({"xs": ["a", "b"]})
+        );
+        assert_eq!(
+            Neutered::from_str::<S>("x=hi").unwrap(),
+            S { x: "hi".into() }
+        );
+    }
 }
 
 /*

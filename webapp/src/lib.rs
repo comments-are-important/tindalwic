@@ -34,17 +34,7 @@ pub fn from_tindalwic(
 ) -> Result<String, String> {
     let bump = Bump::new();
     let mut arena = Arena::new(&bump);
-    let file = match arena.parse_collect(&input, usize::MAX) {
-        Ok(parsed) => parsed,
-        Err(errors) => {
-            let mut message = format!("{} errors:", errors.len());
-            for error in errors {
-                message.push_str("\nline #");
-                message.push_str(&error.to_string());
-            }
-            return Err(message);
-        }
-    };
+    let file = arena.describe_errors(&input, usize::MAX)?;
     match (&mode[..], &format[..]) {
         ("Neutered", "JSON") => into_json(&Neutered(file)),
         ("Neutered", "TOML") => into_toml(&Neutered(file)),

@@ -4,6 +4,7 @@ extern crate alloc;
 
 use crate::parse::{Build, Parse, ParseError, Reported};
 use crate::{Entries, Entry, File, Item, Items};
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use bumpalo::Bump;
 use core::cell::Cell;
@@ -82,7 +83,7 @@ impl<'a> Arena<'a> {
         Arena { builder }
     }
     /// call the parser on the provided content, collect first `count` errors.
-    pub fn parse_collect(
+    pub fn collect_errors(
         &mut self,
         content: &'a str,
         count: usize,
@@ -91,7 +92,7 @@ impl<'a> Arena<'a> {
         Self: Sized,
     {
         let mut errors = Vec::new();
-        self.report(content, &mut |err| {
+        self.report_errors(content, &mut |err| {
             if errors.len() >= count {
                 return Reported::Abort;
             }
@@ -99,6 +100,24 @@ impl<'a> Arena<'a> {
             Reported::Continue
         })
         .ok_or_else(|| errors)
+    }
+    /// call the parser on the provided content, describe any errors.
+    pub fn describe_errors(&mut self, content: &'a str, count: usize) -> Result<File<'a>, String> {
+        self.collect_errors(content, count).map_err(|errors| {
+            if errors.is_empty() {
+                String::from("an unknown error occurred")
+            } else if errors.len() == 1 {
+                errors.first().expect("len == 1").to_string()
+            } else {
+                let mut message = errors.len().to_string();
+                message.push_str(" errors:");
+                for error in errors {
+                    message.push_str("\nline #");
+                    message.push_str(&error.to_string());
+                }
+                message
+            }
+        })
     }
 }
 
@@ -110,14 +129,14 @@ mod tests {
     fn parse_alloc() {
         let bump = Bump::new();
         let mut arena = Arena::new(&bump);
-        let file = arena.panic("k=v\n");
+        let file = arena.panic_if_error("k=v\n");
         assert_eq!(file.to_string(), "k=v\n");
     }
     #[test]
     fn invalid() {
         let bump = Bump::new();
         let mut arena = Arena::new(&bump);
-        let Err(errors) = arena.parse_collect("nope", usize::MAX) else {
+        let Err(errors) = arena.collect_errors("nope", usize::MAX) else {
             panic!("got a file expected parse error")
         };
         assert_eq!(errors.len(), 1);

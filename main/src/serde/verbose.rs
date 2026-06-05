@@ -3,10 +3,10 @@ extern crate alloc;
 use super::{CommentDe, CommentSer, ValueDe, ValueSer, seeded};
 use super::{DictFields, EntryFields, FileFields, ItemVariants, ListFields, TextFields};
 use crate::{Comment, Entry, File, Item, Value};
+use ::serde::de::{Error as _, VariantAccess as _};
+use ::serde::ser::{SerializeSeq as _, SerializeStruct as _};
 use alloc::string::String;
 use core::cell::Cell;
-use serde::de::{Error, VariantAccess};
-use serde::ser::{Serialize, SerializeSeq, SerializeStruct, Serializer};
 
 seeded! {
     #[expecting = "a verbose Item (Text, List, or Dict)"]
@@ -79,7 +79,7 @@ seeded! {
             fields.end()
         }
         fn visit_seq() {
-            let err = || Error::invalid_length(2, &TextDe::EXPECTING);
+            let err = || A::Error::invalid_length(2, &TextDe::EXPECTING);
             Ok((
                 seq.next_element_seed(ValueDe::of(build))?.ok_or_else(err)?,
                 seq.next_element_seed(CommentDe::of(build))?
@@ -93,21 +93,21 @@ seeded! {
                 match field {
                     TextFields::Value => {
                         if value.is_some() {
-                            return Err(Error::duplicate_field("value"));
+                            return Err(A::Error::duplicate_field("value"));
                         }
                         value = Some(map.next_value_seed(ValueDe::of(build))?);
                     }
                     TextFields::Epilog => {
                         if epilog.is_some() {
-                            return Err(Error::duplicate_field("epilog"));
+                            return Err(A::Error::duplicate_field("epilog"));
                         }
                         epilog = Some(map.next_value_seed(CommentDe::of(build))?);
                     }
                 }
             }
             Ok((
-                value.ok_or_else(|| Error::missing_field("value"))?,
-                epilog.ok_or_else(|| Error::missing_field("epilog"))?,
+                value.ok_or_else(|| A::Error::missing_field("value"))?,
+                epilog.ok_or_else(|| A::Error::missing_field("epilog"))?,
             ))
         }
     }
@@ -127,10 +127,10 @@ seeded! {
         fn visit_seq() {
             let mut count = 0usize;
             while let Some(item) = seq.next_element_seed(ItemDe::of(build))? {
-                build.push_item(item).map_err(Error::custom)?;
+                build.push_item(item).map_err(A::Error::custom)?;
                 count += 1;
             }
-            Ok(build.finish_items(count).map_err(Error::custom)?)
+            Ok(build.finish_items(count).map_err(A::Error::custom)?)
         }
     }
 } // !seeded
@@ -148,7 +148,7 @@ seeded! {
             fields.end()
         }
         fn visit_seq() {
-            let err = || Error::invalid_length(3, &ListDe::EXPECTING);
+            let err = || A::Error::invalid_length(3, &ListDe::EXPECTING);
             Ok((
                 seq.next_element_seed(CommentDe::of(build))?
                     .ok_or_else(err)?,
@@ -165,28 +165,28 @@ seeded! {
                 match field {
                     ListFields::Prolog => {
                         if prolog.is_some() {
-                            return Err(Error::duplicate_field("prolog"));
+                            return Err(A::Error::duplicate_field("prolog"));
                         }
                         prolog = Some(map.next_value_seed(CommentDe::of(build))?);
                     }
                     ListFields::Array => {
                         if array.is_some() {
-                            return Err(Error::duplicate_field("array"));
+                            return Err(A::Error::duplicate_field("array"));
                         }
                         array = Some(map.next_value_seed(ItemsDe::of(build))?);
                     }
                     ListFields::Epilog => {
                         if epilog.is_some() {
-                            return Err(Error::duplicate_field("epilog"));
+                            return Err(A::Error::duplicate_field("epilog"));
                         }
                         epilog = Some(map.next_value_seed(CommentDe::of(build))?);
                     }
                 }
             }
             Ok((
-                prolog.ok_or_else(|| Error::missing_field("prolog"))?,
-                array.ok_or_else(|| Error::missing_field("array"))?,
-                epilog.ok_or_else(|| Error::missing_field("epilog"))?,
+                prolog.ok_or_else(|| A::Error::missing_field("prolog"))?,
+                array.ok_or_else(|| A::Error::missing_field("array"))?,
+                epilog.ok_or_else(|| A::Error::missing_field("epilog"))?,
             ))
         }
     }
@@ -206,7 +206,7 @@ seeded! {
             fields.end()
         }
         fn visit_seq() {
-            let err = || Error::invalid_length(4, &EntryDe::EXPECTING);
+            let err = || A::Error::invalid_length(4, &EntryDe::EXPECTING);
             Ok(Entry {
                 gap: seq.next_element()?.ok_or_else(err)?,
                 before: seq
@@ -214,7 +214,7 @@ seeded! {
                     .ok_or_else(err)?,
                 key: build
                     .intern(&seq.next_element::<String>()?.ok_or_else(err)?)
-                    .map_err(Error::custom)?
+                    .map_err(A::Error::custom)?
                     .into(),
                 item: seq.next_element_seed(ItemDe::of(build))?.ok_or_else(err)?,
             })
@@ -228,40 +228,40 @@ seeded! {
                 match field {
                     EntryFields::Gap => {
                         if gap.is_some() {
-                            return Err(Error::duplicate_field("gap"));
+                            return Err(A::Error::duplicate_field("gap"));
                         }
                         gap = Some(map.next_value()?);
                     }
                     EntryFields::Before => {
                         if before.is_some() {
-                            return Err(Error::duplicate_field("before"));
+                            return Err(A::Error::duplicate_field("before"));
                         }
                         before = Some(map.next_value_seed(CommentDe::of(build))?);
                     }
                     EntryFields::Key => {
                         if key.is_some() {
-                            return Err(Error::duplicate_field("key"));
+                            return Err(A::Error::duplicate_field("key"));
                         }
                         key = Some(
                             build
                                 .intern(&map.next_value::<String>()?)
-                                .map_err(Error::custom)?
+                                .map_err(A::Error::custom)?
                                 .into(),
                         );
                     }
                     EntryFields::Item => {
                         if item.is_some() {
-                            return Err(Error::duplicate_field("item"));
+                            return Err(A::Error::duplicate_field("item"));
                         }
                         item = Some(map.next_value_seed(ItemDe::of(build))?);
                     }
                 }
             }
             Ok(Entry {
-                gap: gap.ok_or_else(|| Error::missing_field("gap"))?,
-                before: before.ok_or_else(|| Error::missing_field("before"))?,
-                key: key.ok_or_else(|| Error::missing_field("key"))?,
-                item: item.ok_or_else(|| Error::missing_field("item"))?,
+                gap: gap.ok_or_else(|| A::Error::missing_field("gap"))?,
+                before: before.ok_or_else(|| A::Error::missing_field("before"))?,
+                key: key.ok_or_else(|| A::Error::missing_field("key"))?,
+                item: item.ok_or_else(|| A::Error::missing_field("item"))?,
             })
         }
     }
@@ -281,10 +281,10 @@ seeded! {
         fn visit_seq() {
             let mut count = 0usize;
             while let Some(entry) = seq.next_element_seed(EntryDe::of(build))? {
-                build.push_entry(entry).map_err(Error::custom)?;
+                build.push_entry(entry).map_err(A::Error::custom)?;
                 count += 1;
             }
-            Ok(build.finish_entries(count).map_err(Error::custom)?)
+            Ok(build.finish_entries(count).map_err(A::Error::custom)?)
         }
     }
 } // !seeded
@@ -309,32 +309,32 @@ seeded! {
                 match field {
                     DictFields::Prolog => {
                         if prolog.is_some() {
-                            return Err(Error::duplicate_field("prolog"));
+                            return Err(A::Error::duplicate_field("prolog"));
                         }
                         prolog = Some(map.next_value_seed(CommentDe::of(build))?);
                     }
                     DictFields::Array => {
                         if array.is_some() {
-                            return Err(Error::duplicate_field("array"));
+                            return Err(A::Error::duplicate_field("array"));
                         }
                         array = Some(map.next_value_seed(EntriesDe::of(build))?);
                     }
                     DictFields::Epilog => {
                         if epilog.is_some() {
-                            return Err(Error::duplicate_field("epilog"));
+                            return Err(A::Error::duplicate_field("epilog"));
                         }
                         epilog = Some(map.next_value_seed(CommentDe::of(build))?);
                     }
                 }
             }
             Ok((
-                prolog.ok_or_else(|| Error::missing_field("prolog"))?,
-                array.ok_or_else(|| Error::missing_field("array"))?,
-                epilog.ok_or_else(|| Error::missing_field("epilog"))?,
+                prolog.ok_or_else(|| A::Error::missing_field("prolog"))?,
+                array.ok_or_else(|| A::Error::missing_field("array"))?,
+                epilog.ok_or_else(|| A::Error::missing_field("epilog"))?,
             ))
         }
         fn visit_seq() {
-            let err = || Error::invalid_length(3, &DictDe::EXPECTING);
+            let err = || A::Error::invalid_length(3, &DictDe::EXPECTING);
             Ok((
                 seq.next_element_seed(CommentDe::of(build))?
                     .ok_or_else(err)?,
@@ -366,32 +366,32 @@ seeded! {
                 match field {
                     FileFields::Hashbang => {
                         if hashbang.is_some() {
-                            return Err(Error::duplicate_field("hashbang"));
+                            return Err(A::Error::duplicate_field("hashbang"));
                         }
                         hashbang = Some(map.next_value_seed(CommentDe::of(build))?);
                     }
                     FileFields::Prolog => {
                         if prolog.is_some() {
-                            return Err(Error::duplicate_field("prolog"));
+                            return Err(A::Error::duplicate_field("prolog"));
                         }
                         prolog = Some(map.next_value_seed(CommentDe::of(build))?);
                     }
                     FileFields::Array => {
                         if array.is_some() {
-                            return Err(Error::duplicate_field("array"));
+                            return Err(A::Error::duplicate_field("array"));
                         }
                         array = Some(map.next_value_seed(EntriesDe::of(build))?);
                     }
                 }
             }
             Ok(File {
-                hashbang: hashbang.ok_or_else(|| Error::missing_field("hashbang"))?,
-                prolog: prolog.ok_or_else(|| Error::missing_field("prolog"))?,
-                cells: array.ok_or_else(|| Error::missing_field("array"))?,
+                hashbang: hashbang.ok_or_else(|| A::Error::missing_field("hashbang"))?,
+                prolog: prolog.ok_or_else(|| A::Error::missing_field("prolog"))?,
+                cells: array.ok_or_else(|| A::Error::missing_field("array"))?,
             })
         }
         fn visit_seq() {
-            let err = || Error::invalid_length(3, &FileDe::EXPECTING);
+            let err = || A::Error::invalid_length(3, &FileDe::EXPECTING);
             Ok(File {
                 hashbang: seq
                     .next_element_seed(CommentDe::of(build))?
@@ -409,8 +409,8 @@ seeded! {
 
 /// serialize all fields, avoiding "skip_serializing_if"
 pub struct Verbose<'a>(pub File<'a>);
-impl<'a> Serialize for Verbose<'a> {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+impl<'a> ::serde::ser::Serialize for Verbose<'a> {
+    fn serialize<S: ::serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let Verbose(this) = self;
         FileSer(*this).serialize(s)
     }

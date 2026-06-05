@@ -1,5 +1,8 @@
 #![allow(missing_docs)]
 
+#[cfg(all(feature = "bumpalo", feature = "serde"))]
+use std::borrow::Cow;
+
 use tindalwic::parse::Parse;
 use tindalwic::{Comment, Entry, File, Item, arena, json, path};
 
@@ -49,7 +52,7 @@ mod alloc_tests {
         arena! {
             let mut arena = <1dict>;
         }
-        let parsed = arena.panic(&encoded);
+        let parsed = arena.panic_if_error(&encoded);
         assert!(parsed.hashbang.is_none());
         assert_eq!(
             Vec::from_iter(parsed.prolog.unwrap().value.lines()),
@@ -80,7 +83,7 @@ fn text_stretch_bug() {
     arena! {
         let mut arena = <1dict,1list>;
     }
-    let file = arena.panic(content);
+    let file = arena.panic_if_error(content);
     assert_eq!(file.to_string(), content);
 }
 
@@ -103,18 +106,18 @@ fn multi_line_key() {
         let mut arena = <2dict>;
     }
     let data = "@one\n\ttwo\n<>\n\tv\n";
-    let file = arena.panic(data);
+    let file = arena.panic_if_error(data);
     assert_eq!(file.to_string(), data);
     let report = &mut |err| {
         print!("{err}");
         tindalwic::parse::Reported::Continue
     };
-    assert!(arena.report("@", report).is_none());
-    assert!(arena.report("@k", report).is_none());
-    assert!(arena.report("@k\n", report).is_none());
-    assert!(arena.report("@k\n<", report).is_none());
-    assert!(arena.report("@k\n<>", report).is_some());
-    assert!(arena.report("@k\n<x>", report).is_none());
+    assert!(arena.report_errors("@", report).is_none());
+    assert!(arena.report_errors("@k", report).is_none());
+    assert!(arena.report_errors("@k\n", report).is_none());
+    assert!(arena.report_errors("@k\n<", report).is_none());
+    assert!(arena.report_errors("@k\n<>", report).is_some());
+    assert!(arena.report_errors("@k\n<x>", report).is_none());
 }
 
 #[test]
@@ -250,6 +253,30 @@ fn change_structure() {
             .to_string(),
         "[k]\n\t{}\n\t\tp=v\n\t\t#b\n"
     )
+}
+
+#[derive(::serde::Deserialize, PartialEq, Debug)]
+#[cfg(all(feature = "bumpalo", feature = "serde"))]
+struct S<'a> {
+    x: Cow<'a, str>,
+}
+#[test]
+#[cfg(all(feature = "bumpalo", feature = "serde"))]
+fn deserializer() {
+    use serde_json::{Value, json};
+    use tindalwic::serde::Neutered;
+    assert_eq!(
+        Neutered::from_str::<Value>("k=v").unwrap(),
+        json!({"k": "v"})
+    );
+    assert_eq!(
+        Neutered::from_str::<Value>("[xs]\n\ta\n\tb").unwrap(),
+        json!({"xs": ["a", "b"]})
+    );
+    assert_eq!(
+        Neutered::from_str::<S>("x=hi").unwrap(),
+        S { x: "hi".into() }
+    );
 }
 
 /*

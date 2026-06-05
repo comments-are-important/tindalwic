@@ -9,9 +9,7 @@ pub use neutered::Neutered;
 pub use verbose::Verbose;
 
 use crate::{Comment, Value};
-use serde::Deserialize;
-use serde::de::DeserializeSeed;
-use serde::de::Error;
+use serde::de::DeserializeSeed as _;
 
 use tindalwic_macros::serialize_deserialize_seed_visit as seeded;
 // normally rustfmt would skip over everything inside the macro invocation,
@@ -25,6 +23,10 @@ seeded! {
     #[expecting = "a string value"]
     #[deserialize_str]
     impl Value {
+        fn offer() {
+            // arena Value instances don't live long enough to visit_borrowed_str
+            v.visit_string(this.joined())
+        }
         fn serialize() {
             if let Some(slice) = this.verbatim(0) {
                 s.serialize_str(slice)
@@ -33,7 +35,7 @@ seeded! {
             }
         }
         fn visit_str() {
-            Ok(build.intern(v).map_err(Error::custom)?.into())
+            Ok(build.intern(v).map_err(E::custom)?.into())
         }
     }
 } // !seeded
@@ -59,35 +61,31 @@ seeded! {
     }
 } // !seeded
 
-#[derive(Deserialize)]
+#[derive(serde::Deserialize)]
 #[serde(variant_identifier)]
-#[allow(dead_code)]
 enum ItemVariants {
     Text,
     List,
     Dict,
 }
 
-#[derive(Deserialize)]
+#[derive(serde::Deserialize)]
 #[serde(field_identifier, rename_all = "lowercase")]
-#[allow(dead_code)]
 enum TextFields {
     Value,
     Epilog,
 }
 
-#[derive(Deserialize)]
+#[derive(serde::Deserialize)]
 #[serde(field_identifier, rename_all = "lowercase")]
-#[allow(dead_code)]
 enum ListFields {
     Prolog,
     Array,
     Epilog,
 }
 
-#[derive(Deserialize)]
+#[derive(serde::Deserialize)]
 #[serde(field_identifier, rename_all = "lowercase")]
-#[allow(dead_code)]
 enum EntryFields {
     Gap,
     Before,
@@ -95,20 +93,47 @@ enum EntryFields {
     Item,
 }
 
-#[derive(Deserialize)]
+#[derive(serde::Deserialize)]
 #[serde(field_identifier, rename_all = "lowercase")]
-#[allow(dead_code)]
 enum DictFields {
     Prolog,
     Array,
     Epilog,
 }
 
-#[derive(Deserialize)]
+#[derive(serde::Deserialize)]
 #[serde(field_identifier, rename_all = "lowercase")]
-#[allow(dead_code)]
 enum FileFields {
     Hashbang,
     Prolog,
     Array,
+}
+
+pub mod err {
+    //! the concrete Error use by our serde data format
+    extern crate alloc;
+    use alloc::string::{String, ToString};
+    use core::fmt::{self, Display};
+    /// payload is just a String message
+    #[derive(Debug)]
+    pub struct Error(String);
+    /// specialized to Err([Error])
+    pub type Result<T> = core::result::Result<T, Error>;
+
+    impl Display for Error {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str(&self.0)
+        }
+    }
+    impl core::error::Error for Error {}
+    impl serde::ser::Error for Error {
+        fn custom<T: Display>(m: T) -> Self {
+            Error(m.to_string())
+        }
+    }
+    impl serde::de::Error for Error {
+        fn custom<T: Display>(m: T) -> Self {
+            Error(m.to_string())
+        }
+    }
 }

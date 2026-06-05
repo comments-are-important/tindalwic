@@ -1,17 +1,29 @@
 extern crate alloc;
 
 use super::{ValueDe, ValueSer, seeded};
-use crate::{Entry, File, Item};
+use crate::{Entries, Entry, File, Item, Items};
+use ::serde::ser::{SerializeMap as _, SerializeSeq as _};
 use alloc::format;
 use alloc::string::{String, ToString};
 use core::cell::Cell;
-use serde::de::Error;
-use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
+use serde::de::Error as _;
+use serde::de::value::{MapDeserializer, SeqDeserializer};
 
 seeded! {
     #[expecting = "a neutered item (simple value, list, or dictionary)"]
     #[deserialize_any]
     impl Item {
+        fn offer() {
+            match this {
+                Item::Text { value, .. } => ValueSer(value).deserialize_any(v),
+                Item::List { cells, .. } => {
+                    v.visit_seq(SeqDeserializer::new(ItemsSer::iter(cells)))
+                }
+                Item::Dict { cells, .. } => {
+                    v.visit_map(MapDeserializer::new(EntriesSer::iter(cells)))
+                }
+            }
+        }
         fn serialize() {
             match this {
                 Item::Text { value, .. } => ValueSer(*value).serialize(s),
@@ -25,68 +37,66 @@ seeded! {
         }
         fn visit_i8() {
             Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
             ))
         }
         fn visit_i16() {
             Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
             ))
         }
         fn visit_i32() {
             Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
             ))
         }
         fn visit_i64() {
             Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
             ))
         }
         fn visit_i128() {
             Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
             ))
         }
         fn visit_u8() {
             Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
             ))
         }
         fn visit_u16() {
             Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
             ))
         }
         fn visit_u32() {
             Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
             ))
         }
         fn visit_u64() {
             Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
             ))
         }
         fn visit_u128() {
             Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
             ))
         }
         fn visit_f32() {
             Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
             ))
         }
         fn visit_f64() {
             Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(Error::custom)?,
+                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
             ))
         }
         fn visit_char() {
-            Ok(Item::text(
-                build.intern(&v.to_string()).map_err(Error::custom)?,
-            ))
+            Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
         }
         fn visit_str() {
             // defaults for `_borrowed_str` and `_string` arrive here
@@ -101,10 +111,10 @@ seeded! {
             if v.is_ascii() {
                 // SAFETY: Verified it is ASCII.
                 let value = unsafe { str::from_utf8_unchecked(v) };
-                Ok(Item::text(build.intern(value).map_err(Error::custom)?))
+                Ok(Item::text(build.intern(value).map_err(E::custom)?))
             } else {
                 let value: String = v.iter().map(|&b| char::from(b)).collect();
-                Ok(Item::text(build.intern(&value).map_err(Error::custom)?))
+                Ok(Item::text(build.intern(&value).map_err(E::custom)?))
             }
         }
         fn visit_unit() {
@@ -137,13 +147,18 @@ seeded! {
         fn visit_seq() {
             let mut count = 0usize;
             while let Some(item) = seq.next_element_seed(ItemDe::of(build))? {
-                build.push_item(item).map_err(Error::custom)?;
+                build.push_item(item).map_err(A::Error::custom)?;
                 count += 1;
             }
-            build.finish_items(count).map_err(Error::custom)
+            build.finish_items(count).map_err(A::Error::custom)
         }
     }
 } // !seeded
+impl<'a> ItemsSer<'a> {
+    fn iter(cells: Items<'a>) -> impl Iterator<Item = ItemSer<'a>> {
+        cells.iter().map(|cell| ItemSer(cell.get()))
+    }
+}
 
 seeded! {
     #[expecting = "a dictionary (string keys, neutered item values)"]
@@ -166,24 +181,35 @@ seeded! {
                     key: if let Some(slice) = key.verbatim(0) {
                         slice
                     } else {
-                        build.intern(&key.joined()).map_err(Error::custom)?
+                        build.intern(&key.joined()).map_err(A::Error::custom)?
                     }
                     .into(),
                     item,
                     ..Default::default()
                 };
-                build.push_entry(entry).map_err(Error::custom)?;
+                build.push_entry(entry).map_err(A::Error::custom)?;
                 count += 1;
             }
-            build.finish_entries(count).map_err(Error::custom)
+            build.finish_entries(count).map_err(A::Error::custom)
         }
     }
 } // !seeded
+impl<'a> EntriesSer<'a> {
+    fn iter(cells: Entries<'a>) -> impl Iterator<Item = (ValueSer<'a>, ItemSer<'a>)> {
+        cells.iter().map(|cell| {
+            let Entry { key, item, .. } = cell.get();
+            (ValueSer(key), ItemSer(item))
+        })
+    }
+}
 
 seeded! {
     #[expecting = "a file (string keys, neutered item values)"]
     #[deserialize_map]
     impl File {
+        fn offer() {
+            v.visit_map(MapDeserializer::new(EntriesSer::iter(this.cells)))
+        }
         fn serialize() {
             EntriesSer(this.cells).serialize(s)
         }
@@ -200,8 +226,8 @@ seeded! {
 
 /// serialize to a format that can't remember comments.
 pub struct Neutered<'a>(pub File<'a>);
-impl<'a> Serialize for Neutered<'a> {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+impl<'a> ::serde::ser::Serialize for Neutered<'a> {
+    fn serialize<S: ::serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let Neutered(this) = self;
         FileSer(*this).serialize(s)
     }
@@ -216,5 +242,32 @@ impl<'a> Neutered<'a> {
         'a: 'b,
     {
         FileDe::of(parse.builder())
+    }
+}
+#[cfg(feature = "bumpalo")]
+mod bumpalo {
+    use super::{FileSer, Neutered};
+    use crate::serde::err::{Error, Result};
+    use serde::de::Error as _;
+    impl<'a> Neutered<'a> {
+        /// unpack tindalwic data into any type that can visit {map,seq,str}
+        pub fn from_str<'de, T: serde::Deserialize<'de>>(s: &'de str) -> Result<T> {
+            let bump = bumpalo::Bump::new();
+            let mut arena = crate::bumpalo::Arena::new(&bump);
+            let file = arena
+                .describe_errors(s, usize::MAX)
+                .map_err(Error::custom)?;
+            let value = T::deserialize(FileSer(file))?;
+            Ok(value)
+        }
+        // pub fn to_string<T: ?Sized + Serialize>(value: &T) -> OurResult<String> {
+        //     let bump = bumpalo::Bump::new();
+        //     let mut arena = crate::bumpalo::Arena::new(&bump);
+        //     value.serialize(serializer)
+        //     let file = Neutered::seed(&mut arena).deserialize(deserializer)
+        //     let mut buf = String::new();
+        //     to_writer(&mut buf, value)?;
+        //     Ok(buf)
+        // }
     }
 }

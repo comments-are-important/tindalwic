@@ -102,7 +102,7 @@ pub trait Parse<'a> {
         Input::parse(self.builder(), content, report)
     }
     /// call the parser on the provided content, panic if the content isn't legit.
-    fn panic_if_error(&mut self, content: &'a str) -> File<'a> {
+    fn panic_first_error(&mut self, content: &'a str) -> File<'a> {
         self.report_errors(content, &mut |error| panic!("{error}"))
             .expect("panic should have already happened in report")
     }
@@ -591,7 +591,7 @@ mod tests {
             $crate = crate;
             let mut arena = <10dict,10list>;
         }
-        let file = arena.panic_if_error("");
+        let file = arena.panic_first_error("");
         assert!(!arena.completed().is_some());
         assert!(file.hashbang.is_none());
         assert!(file.prolog.is_none());
@@ -604,7 +604,7 @@ mod tests {
             $crate = crate;
             let mut arena = <1dict>;
         }
-        let file = arena.panic_if_error("k=v");
+        let file = arena.panic_first_error("k=v");
         assert!(arena.completed().is_some());
         assert!(file.hashbang.is_none());
         assert!(file.prolog.is_none());
@@ -624,7 +624,7 @@ mod tests {
             $crate = crate;
             let mut arena = <3list,1dict>;
         }
-        let file = arena.panic_if_error("[k]\n\t1\n\t2\n\t3");
+        let file = arena.panic_first_error("[k]\n\t1\n\t2\n\t3");
         assert!(arena.completed().is_some());
         assert_eq!(file.cells.len(), 1);
         let key: Value<'_> = "k".into();
@@ -654,7 +654,7 @@ mod tests {
             $crate = crate;
             let mut arena = <2dict>;
         }
-        let file = arena.panic_if_error("{z}\n\t<k>\n\t\tv");
+        let file = arena.panic_first_error("{z}\n\t<k>\n\t\tv");
         assert!(arena.completed().is_some());
         use crate::walk::*;
 

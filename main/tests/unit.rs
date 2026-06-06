@@ -49,7 +49,7 @@ mod alloc_tests {
         arena! {
             let mut arena = <1dict>;
         }
-        let parsed = arena.panic_if_error(&encoded);
+        let parsed = arena.panic_first_error(&encoded);
         assert!(parsed.hashbang.is_none());
         assert_eq!(
             Vec::from_iter(parsed.prolog.unwrap().value.lines()),
@@ -80,7 +80,7 @@ fn text_stretch_bug() {
     arena! {
         let mut arena = <1dict,1list>;
     }
-    let file = arena.panic_if_error(content);
+    let file = arena.panic_first_error(content);
     assert_eq!(file.to_string(), content);
 }
 
@@ -103,7 +103,7 @@ fn multi_line_key() {
         let mut arena = <2dict>;
     }
     let data = "@one\n\ttwo\n<>\n\tv\n";
-    let file = arena.panic_if_error(data);
+    let file = arena.panic_first_error(data);
     assert_eq!(file.to_string(), data);
     let report = &mut |err| {
         print!("{err}");
@@ -258,23 +258,24 @@ mod borrow {
     #[derive(::serde::Deserialize, PartialEq, Debug)]
     struct S<'a> {
         x: &'a str,
+        b: bool,
     }
 
     #[test]
     fn deserializer() {
         use serde_json::{Value, json};
-        use tindalwic::serde::Neutered;
+        use tindalwic::serde::format::from_str;
+        assert_eq!(from_str::<Value>("k=v").unwrap(), json!({"k": "v"}));
         assert_eq!(
-            Neutered::from_str::<Value>("k=v").unwrap(),
-            json!({"k": "v"})
-        );
-        assert_eq!(
-            Neutered::from_str::<Value>("[xs]\n\ta\n\tb").unwrap(),
+            from_str::<Value>("[xs]\n\ta\n\tb").unwrap(),
             json!({"xs": ["a", "b"]})
         );
         assert_eq!(
-            Neutered::from_str::<S>("x=hi").unwrap(),
-            S { x: "hi".into() }
+            from_str::<S>("x=hi\nb=true").unwrap(),
+            S {
+                x: "hi".into(),
+                b: true
+            }
         );
     }
 }

@@ -129,7 +129,7 @@ mod tests {
     fn parse_alloc() {
         let bump = Bump::new();
         let mut arena = Arena::new(&bump);
-        let file = arena.panic_if_error("k=v\n");
+        let file = arena.panic_first_error("k=v\n");
         assert_eq!(file.to_string(), "k=v\n");
     }
     #[test]

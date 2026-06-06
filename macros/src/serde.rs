@@ -40,8 +40,6 @@ pub(super) struct SerDe {
     value: TokenStream,
     expecting: TokenStream,
     deserialize: TokenStream,
-    //accept: Option<Body>,
-    offer: Option<Body>,
     serialize: Body,
     visitors: Vec<Method>,
 }
@@ -122,8 +120,6 @@ impl Parse for SerDe {
         let Some(deserialize) = deserialize else {
             return Err(Error::new_spanned(ii.impl_token, "need: #[deserialize_*]"));
         };
-        // let mut accept = None;
-        let mut offer = None;
         let mut serialize = None;
         let mut visitors = Vec::new();
         for item in &ii.items {
@@ -131,18 +127,6 @@ impl Parse for SerDe {
                 return Err(Error::new_spanned(item, "not allowed"));
             };
             match &f.sig.ident.to_string()[..] {
-                // "accept" => {
-                //     if accept.is_some() {
-                //         return Err(Error::new_spanned(f, "duplicate"));
-                //     }
-                //     accept = Some(SerDe::validate_func(&f)?.stmts);
-                // }
-                "offer" => {
-                    if offer.is_some() {
-                        return Err(Error::new_spanned(f, "duplicate"));
-                    }
-                    offer = Some(Body(SerDe::validate_func(&f)?.stmts));
-                }
                 "serialize" => {
                     if serialize.is_some() {
                         return Err(Error::new_spanned(f, "duplicate"));
@@ -174,8 +158,6 @@ impl Parse for SerDe {
             value,
             expecting,
             deserialize,
-            //accept,
-            offer,
             serialize,
             visitors,
         });
@@ -298,11 +280,8 @@ impl ToTokens for SerDe {
             value,
             expecting,
             deserialize,
-            //accept,
-            offer,
             serialize,
             visitors,
-            ..
         } = self;
         let tindalwic = tindalwic();
         let kind_slice = &kind.to_string()[..];
@@ -336,29 +315,5 @@ impl ToTokens for SerDe {
                 #visitors
             }
         });
-        if let Some(offer) = offer {
-            let off = Ident::new(&format!("{kind_slice}Off"), Span::call_site());
-            tokens.extend(quote! {
-                struct #off <'de, 'a>(&'de str, #value);
-                impl<'de, 'a> ::serde::de::IntoDeserializer<'de, #tindalwic::serde::err::Error> for #off<'de, 'a> {
-                    type Deserializer = Self;
-                    fn into_deserializer(self) -> Self::Deserializer {
-                        self
-                    }
-                }
-                impl<'de, 'a> ::serde::Deserializer<'de> for #off<'de, 'a> {
-                    type Error = #tindalwic::serde::err::Error;
-                    fn deserialize_any<V: ::serde::de::Visitor<'de>>(self, v: V) -> Result<V::Value, Self::Error> {
-                        let #off(input, this) = self;
-                        #offer
-                    }
-                    serde::forward_to_deserialize_any! {
-                        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
-                        bytes byte_buf option unit unit_struct newtype_struct seq tuple
-                        tuple_struct map struct enum identifier ignored_any
-                    }
-                }
-            });
-        }
     }
 }

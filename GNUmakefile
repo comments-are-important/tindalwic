@@ -152,8 +152,14 @@ msrv: must-run-inside
 
 ghraw: must-run-outside
 	PROJECT='https://raw.githubusercontent.com/comments-are-important/tindalwic'
-	BRANCH='refs/heads/main'
-	git ls-tree -r --format "$$PROJECT/$$BRANCH/%(path)" HEAD
+	COMMIT="$$(git rev-parse HEAD)"
+	if git merge-base --is-ancestor "$$COMMIT" origin/main
+	then
+	  git log -1
+	  git ls-tree -r --format "$$PROJECT/$$COMMIT/%(path)" HEAD
+	else
+	  echo "HEAD is not known to be in origin/main... push (maybe fetch too)"
+	fi
 .PHONY: ghraw
 
 # =====================================================================================

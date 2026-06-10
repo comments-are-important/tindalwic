@@ -150,7 +150,7 @@ msrv: must-run-inside
 	echo ====== webapp ; cargo msrv verify --path webapp
 .PHONY: msrv
 
-ghraw: must-run-outside
+ghraw: must-run-outside ;@
 	PROJECT='https://raw.githubusercontent.com/comments-are-important/tindalwic'
 	COMMIT="$$(git rev-parse HEAD)"
 	if git merge-base --is-ancestor "$$COMMIT" origin/main

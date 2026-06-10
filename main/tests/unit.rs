@@ -334,7 +334,37 @@ mod data_format {
     #[test]
     fn enum_newtype() {
         type M<'a> = Map<&'a str, Owned>;
-        let data: M = map!("data" => Owned::Bool(true));
+        let data: M = map!("data" => Owned::String("hello".to_owned()));
+        let value = serde_json::to_value(&data).unwrap();
+        let json = serde_json::to_string(&value).unwrap();
+        let json: M = serde_json::from_str(&json).unwrap();
+        assert_eq!(&data, &json);
+        let bump = Bump::new();
+        let mut arena = Arena::new(&bump);
+        let file = Neutered::seed(&mut arena).deserialize(value).unwrap();
+        let file = file.to_string();
+        let file: M = from_tindalwic(&file).unwrap();
+        assert_eq!(&data, &file);
+    }
+    #[test]
+    fn enum_tuple() {
+        type M<'a> = Map<&'a str, Enum<bool, u8>>;
+        let data: M = map!("data" => Enum::Tuple(true, 9));
+        let value = serde_json::to_value(&data).unwrap();
+        let json = serde_json::to_string(&value).unwrap();
+        let json: M = serde_json::from_str(&json).unwrap();
+        assert_eq!(&data, &json);
+        let bump = Bump::new();
+        let mut arena = Arena::new(&bump);
+        let file = Neutered::seed(&mut arena).deserialize(value).unwrap();
+        let file = file.to_string();
+        let file: M = from_tindalwic(&file).unwrap();
+        assert_eq!(&data, &file);
+    }
+    #[test]
+    fn enum_struct() {
+        type M<'a> = Map<&'a str, Enum<i16, f64>>;
+        let data: M = map!("data" => Enum::Struct{ one: 512, two: 3.14 });
         let value = serde_json::to_value(&data).unwrap();
         let json = serde_json::to_string(&value).unwrap();
         let json: M = serde_json::from_str(&json).unwrap();

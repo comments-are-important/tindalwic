@@ -109,10 +109,10 @@ enum FileFields {
 pub mod format {
     //! our serde data format
     extern crate alloc;
-    use crate::{Entry, Item};
+    use crate::{Entry, Item, Value};
     use ::serde::Deserializer;
     use ::serde::de::value::{MapDeserializer, SeqDeserializer};
-    use ::serde::de::{DeserializeSeed, EnumAccess, IntoDeserializer, VariantAccess, Visitor};
+    use ::serde::de::{DeserializeSeed, IntoDeserializer, Visitor};
     use ::serde::de::{Error as _, Unexpected};
     use alloc::string::{String, ToString};
     use core::fmt::{self, Display};
@@ -146,11 +146,17 @@ pub mod format {
         item: Item<'a>,
     }
     impl<'de, 'a> ItemDe<'de, 'a> {
-        fn with(&self, item: Item<'a>) -> Self {
+        fn with_item(&self, item: Item<'a>) -> Self {
             ItemDe {
                 encoded: self.encoded,
                 item,
             }
+        }
+        fn with_text(&self, value: Value<'a>) -> Self {
+            self.with_item(Item::Text {
+                value,
+                epilog: None,
+            })
         }
         fn parse<T: core::str::FromStr>(&self) -> Option<T> {
             if let Item::Text { value, .. } = self.item {
@@ -195,16 +201,12 @@ pub mod format {
                     }
                 }
                 Item::List { cells, .. } => v.visit_seq(SeqDeserializer::new(
-                    cells.iter().map(|cell| self.with(cell.get())),
+                    cells.iter().map(|cell| self.with_item(cell.get())),
                 )),
                 Item::Dict { cells, .. } => {
                     v.visit_map(MapDeserializer::new(cells.iter().map(|cell| {
                         let Entry { key, item, .. } = cell.get();
-                        let text = Item::Text {
-                            value: key,
-                            epilog: None,
-                        };
-                        (self.with(text), self.with(item))
+                        (self.with_text(key), self.with_item(item))
                     })))
                 }
             }
@@ -426,9 +428,20 @@ pub mod format {
             v: V,
         ) -> Result<V::Value> {
             match self.item {
-                Item::Text { .. } => v.visit_enum(EnumUnit(self)),
-                Item::List { .. } => Err(Error::custom("want enum, have list")),
-                Item::Dict { .. } => v.visit_enum(EnumOther(self)),
+                Item::Text { value, .. } => v.visit_enum(EnumAccess {
+                    de: &self,
+                    name: value,
+                    payload: None,
+                }),
+                Item::Dict { cells: [entry], .. } => {
+                    let Entry { key, item, .. } = entry.get();
+                    v.visit_enum(EnumAccess {
+                        de: &self,
+                        name: key,
+                        payload: Some(item),
+                    })
+                }
+                _ => self.deserialize_any(v),
             }
         }
 
@@ -440,40 +453,76 @@ pub mod format {
             self.deserialize_any(v)
         }
     }
-    struct EnumUnit<'de, 'a>(ItemDe<'de, 'a>);
-    impl<'de, 'a> EnumAccess<'de> for EnumUnit<'de, 'a> {
+    struct EnumAccess<'de, 'a, 'i> {
+        de: &'i ItemDe<'de, 'a>, // the container of this encoded enum
+        name: crate::Value<'a>,
+        payload: Option<crate::Item<'a>>,
+    }
+    impl<'de, 'a, 'i> ::serde::de::EnumAccess<'de> for EnumAccess<'de, 'a, 'i> {
         type Error = Error;
-        type Variant = Self;
+        type Variant = VariantAccess<'de, 'a, 'i>;
 
         fn variant_seed<V: DeserializeSeed<'de>>(
             self,
             seed: V,
         ) -> Result<(V::Value, Self::Variant)> {
-            let EnumUnit(de) = self;
-            let variant = seed.deserialize(de);
-            Ok((variant?, self))
+            let EnumAccess { de, name, payload } = self;
+            Ok((
+                seed.deserialize(self.de.with_text(name))?,
+                VariantAccess { de, payload },
+            ))
         }
     }
-    impl<'de, 'a> VariantAccess<'de> for EnumUnit<'de, 'a> {
-        #![allow(unused_variables)]
+    struct VariantAccess<'de, 'a, 'i> {
+        de: &'i ItemDe<'de, 'a>, // the container of this encoded enum
+        payload: Option<crate::Item<'a>>,
+    }
+    impl<'de, 'a, 'i> ::serde::de::VariantAccess<'de> for VariantAccess<'de, 'a, 'i> {
         type Error = Error;
 
         fn unit_variant(self) -> Result<()> {
-            Ok(())
+            if let Some(item) = self.payload {
+                match item {
+                    Item::Text { value, .. } => {
+                        if value.is_empty() {
+                            Ok(())
+                        } else {
+                            // could Unexpected::Str but that needs borrowed slice
+                            // TODO try out this generic message and see if it is good enough
+                            Err(Error::invalid_type(
+                                Unexpected::Other("text"),
+                                &"unit variant",
+                            ))
+                        }
+                    }
+                    Item::List { .. } => Err(Error::invalid_type(Unexpected::Seq, &"unit variant")),
+                    Item::Dict { .. } => Err(Error::invalid_type(Unexpected::Map, &"unit variant")),
+                }
+            } else {
+                Ok(())
+            }
         }
 
         fn newtype_variant_seed<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value> {
-            Err(Error::invalid_type(
-                Unexpected::UnitVariant,
-                &"newtype variant",
-            ))
+            if let Some(item) = self.payload {
+                seed.deserialize(self.de.with_item(item))
+            } else {
+                Err(Error::invalid_type(
+                    Unexpected::UnitVariant,
+                    &"newtype variant",
+                ))
+            }
         }
 
         fn tuple_variant<V: Visitor<'de>>(self, _len: usize, v: V) -> Result<V::Value> {
-            Err(Error::invalid_type(
-                Unexpected::UnitVariant,
-                &"tuple variant",
-            ))
+            if let Some(item) = self.payload {
+                self.de.with_item(item).deserialize_seq(v)
+            } else {
+                Err(Error::invalid_type(
+                    Unexpected::UnitVariant,
+                    &"tuple variant",
+                ))
+            }
         }
 
         fn struct_variant<V: Visitor<'de>>(
@@ -481,47 +530,14 @@ pub mod format {
             fields: &'static [&'static str],
             v: V,
         ) -> Result<V::Value> {
-            Err(Error::invalid_type(
-                Unexpected::UnitVariant,
-                &"struct variant",
-            ))
-        }
-    }
-    struct EnumOther<'de, 'a>(ItemDe<'de, 'a>);
-    impl<'de, 'a> EnumAccess<'de> for EnumOther<'de, 'a> {
-        type Error = Error;
-        type Variant = Self;
-
-        fn variant_seed<V: DeserializeSeed<'de>>(
-            self,
-            seed: V,
-        ) -> Result<(V::Value, Self::Variant)> {
-            let EnumOther(de) = self;
-            let variant = seed.deserialize(de);
-            Ok((variant?, self))
-        }
-    }
-    impl<'de, 'a> VariantAccess<'de> for EnumOther<'de, 'a> {
-        type Error = Error;
-
-        fn unit_variant(self) -> Result<()> {
-            ::serde::de::Deserialize::deserialize(self.0)
-        }
-
-        fn newtype_variant_seed<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value> {
-            seed.deserialize(self.0)
-        }
-
-        fn tuple_variant<V: Visitor<'de>>(self, _len: usize, v: V) -> Result<V::Value> {
-            ::serde::de::Deserializer::deserialize_seq(self.0, v)
-        }
-
-        fn struct_variant<V: Visitor<'de>>(
-            self,
-            fields: &'static [&'static str],
-            v: V,
-        ) -> Result<V::Value> {
-            ::serde::de::Deserializer::deserialize_struct(self.0, "", fields, v)
+            if let Some(item) = self.payload {
+                self.de.with_item(item).deserialize_struct("", fields, v)
+            } else {
+                Err(Error::invalid_type(
+                    Unexpected::UnitVariant,
+                    &"struct variant",
+                ))
+            }
         }
     }
     /// unpack tindalwic data into any type that can visit {map,seq,str}

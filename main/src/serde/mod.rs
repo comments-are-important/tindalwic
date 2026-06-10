@@ -112,7 +112,8 @@ pub mod format {
     use crate::{Entry, Item};
     use ::serde::Deserializer;
     use ::serde::de::value::{MapDeserializer, SeqDeserializer};
-    use ::serde::de::{Error as _, IntoDeserializer, Visitor};
+    use ::serde::de::{DeserializeSeed, EnumAccess, IntoDeserializer, VariantAccess, Visitor};
+    use ::serde::de::{Error as _, Unexpected};
     use alloc::string::{String, ToString};
     use core::fmt::{self, Display};
 
@@ -139,6 +140,7 @@ pub mod format {
         }
     }
 
+    #[derive(Copy, Clone)]
     struct ItemDe<'de, 'a> {
         encoded: &'de str,
         item: Item<'a>,
@@ -423,7 +425,11 @@ pub mod format {
             _variants: &'static [&'static str],
             v: V,
         ) -> Result<V::Value> {
-            self.deserialize_any(v)
+            match self.item {
+                Item::Text { .. } => v.visit_enum(EnumUnit(self)),
+                Item::List { .. } => Err(Error::custom("want enum, have list")),
+                Item::Dict { .. } => v.visit_enum(EnumOther(self)),
+            }
         }
 
         fn deserialize_identifier<V: Visitor<'de>>(self, v: V) -> Result<V::Value> {
@@ -432,6 +438,90 @@ pub mod format {
 
         fn deserialize_ignored_any<V: Visitor<'de>>(self, v: V) -> Result<V::Value> {
             self.deserialize_any(v)
+        }
+    }
+    struct EnumUnit<'de, 'a>(ItemDe<'de, 'a>);
+    impl<'de, 'a> EnumAccess<'de> for EnumUnit<'de, 'a> {
+        type Error = Error;
+        type Variant = Self;
+
+        fn variant_seed<V: DeserializeSeed<'de>>(
+            self,
+            seed: V,
+        ) -> Result<(V::Value, Self::Variant)> {
+            let EnumUnit(de) = self;
+            let variant = seed.deserialize(de);
+            Ok((variant?, self))
+        }
+    }
+    impl<'de, 'a> VariantAccess<'de> for EnumUnit<'de, 'a> {
+        #![allow(unused_variables)]
+        type Error = Error;
+
+        fn unit_variant(self) -> Result<()> {
+            Ok(())
+        }
+
+        fn newtype_variant_seed<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value> {
+            Err(Error::invalid_type(
+                Unexpected::UnitVariant,
+                &"newtype variant",
+            ))
+        }
+
+        fn tuple_variant<V: Visitor<'de>>(self, _len: usize, v: V) -> Result<V::Value> {
+            Err(Error::invalid_type(
+                Unexpected::UnitVariant,
+                &"tuple variant",
+            ))
+        }
+
+        fn struct_variant<V: Visitor<'de>>(
+            self,
+            fields: &'static [&'static str],
+            v: V,
+        ) -> Result<V::Value> {
+            Err(Error::invalid_type(
+                Unexpected::UnitVariant,
+                &"struct variant",
+            ))
+        }
+    }
+    struct EnumOther<'de, 'a>(ItemDe<'de, 'a>);
+    impl<'de, 'a> EnumAccess<'de> for EnumOther<'de, 'a> {
+        type Error = Error;
+        type Variant = Self;
+
+        fn variant_seed<V: DeserializeSeed<'de>>(
+            self,
+            seed: V,
+        ) -> Result<(V::Value, Self::Variant)> {
+            let EnumOther(de) = self;
+            let variant = seed.deserialize(de);
+            Ok((variant?, self))
+        }
+    }
+    impl<'de, 'a> VariantAccess<'de> for EnumOther<'de, 'a> {
+        type Error = Error;
+
+        fn unit_variant(self) -> Result<()> {
+            ::serde::de::Deserialize::deserialize(self.0)
+        }
+
+        fn newtype_variant_seed<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value> {
+            seed.deserialize(self.0)
+        }
+
+        fn tuple_variant<V: Visitor<'de>>(self, _len: usize, v: V) -> Result<V::Value> {
+            ::serde::de::Deserializer::deserialize_seq(self.0, v)
+        }
+
+        fn struct_variant<V: Visitor<'de>>(
+            self,
+            fields: &'static [&'static str],
+            v: V,
+        ) -> Result<V::Value> {
+            ::serde::de::Deserializer::deserialize_struct(self.0, "", fields, v)
         }
     }
     /// unpack tindalwic data into any type that can visit {map,seq,str}

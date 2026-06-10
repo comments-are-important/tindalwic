@@ -150,6 +150,12 @@ msrv: must-run-inside
 	echo ====== webapp ; cargo msrv verify --path webapp
 .PHONY: msrv
 
+ghraw: must-run-outside
+	PROJECT='https://raw.githubusercontent.com/comments-are-important/tindalwic'
+	BRANCH='refs/heads/main'
+	git ls-tree -r --format "$$PROJECT/$$BRANCH/%(path)" HEAD
+.PHONY: ghraw
+
 # =====================================================================================
 
 python/test: must-run-inside

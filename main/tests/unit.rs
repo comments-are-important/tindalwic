@@ -8,6 +8,38 @@ use tindalwic::{Comment, Entry, File, Item, arena, json, path};
 //     trybuild::TestCases::new().compile_fail("tests/macro_err/*.rs");
 // }
 
+fn from_literal(literal: &'static str) -> String {
+    let mut lines = literal.lines().enumerate();
+    let Some((_, line)) = lines.next() else {
+        return "".into();
+    };
+    assert!(line.is_empty(), "start on 2nd line");
+    let Some((_, line)) = lines.next() else {
+        return "".into();
+    };
+    let mut result = line.trim_start().to_owned();
+    let prefix = &line[0..line.len() - result.len()];
+    let mut more = lines.next();
+    while let Some((_, line)) = more {
+        let Some(mut remainder) = line.strip_prefix(prefix) else {
+            break;
+        };
+        result.push('\n');
+        while let Some(trailing) = remainder.strip_prefix("    ") {
+            result.push('\t');
+            remainder = trailing;
+        }
+        result.push_str(remainder);
+        more = lines.next()
+    }
+    if let Some((num, line)) = more {
+        assert!(lines.next().is_none(), "line {num} isn't indented");
+        assert!(line.trim().is_empty(), "last line isn't blank");
+    }
+    result.push('\n');
+    result
+}
+
 fn some_comment<'a>(value: &'a str) -> Option<Comment<'a>> {
     Some(Comment {
         value: value.into(),
@@ -72,15 +104,27 @@ fn three_blank_comments() {
         cells: &entries,
     };
     let encoded = file.to_string();
-    assert_eq!(encoded, "#!\n#\n//\n{}\n");
+    let expect = "
+        #!
+        #
+        //
+        {}
+    ";
+    assert_eq!(encoded, from_literal(expect));
 }
 #[test]
 fn text_stretch_bug() {
-    let content = "[K]\n\tV\n#L\n";
+    let spaces = "
+        [K]
+            V
+        #E
+    ";
+    let content = from_literal(spaces);
+    assert_eq!("[K]\n\tV\n#E\n", content);
     arena! {
         let mut arena = <1dict,1list>;
     }
-    let file = arena.panic_first_error(content);
+    let file = arena.panic_first_error(&content);
     assert_eq!(file.to_string(), content);
 }
 
@@ -253,30 +297,54 @@ fn change_structure() {
 }
 
 #[cfg(all(feature = "bumpalo", feature = "serde"))]
-mod borrow {
+#[macro_use]
+mod serde_model;
 
-    #[derive(::serde::Deserialize, PartialEq, Debug)]
-    struct S<'a> {
-        x: &'a str,
-        b: bool,
-    }
+#[cfg(all(feature = "bumpalo", feature = "serde"))]
+mod data_format {
+    use super::serde_model::*;
+    use bumpalo::Bump;
+    use serde::de::DeserializeSeed;
+    use tindalwic::bumpalo::Arena;
+    use tindalwic::serde::Neutered;
+    use tindalwic::serde::format::from_str as from_tindalwic;
+
+    // fn round_trip_json<T: Serialize + for<'de> Deserialize<'de>>(
+    //     value: &T,
+    // ) -> Result<T, serde_json::Error> {
+    //     let string = serde_json::to_string_pretty(value)?;
+    //     serde_json::from_str(&string)
+    // }
 
     #[test]
-    fn deserializer() {
-        use serde_json::{Value, json};
-        use tindalwic::serde::format::from_str;
-        assert_eq!(from_str::<Value>("k=v").unwrap(), json!({"k": "v"}));
-        assert_eq!(
-            from_str::<Value>("[xs]\n\ta\n\tb").unwrap(),
-            json!({"xs": ["a", "b"]})
-        );
-        assert_eq!(
-            from_str::<S>("x=hi\nb=true").unwrap(),
-            S {
-                x: "hi".into(),
-                b: true
-            }
-        );
+    fn enum_unit() {
+        type M<'a> = Map<&'a str, Owned>;
+        let data: M = map!("data" => Owned::Unit);
+        let value = serde_json::to_value(&data).unwrap();
+        let json = serde_json::to_string(&value).unwrap();
+        let json: M = serde_json::from_str(&json).unwrap();
+        assert_eq!(&data, &json);
+        let bump = Bump::new();
+        let mut arena = Arena::new(&bump);
+        let file = Neutered::seed(&mut arena).deserialize(value).unwrap();
+        let file = file.to_string();
+        let file: M = from_tindalwic(&file).unwrap();
+        assert_eq!(&data, &file);
+    }
+    #[test]
+    fn enum_newtype() {
+        type M<'a> = Map<&'a str, Owned>;
+        let data: M = map!("data" => Owned::Bool(true));
+        let value = serde_json::to_value(&data).unwrap();
+        let json = serde_json::to_string(&value).unwrap();
+        let json: M = serde_json::from_str(&json).unwrap();
+        assert_eq!(&data, &json);
+        let bump = Bump::new();
+        let mut arena = Arena::new(&bump);
+        let file = Neutered::seed(&mut arena).deserialize(value).unwrap();
+        let file = file.to_string();
+        let file: M = from_tindalwic(&file).unwrap();
+        assert_eq!(&data, &file);
     }
 }
 

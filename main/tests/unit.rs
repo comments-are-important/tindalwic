@@ -297,84 +297,202 @@ fn change_structure() {
 }
 
 #[cfg(all(feature = "bumpalo", feature = "serde"))]
-#[macro_use]
-mod serde_model;
-
-#[cfg(all(feature = "bumpalo", feature = "serde"))]
 mod data_format {
-    use super::serde_model::*;
-    use bumpalo::Bump;
-    use serde::de::DeserializeSeed;
-    use tindalwic::bumpalo::Arena;
-    use tindalwic::serde::Neutered;
-    use tindalwic::serde::format::from_str as from_tindalwic;
+    use ::serde::{Deserialize, Serialize};
+    use std::collections::BTreeMap;
+    use tindalwic::serde::format::{Error, Result, from_tindalwic, to_tindalwic};
 
-    // fn round_trip_json<T: Serialize + for<'de> Deserialize<'de>>(
-    //     value: &T,
-    // ) -> Result<T, serde_json::Error> {
-    //     let string = serde_json::to_string_pretty(value)?;
-    //     serde_json::from_str(&string)
-    // }
+    fn round_trip<T: Serialize + for<'de> Deserialize<'de>>(
+        value: &T, // important this is a ref
+    ) -> Result<T> {
+        let mut data = BTreeMap::new();
+        data.insert("data", value);
+        let string = to_tindalwic(&data)?;
+        let mut file: BTreeMap<&str, T> = from_tindalwic(&string)?;
+        file.remove("data")
+            .ok_or_else(|| Error::new("where did data go?"))
+    }
 
     #[test]
-    fn enum_unit() {
-        type M<'a> = Map<&'a str, Owned>;
-        let data: M = map!("data" => Owned::Unit);
-        let value = serde_json::to_value(&data).unwrap();
-        let json = serde_json::to_string(&value).unwrap();
-        let json: M = serde_json::from_str(&json).unwrap();
-        assert_eq!(&data, &json);
-        let bump = Bump::new();
-        let mut arena = Arena::new(&bump);
-        let file = Neutered::seed(&mut arena).deserialize(value).unwrap();
-        let file = file.to_string();
-        let file: M = from_tindalwic(&file).unwrap();
-        assert_eq!(&data, &file);
+    fn boolean() {
+        assert_eq!(true, round_trip(&true).unwrap());
+        assert_eq!(false, round_trip(&false).unwrap());
     }
     #[test]
-    fn enum_newtype() {
-        type M<'a> = Map<&'a str, Owned>;
-        let data: M = map!("data" => Owned::String("hello".to_owned()));
-        let value = serde_json::to_value(&data).unwrap();
-        let json = serde_json::to_string(&value).unwrap();
-        let json: M = serde_json::from_str(&json).unwrap();
-        assert_eq!(&data, &json);
-        let bump = Bump::new();
-        let mut arena = Arena::new(&bump);
-        let file = Neutered::seed(&mut arena).deserialize(value).unwrap();
-        let file = file.to_string();
-        let file: M = from_tindalwic(&file).unwrap();
-        assert_eq!(&data, &file);
+    fn signed_1_byte() {
+        assert_eq!(i8::MIN, round_trip(&i8::MIN).unwrap());
+        assert_eq!(i8::MAX, round_trip(&i8::MAX).unwrap());
     }
     #[test]
-    fn enum_tuple() {
-        type M<'a> = Map<&'a str, Enum<bool, u8>>;
-        let data: M = map!("data" => Enum::Tuple(true, 9));
-        let value = serde_json::to_value(&data).unwrap();
-        let json = serde_json::to_string(&value).unwrap();
-        let json: M = serde_json::from_str(&json).unwrap();
-        assert_eq!(&data, &json);
-        let bump = Bump::new();
-        let mut arena = Arena::new(&bump);
-        let file = Neutered::seed(&mut arena).deserialize(value).unwrap();
-        let file = file.to_string();
-        let file: M = from_tindalwic(&file).unwrap();
-        assert_eq!(&data, &file);
+    fn signed_2_bytes() {
+        assert_eq!(i16::MIN, round_trip(&i16::MIN).unwrap());
+        assert_eq!(i16::MAX, round_trip(&i16::MAX).unwrap());
     }
     #[test]
-    fn enum_struct() {
-        type M<'a> = Map<&'a str, Enum<i16, f64>>;
-        let data: M = map!("data" => Enum::Struct{ one: 512, two: 3.14 });
-        let value = serde_json::to_value(&data).unwrap();
-        let json = serde_json::to_string(&value).unwrap();
-        let json: M = serde_json::from_str(&json).unwrap();
-        assert_eq!(&data, &json);
-        let bump = Bump::new();
-        let mut arena = Arena::new(&bump);
-        let file = Neutered::seed(&mut arena).deserialize(value).unwrap();
-        let file = file.to_string();
-        let file: M = from_tindalwic(&file).unwrap();
-        assert_eq!(&data, &file);
+    fn signed_4_bytes() {
+        assert_eq!(i32::MIN, round_trip(&i32::MIN).unwrap());
+        assert_eq!(i32::MAX, round_trip(&i32::MAX).unwrap());
+    }
+    #[test]
+    fn signed_8_bytes() {
+        assert_eq!(i64::MIN, round_trip(&i64::MIN).unwrap());
+        assert_eq!(i64::MAX, round_trip(&i64::MAX).unwrap());
+    }
+    #[test]
+    fn signed_16_bytes() {
+        assert_eq!(i128::MIN, round_trip(&i128::MIN).unwrap());
+        assert_eq!(i128::MAX, round_trip(&i128::MAX).unwrap());
+    }
+    #[test]
+    fn unsigned_1_byte() {
+        assert_eq!(u8::MIN, round_trip(&u8::MIN).unwrap());
+        assert_eq!(u8::MAX, round_trip(&u8::MAX).unwrap());
+    }
+    #[test]
+    fn unsigned_2_bytes() {
+        assert_eq!(u16::MIN, round_trip(&u16::MIN).unwrap());
+        assert_eq!(u16::MAX, round_trip(&u16::MAX).unwrap());
+    }
+    #[test]
+    fn unsigned_4_bytes() {
+        assert_eq!(u32::MIN, round_trip(&u32::MIN).unwrap());
+        assert_eq!(u32::MAX, round_trip(&u32::MAX).unwrap());
+    }
+    #[test]
+    fn unsigned_8_bytes() {
+        assert_eq!(u64::MIN, round_trip(&u64::MIN).unwrap());
+        assert_eq!(u64::MAX, round_trip(&u64::MAX).unwrap());
+    }
+    #[test]
+    fn unsigned_16_bytes() {
+        assert_eq!(u128::MIN, round_trip(&u128::MIN).unwrap());
+        assert_eq!(u128::MAX, round_trip(&u128::MAX).unwrap());
+    }
+    #[test]
+    fn float_4_bytes() {
+        assert_eq!(f32::MIN, round_trip(&f32::MIN).unwrap());
+        assert_eq!(f32::MAX, round_trip(&f32::MAX).unwrap());
+        assert_eq!(f32::EPSILON, round_trip(&f32::EPSILON).unwrap());
+        assert_eq!(f32::MIN_POSITIVE, round_trip(&f32::MIN_POSITIVE).unwrap());
+        const E: f32 = std::f32::consts::E;
+        assert_eq!(E, round_trip(&E).unwrap());
+        const PI: f32 = std::f32::consts::PI;
+        assert_eq!(PI, round_trip(&PI).unwrap());
+    }
+    #[test]
+    fn float_8_bytes() {
+        assert_eq!(f64::MIN, round_trip(&f64::MIN).unwrap());
+        assert_eq!(f64::MAX, round_trip(&f64::MAX).unwrap());
+        assert_eq!(f64::EPSILON, round_trip(&f64::EPSILON).unwrap());
+        assert_eq!(f64::MIN_POSITIVE, round_trip(&f64::MIN_POSITIVE).unwrap());
+        const E: f64 = std::f64::consts::E;
+        assert_eq!(E, round_trip(&E).unwrap());
+        const PI: f64 = std::f64::consts::PI;
+        assert_eq!(PI, round_trip(&PI).unwrap());
+    }
+    #[test]
+    fn character() {
+        assert_eq!(char::MIN, round_trip(&char::MIN).unwrap());
+        assert_eq!(char::MAX, round_trip(&char::MAX).unwrap());
+    }
+    #[test]
+    fn string() {
+        let data = String::from("");
+        assert_eq!(data, round_trip(&data).unwrap());
+        let data = String::from("hello");
+        assert_eq!(data, round_trip(&data).unwrap());
+        // TODO: let data = "";
+        // assert_eq!(data, round_trip(&data).unwrap());
+    }
+    #[test]
+    fn byte_array() {
+        let data = Vec::<u8>::new();
+        assert_eq!(data, round_trip(&data).unwrap());
+        let data = vec![u8::MIN, u8::MAX];
+        assert_eq!(data, round_trip(&data).unwrap());
+    }
+    #[test]
+    fn option_and_unit() {
+        assert_eq!((), round_trip(&()).unwrap());
+        let data: Option<u8> = None;
+        assert_eq!(data, round_trip(&data).unwrap());
+        let data: Option<u8> = Some(u8::MAX);
+        assert_eq!(data, round_trip(&data).unwrap());
+        // TODO: Some(()) comes back as None
+    }
+    #[test]
+    fn tuple() {
+        let data = (false, true);
+        assert_eq!(data, round_trip(&data).unwrap());
+        let data = [0, 1, 2, 3, 4, 5, 6];
+        assert_eq!(data, round_trip(&data).unwrap());
+    }
+    #[test]
+    fn enums() {
+        #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+        enum Enum {
+            Unit,
+            Newtype(bool),
+            Tuple(bool, bool),
+            Struct { one: bool, two: bool },
+        }
+        let data = Enum::Unit;
+        assert_eq!(data, round_trip(&data).unwrap());
+        let data = Enum::Newtype(false);
+        assert_eq!(data, round_trip(&data).unwrap());
+        let data = Enum::Tuple(false, true);
+        assert_eq!(data, round_trip(&data).unwrap());
+        let data = Enum::Struct {
+            one: false,
+            two: true,
+        };
+        assert_eq!(data, round_trip(&data).unwrap());
+    }
+    #[test]
+    fn structs() {
+        // TODO: invalid type string ""
+        // #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+        // struct Unit;
+        // let data = Unit;
+        // assert_eq!(data, round_trip(&data).unwrap());
+
+        // TODO: invalid type string "false"
+        // #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+        // struct Newtype(bool);
+        // let data = Newtype(false);
+        // assert_eq!(data, round_trip(&data).unwrap());
+
+        #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+        struct Tuple(bool, bool);
+        let data = Tuple(false, true);
+        assert_eq!(data, round_trip(&data).unwrap());
+        #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+        struct Struct {
+            one: bool,
+            two: bool,
+        }
+        let data = Struct {
+            one: false,
+            two: true,
+        };
+        assert_eq!(data, round_trip(&data).unwrap());
+    }
+    #[test]
+    fn seq() {
+        let data = Vec::<bool>::new();
+        assert_eq!(data, round_trip(&data).unwrap());
+        let data = vec!['a', 'b', 'c', 'd', 'e'];
+        assert_eq!(data, round_trip(&data).unwrap());
+    }
+    #[test]
+    fn map() {
+        let mut data = BTreeMap::<String, char>::new();
+        assert_eq!(data, round_trip(&data).unwrap());
+        data.insert("zero".into(), '0');
+        data.insert("one".into(), '1');
+        data.insert("two".into(), '2');
+        data.insert("three".into(), '3');
+        assert_eq!(data, round_trip(&data).unwrap());
     }
 }
 

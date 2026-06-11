@@ -109,12 +109,19 @@ enum FileFields {
 pub mod format {
     //! our serde data format
     extern crate alloc;
-    use crate::{Entry, Item, Value};
-    use ::serde::Deserializer;
+    use crate::bumpalo::Arena;
+    use crate::parse::{Build, Parse};
+    use crate::{Entry, File, Item, Value};
     use ::serde::de::value::{MapDeserializer, SeqDeserializer};
-    use ::serde::de::{DeserializeSeed, IntoDeserializer, Visitor};
+    use ::serde::de::{DeserializeSeed, Deserializer, IntoDeserializer, Visitor};
     use ::serde::de::{Error as _, Unexpected};
+    use ::serde::ser::{
+        Serialize, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant,
+        SerializeTuple, SerializeTupleStruct, SerializeTupleVariant, Serializer,
+    };
+    use alloc::format;
     use alloc::string::{String, ToString};
+    use bumpalo::Bump;
     use core::fmt::{self, Display};
 
     /// specialized to Err([Error])
@@ -123,6 +130,12 @@ pub mod format {
     /// payload is just a String message
     #[derive(Debug)]
     pub struct Error(String);
+    impl Error {
+        /// construct from slice
+        pub fn new(message: &str) -> Self {
+            Error(String::from(message))
+        }
+    }
     impl Display for Error {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             f.write_str(&self.0)
@@ -138,6 +151,445 @@ pub mod format {
         fn custom<T: Display>(m: T) -> Self {
             Error(m.to_string())
         }
+    }
+
+    /// pack any `T: Serialize` into a tindalwic [`Item`], built into `build`'s arena.
+    struct ItemSer<'b, 'a> {
+        build: &'b mut dyn Build<'a>,
+    }
+    impl<'b, 'a> ItemSer<'b, 'a> {
+        fn debug<T: core::fmt::Debug>(&mut self, v: T) -> Result<Item<'a>> {
+            let s = self.build.intern(&format!("{:?}", v)).map_err(Error::new)?;
+            Ok(Item::text(s))
+        }
+    }
+
+    impl<'c, 'b, 'a> Serializer for &'c mut ItemSer<'b, 'a> {
+        type Ok = Item<'a>;
+        type Error = Error;
+        type SerializeSeq = SeqSer<'c, 'b, 'a>;
+        type SerializeTuple = SeqSer<'c, 'b, 'a>;
+        type SerializeTupleStruct = SeqSer<'c, 'b, 'a>;
+        type SerializeTupleVariant = TupleVariantSer<'c, 'b, 'a>;
+        type SerializeMap = MapSer<'c, 'b, 'a>;
+        type SerializeStruct = StructSer<'c, 'b, 'a>;
+        type SerializeStructVariant = StructVariantSer<'c, 'b, 'a>;
+
+        fn serialize_bool(self, v: bool) -> Result<Item<'a>> {
+            Ok(Item::text(if v { "true" } else { "false" }))
+        }
+        fn serialize_i8(self, v: i8) -> Result<Item<'a>> {
+            self.debug(v)
+        }
+        fn serialize_i16(self, v: i16) -> Result<Item<'a>> {
+            self.debug(v)
+        }
+        fn serialize_i32(self, v: i32) -> Result<Item<'a>> {
+            self.debug(v)
+        }
+        fn serialize_i64(self, v: i64) -> Result<Item<'a>> {
+            self.debug(v)
+        }
+        fn serialize_i128(self, v: i128) -> Result<Item<'a>> {
+            self.debug(v)
+        }
+        fn serialize_u8(self, v: u8) -> Result<Item<'a>> {
+            self.debug(v)
+        }
+        fn serialize_u16(self, v: u16) -> Result<Item<'a>> {
+            self.debug(v)
+        }
+        fn serialize_u32(self, v: u32) -> Result<Item<'a>> {
+            self.debug(v)
+        }
+        fn serialize_u64(self, v: u64) -> Result<Item<'a>> {
+            self.debug(v)
+        }
+        fn serialize_u128(self, v: u128) -> Result<Item<'a>> {
+            self.debug(v)
+        }
+        fn serialize_f32(self, v: f32) -> Result<Item<'a>> {
+            self.debug(v)
+        }
+        fn serialize_f64(self, v: f64) -> Result<Item<'a>> {
+            self.debug(v)
+        }
+
+        fn serialize_char(self, v: char) -> Result<Item<'a>> {
+            let s = self.build.intern(&v.to_string()).map_err(Error::new)?;
+            Ok(Item::text(s))
+        }
+        fn serialize_str(self, v: &str) -> Result<Item<'a>> {
+            let s = self.build.intern(v).map_err(Error::new)?;
+            Ok(Item::text(s))
+        }
+        fn serialize_bytes(self, v: &[u8]) -> Result<Item<'a>> {
+            // differs from Neutered on purpose: no lossy Latin-1 round-trip.
+            // ItemDe::deserialize_bytes hands back the text's UTF-8 bytes, so only
+            // valid UTF-8 can round-trip; reject the rest rather than lie.
+            match core::str::from_utf8(v) {
+                Ok(s) => {
+                    let s = self.build.intern(s).map_err(Error::new)?;
+                    Ok(Item::text(s))
+                }
+                Err(_) => Err(Error::new(
+                    "non-UTF-8 bytes cannot be encoded as tindalwic text",
+                )),
+            }
+        }
+
+        // empty Text -> None / unit on the read side
+        fn serialize_none(self) -> Result<Item<'a>> {
+            Ok(Item::default())
+        }
+        fn serialize_unit(self) -> Result<Item<'a>> {
+            Ok(Item::default())
+        }
+        fn serialize_unit_struct(self, _name: &'static str) -> Result<Item<'a>> {
+            // NB: ItemDe::deserialize_unit_struct routes to deserialize_any, so this
+            // won't round-trip until that's fixed to hit the unit path.
+            Ok(Item::default())
+        }
+
+        // Some(x) and newtype(x) are encoded as bare x
+        fn serialize_some<T: ?Sized + Serialize>(self, value: &T) -> Result<Item<'a>> {
+            value.serialize(self)
+        }
+        fn serialize_newtype_struct<T: ?Sized + Serialize>(
+            self,
+            _name: &'static str,
+            value: &T,
+        ) -> Result<Item<'a>> {
+            value.serialize(self)
+        }
+
+        fn serialize_unit_variant(
+            self,
+            _name: &'static str,
+            _idx: u32,
+            variant: &'static str,
+        ) -> Result<Item<'a>> {
+            let s = self.build.intern(variant).map_err(Error::new)?;
+            Ok(Item::text(s))
+        }
+        fn serialize_newtype_variant<T: ?Sized + Serialize>(
+            self,
+            _name: &'static str,
+            _idx: u32,
+            variant: &'static str,
+            value: &T,
+        ) -> Result<Item<'a>> {
+            let inner = value.serialize(&mut *self)?;
+            let key = self.build.intern(variant).map_err(Error::new)?;
+            self.build
+                .push_entry(Entry {
+                    key: key.into(),
+                    item: inner,
+                    ..Default::default()
+                })
+                .map_err(Error::new)?;
+            let cells = self.build.finish_entries(1).map_err(Error::new)?;
+            Ok(Item::dict(cells))
+        }
+
+        fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq> {
+            Ok(SeqSer {
+                ser: self,
+                count: 0,
+            })
+        }
+        fn serialize_tuple(self, _len: usize) -> Result<Self::SerializeTuple> {
+            Ok(SeqSer {
+                ser: self,
+                count: 0,
+            })
+        }
+        fn serialize_tuple_struct(
+            self,
+            _name: &'static str,
+            _len: usize,
+        ) -> Result<Self::SerializeTupleStruct> {
+            Ok(SeqSer {
+                ser: self,
+                count: 0,
+            })
+        }
+        fn serialize_tuple_variant(
+            self,
+            _name: &'static str,
+            _idx: u32,
+            variant: &'static str,
+            _len: usize,
+        ) -> Result<Self::SerializeTupleVariant> {
+            let variant = self.build.intern(variant).map_err(Error::new)?;
+            Ok(TupleVariantSer {
+                ser: self,
+                variant,
+                count: 0,
+            })
+        }
+        fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap> {
+            Ok(MapSer {
+                ser: self,
+                key: None,
+                count: 0,
+            })
+        }
+        fn serialize_struct(
+            self,
+            _name: &'static str,
+            _len: usize,
+        ) -> Result<Self::SerializeStruct> {
+            Ok(StructSer {
+                ser: self,
+                count: 0,
+            })
+        }
+        fn serialize_struct_variant(
+            self,
+            _name: &'static str,
+            _idx: u32,
+            variant: &'static str,
+            _len: usize,
+        ) -> Result<Self::SerializeStructVariant> {
+            let variant = self.build.intern(variant).map_err(Error::new)?;
+            Ok(StructVariantSer {
+                ser: self,
+                variant,
+                count: 0,
+            })
+        }
+    }
+
+    // every element is built and pushed eagerly, before the next one, so the shared
+    // CellVec stacks stay strictly LIFO. don't batch.
+    struct SeqSer<'c, 'b, 'a> {
+        ser: &'c mut ItemSer<'b, 'a>,
+        count: usize,
+    }
+    impl<'c, 'b, 'a> SeqSer<'c, 'b, 'a> {
+        fn push<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<()> {
+            let item = value.serialize(&mut *self.ser)?;
+            self.ser.build.push_item(item).map_err(Error::new)?;
+            self.count += 1;
+            Ok(())
+        }
+        fn list(self) -> Result<Item<'a>> {
+            let cells = self
+                .ser
+                .build
+                .finish_items(self.count)
+                .map_err(Error::new)?;
+            Ok(Item::list(cells))
+        }
+    }
+    impl<'c, 'b, 'a> SerializeSeq for SeqSer<'c, 'b, 'a> {
+        type Ok = Item<'a>;
+        type Error = Error;
+        fn serialize_element<T: ?Sized + Serialize>(&mut self, v: &T) -> Result<()> {
+            self.push(v)
+        }
+        fn end(self) -> Result<Item<'a>> {
+            self.list()
+        }
+    }
+    impl<'c, 'b, 'a> SerializeTuple for SeqSer<'c, 'b, 'a> {
+        type Ok = Item<'a>;
+        type Error = Error;
+        fn serialize_element<T: ?Sized + Serialize>(&mut self, v: &T) -> Result<()> {
+            self.push(v)
+        }
+        fn end(self) -> Result<Item<'a>> {
+            self.list()
+        }
+    }
+    impl<'c, 'b, 'a> SerializeTupleStruct for SeqSer<'c, 'b, 'a> {
+        type Ok = Item<'a>;
+        type Error = Error;
+        fn serialize_field<T: ?Sized + Serialize>(&mut self, v: &T) -> Result<()> {
+            self.push(v)
+        }
+        fn end(self) -> Result<Item<'a>> {
+            self.list()
+        }
+    }
+
+    // {variant: [..]}  — the double-close case; inner finish_items pops before the
+    // outer finish_entries(1), so LIFO holds.
+    struct TupleVariantSer<'c, 'b, 'a> {
+        ser: &'c mut ItemSer<'b, 'a>,
+        variant: &'a str,
+        count: usize,
+    }
+    impl<'c, 'b, 'a> SerializeTupleVariant for TupleVariantSer<'c, 'b, 'a> {
+        type Ok = Item<'a>;
+        type Error = Error;
+        fn serialize_field<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<()> {
+            let item = value.serialize(&mut *self.ser)?;
+            self.ser.build.push_item(item).map_err(Error::new)?;
+            self.count += 1;
+            Ok(())
+        }
+        fn end(self) -> Result<Item<'a>> {
+            let cells = self
+                .ser
+                .build
+                .finish_items(self.count)
+                .map_err(Error::new)?;
+            let list = Item::list(cells);
+            self.ser
+                .build
+                .push_entry(Entry {
+                    key: self.variant.into(),
+                    item: list,
+                    ..Default::default()
+                })
+                .map_err(Error::new)?;
+            let cells = self.ser.build.finish_entries(1).map_err(Error::new)?;
+            Ok(Item::dict(cells))
+        }
+    }
+
+    struct MapSer<'c, 'b, 'a> {
+        ser: &'c mut ItemSer<'b, 'a>,
+        key: Option<Value<'a>>,
+        count: usize,
+    }
+    impl<'c, 'b, 'a> SerializeMap for MapSer<'c, 'b, 'a> {
+        type Ok = Item<'a>;
+        type Error = Error;
+        fn serialize_key<T: ?Sized + Serialize>(&mut self, key: &T) -> Result<()> {
+            match key.serialize(&mut *self.ser)? {
+                Item::Text { value, .. } => {
+                    self.key = Some(value);
+                    Ok(())
+                }
+                _ => Err(Error::new("map key must serialize to a string")),
+            }
+        }
+        fn serialize_value<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<()> {
+            let item = value.serialize(&mut *self.ser)?;
+            let key = self
+                .key
+                .take()
+                .ok_or_else(|| Error::new("value before key"))?;
+            self.ser
+                .build
+                .push_entry(Entry {
+                    key,
+                    item,
+                    ..Default::default()
+                })
+                .map_err(Error::new)?;
+            self.count += 1;
+            Ok(())
+        }
+        fn end(self) -> Result<Item<'a>> {
+            let cells = self
+                .ser
+                .build
+                .finish_entries(self.count)
+                .map_err(Error::new)?;
+            Ok(Item::dict(cells))
+        }
+    }
+
+    struct StructSer<'c, 'b, 'a> {
+        ser: &'c mut ItemSer<'b, 'a>,
+        count: usize,
+    }
+    impl<'c, 'b, 'a> SerializeStruct for StructSer<'c, 'b, 'a> {
+        type Ok = Item<'a>;
+        type Error = Error;
+        fn serialize_field<T: ?Sized + Serialize>(
+            &mut self,
+            key: &'static str,
+            value: &T,
+        ) -> Result<()> {
+            let item = value.serialize(&mut *self.ser)?;
+            let key = self.ser.build.intern(key).map_err(Error::new)?;
+            self.ser
+                .build
+                .push_entry(Entry {
+                    key: key.into(),
+                    item,
+                    ..Default::default()
+                })
+                .map_err(Error::new)?;
+            self.count += 1;
+            Ok(())
+        }
+        fn end(self) -> Result<Item<'a>> {
+            let cells = self
+                .ser
+                .build
+                .finish_entries(self.count)
+                .map_err(Error::new)?;
+            Ok(Item::dict(cells))
+        }
+    }
+
+    // {variant: {..}}
+    struct StructVariantSer<'c, 'b, 'a> {
+        ser: &'c mut ItemSer<'b, 'a>,
+        variant: &'a str,
+        count: usize,
+    }
+    impl<'c, 'b, 'a> SerializeStructVariant for StructVariantSer<'c, 'b, 'a> {
+        type Ok = Item<'a>;
+        type Error = Error;
+        fn serialize_field<T: ?Sized + Serialize>(
+            &mut self,
+            key: &'static str,
+            value: &T,
+        ) -> Result<()> {
+            let item = value.serialize(&mut *self.ser)?;
+            let key = self.ser.build.intern(key).map_err(Error::new)?;
+            self.ser
+                .build
+                .push_entry(Entry {
+                    key: key.into(),
+                    item,
+                    ..Default::default()
+                })
+                .map_err(Error::new)?;
+            self.count += 1;
+            Ok(())
+        }
+        fn end(self) -> Result<Item<'a>> {
+            let inner = self
+                .ser
+                .build
+                .finish_entries(self.count)
+                .map_err(Error::new)?;
+            let dict = Item::dict(inner);
+            self.ser
+                .build
+                .push_entry(Entry {
+                    key: self.variant.into(),
+                    item: dict,
+                    ..Default::default()
+                })
+                .map_err(Error::new)?;
+            let cells = self.ser.build.finish_entries(1).map_err(Error::new)?;
+            Ok(Item::dict(cells))
+        }
+    }
+
+    /// encode any `T: Serialize` into the tindalwic format. the top-level value must
+    /// serialize to a map/struct — tindalwic has no free-standing items.
+    pub fn to_tindalwic<T: ?Sized + Serialize>(value: &T) -> Result<String> {
+        let bump = Bump::new();
+        let mut arena = Arena::new(&bump);
+        let item = {
+            let mut ser = ItemSer {
+                build: arena.builder(),
+            };
+            value.serialize(&mut ser)?
+        };
+        let file = File::try_from_dict_without_epilog(&item)
+            .ok_or_else(|| Error::new("top-level value must serialize to a map or struct"))?;
+        Ok(file.to_string())
     }
 
     #[derive(Copy, Clone)]
@@ -170,7 +622,7 @@ pub mod format {
             }
             None
         }
-        fn outlive(&self, value: crate::Value<'a>) -> Option<&'de str> {
+        fn outlive(&self, value: Value<'a>) -> Option<&'de str> {
             if let Some(verbatim) = value.verbatim(0) {
                 let base = self.encoded.as_ptr() as usize;
                 let mut start = verbatim.as_ptr() as usize;
@@ -247,6 +699,13 @@ pub mod format {
                 self.deserialize_any(v)
             }
         }
+        fn deserialize_i128<V: Visitor<'de>>(self, v: V) -> Result<V::Value> {
+            if let Some(value) = self.parse::<i128>() {
+                v.visit_i128(value)
+            } else {
+                self.deserialize_any(v)
+            }
+        }
         fn deserialize_u8<V: Visitor<'de>>(self, v: V) -> Result<V::Value> {
             if let Some(value) = self.parse::<u8>() {
                 v.visit_u8(value)
@@ -271,6 +730,13 @@ pub mod format {
         fn deserialize_u64<V: Visitor<'de>>(self, v: V) -> Result<V::Value> {
             if let Some(value) = self.parse::<u64>() {
                 v.visit_u64(value)
+            } else {
+                self.deserialize_any(v)
+            }
+        }
+        fn deserialize_u128<V: Visitor<'de>>(self, v: V) -> Result<V::Value> {
+            if let Some(value) = self.parse::<u128>() {
+                v.visit_u128(value)
             } else {
                 self.deserialize_any(v)
             }
@@ -455,8 +921,8 @@ pub mod format {
     }
     struct EnumAccess<'de, 'a, 'i> {
         de: &'i ItemDe<'de, 'a>, // the container of this encoded enum
-        name: crate::Value<'a>,
-        payload: Option<crate::Item<'a>>,
+        name: Value<'a>,
+        payload: Option<Item<'a>>,
     }
     impl<'de, 'a, 'i> ::serde::de::EnumAccess<'de> for EnumAccess<'de, 'a, 'i> {
         type Error = Error;
@@ -475,7 +941,7 @@ pub mod format {
     }
     struct VariantAccess<'de, 'a, 'i> {
         de: &'i ItemDe<'de, 'a>, // the container of this encoded enum
-        payload: Option<crate::Item<'a>>,
+        payload: Option<Item<'a>>,
     }
     impl<'de, 'a, 'i> ::serde::de::VariantAccess<'de> for VariantAccess<'de, 'a, 'i> {
         type Error = Error;
@@ -541,9 +1007,9 @@ pub mod format {
         }
     }
     /// unpack tindalwic data into any type that can visit {map,seq,str}
-    pub fn from_str<'de, T: ::serde::Deserialize<'de>>(encoded: &'de str) -> Result<T> {
-        let bump = bumpalo::Bump::new();
-        let mut arena = crate::bumpalo::Arena::new(&bump);
+    pub fn from_tindalwic<'de, T: ::serde::Deserialize<'de>>(encoded: &'de str) -> Result<T> {
+        let bump = Bump::new();
+        let mut arena = Arena::new(&bump);
         let item = arena
             .describe_errors(encoded, usize::MAX)
             .map_err(Error::custom)?

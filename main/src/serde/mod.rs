@@ -846,7 +846,7 @@ pub mod format {
             _name: &'static str,
             v: V,
         ) -> Result<V::Value> {
-            self.deserialize_any(v)
+            self.deserialize_unit(v)
         }
 
         fn deserialize_newtype_struct<V: Visitor<'de>>(
@@ -854,7 +854,7 @@ pub mod format {
             _name: &'static str,
             v: V,
         ) -> Result<V::Value> {
-            self.deserialize_any(v)
+            v.visit_newtype_struct(self)
         }
 
         fn deserialize_seq<V: Visitor<'de>>(self, v: V) -> Result<V::Value> {

@@ -156,6 +156,7 @@ ghraw: must-run-outside ;@
 	if git merge-base --is-ancestor "$$COMMIT" origin/main
 	then
 	  git log -1
+	  echo ''
 	  git ls-tree -r --format "$$PROJECT/$$COMMIT/%(path)" HEAD
 	else
 	  echo "HEAD is not known to be in origin/main... push (maybe fetch too)"

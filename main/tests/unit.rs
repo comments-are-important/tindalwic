@@ -302,12 +302,15 @@ mod data_format {
     use std::collections::BTreeMap;
     use tindalwic::serde::format::{Error, Result, from_tindalwic, to_tindalwic};
 
-    fn round_trip<T: Serialize + for<'de> Deserialize<'de>>(
+    fn round_trip<T: std::fmt::Debug + Serialize + for<'de> Deserialize<'de>>(
         value: &T, // important this is a ref
     ) -> Result<T> {
         let mut data = BTreeMap::new();
         data.insert("data", value);
+        println!("==== data\n{data:?}");
+        println!("==== json\n{}", serde_json::to_string_pretty(&data).unwrap());
         let string = to_tindalwic(&data)?;
+        println!("==== tindalwic\n{string}");
         let mut file: BTreeMap<&str, T> = from_tindalwic(&string)?;
         file.remove("data")
             .ok_or_else(|| Error::new("where did data go?"))
@@ -418,7 +421,10 @@ mod data_format {
         assert_eq!(data, round_trip(&data).unwrap());
         let data: Option<u8> = Some(u8::MAX);
         assert_eq!(data, round_trip(&data).unwrap());
-        // TODO: Some(()) comes back as None
+        let data: Option<()> = Some(());
+        assert_eq!(data, round_trip(&data).unwrap());
+        let data: Option<Option<u8>> = Some(None);
+        assert_eq!(data, round_trip(&data).unwrap());
     }
     #[test]
     fn tuple() {
@@ -450,22 +456,21 @@ mod data_format {
     }
     #[test]
     fn structs() {
-        // TODO: invalid type string ""
-        // #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-        // struct Unit;
-        // let data = Unit;
-        // assert_eq!(data, round_trip(&data).unwrap());
+        #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+        struct Unit;
+        let data = Unit;
+        assert_eq!(data, round_trip(&data).unwrap());
 
-        // TODO: invalid type string "false"
-        // #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-        // struct Newtype(bool);
-        // let data = Newtype(false);
-        // assert_eq!(data, round_trip(&data).unwrap());
+        #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+        struct Newtype(bool);
+        let data = Newtype(false);
+        assert_eq!(data, round_trip(&data).unwrap());
 
         #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
         struct Tuple(bool, bool);
         let data = Tuple(false, true);
         assert_eq!(data, round_trip(&data).unwrap());
+
         #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
         struct Struct {
             one: bool,

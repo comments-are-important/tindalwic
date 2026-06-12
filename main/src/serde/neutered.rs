@@ -3,7 +3,6 @@ extern crate alloc;
 use super::{ValueDe, ValueSer, seeded};
 use crate::{Entry, File, Item};
 use ::serde::ser::{SerializeMap as _, SerializeSeq as _};
-use alloc::format;
 use alloc::string::{String, ToString};
 use serde::de::Error as _;
 
@@ -19,68 +18,43 @@ seeded! {
             }
         }
         fn visit_bool() {
-            let value = if v { "true" } else { "false" };
-            Ok(Item::text(value))
+            Ok(Item::text(if v { "true" } else { "false" }))
         }
         fn visit_i8() {
-            Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
-            ))
+            Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
         }
         fn visit_i16() {
-            Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
-            ))
+            Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
         }
         fn visit_i32() {
-            Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
-            ))
+            Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
         }
         fn visit_i64() {
-            Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
-            ))
+            Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
         }
         fn visit_i128() {
-            Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
-            ))
+            Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
         }
         fn visit_u8() {
-            Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
-            ))
+            Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
         }
         fn visit_u16() {
-            Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
-            ))
+            Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
         }
         fn visit_u32() {
-            Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
-            ))
+            Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
         }
         fn visit_u64() {
-            Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
-            ))
+            Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
         }
         fn visit_u128() {
-            Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
-            ))
+            Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
         }
         fn visit_f32() {
-            Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
-            ))
+            Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
         }
         fn visit_f64() {
-            Ok(Item::text(
-                build.intern(&format!("{:?}", v)).map_err(E::custom)?,
-            ))
+            Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
         }
         fn visit_char() {
             Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))

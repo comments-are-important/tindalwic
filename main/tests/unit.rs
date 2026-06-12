@@ -300,138 +300,136 @@ fn change_structure() {
 mod data_format {
     use ::serde::{Deserialize, Serialize};
     use std::collections::BTreeMap;
-    use tindalwic::serde::format::{Error, Result, from_tindalwic, to_tindalwic};
+    use std::fmt::Debug;
+    use tindalwic::serde::format::{from_tindalwic, to_tindalwic};
 
-    fn round_trip<T: std::fmt::Debug + Serialize + for<'de> Deserialize<'de>>(
-        value: &T, // important this is a ref
-    ) -> Result<T> {
+    fn check<T>(value: T)
+    where
+        T: Debug + PartialEq + Serialize + for<'de> Deserialize<'de>,
+    {
+        println!("# {value:?}");
+        let json = serde_json::to_string_pretty(&value).unwrap();
+        println!("## serde_json\n{}", json);
+        let json: T = serde_json::from_str(&json).unwrap();
+        if json != value {
+            println!("### != {json:?}");
+        }
         let mut data = BTreeMap::new();
-        data.insert("data", value);
-        println!("==== data\n{data:?}");
-        println!("==== json\n{}", serde_json::to_string_pretty(&data).unwrap());
-        let string = to_tindalwic(&data)?;
-        println!("==== tindalwic\n{string}");
-        let mut file: BTreeMap<&str, T> = from_tindalwic(&string)?;
-        file.remove("data")
-            .ok_or_else(|| Error::new("where did data go?"))
+        data.insert("data", &value);
+        let string = to_tindalwic(&data).unwrap();
+        println!("## tindalwic\n{string}");
+        let mut file: BTreeMap<&str, T> = from_tindalwic(&string).unwrap();
+        // TODO: be better than json, be equal to value...
+        assert_eq!(json, file.remove("data").unwrap());
+        assert!(file.is_empty());
     }
 
     #[test]
     fn boolean() {
-        assert_eq!(true, round_trip(&true).unwrap());
-        assert_eq!(false, round_trip(&false).unwrap());
+        check(true);
+        check(false);
     }
     #[test]
     fn signed_1_byte() {
-        assert_eq!(i8::MIN, round_trip(&i8::MIN).unwrap());
-        assert_eq!(i8::MAX, round_trip(&i8::MAX).unwrap());
+        check(i8::MIN);
+        check(0i8);
+        check(i8::MAX);
     }
     #[test]
     fn signed_2_bytes() {
-        assert_eq!(i16::MIN, round_trip(&i16::MIN).unwrap());
-        assert_eq!(i16::MAX, round_trip(&i16::MAX).unwrap());
+        check(i16::MIN);
+        check(0i16);
+        check(i16::MAX);
     }
     #[test]
     fn signed_4_bytes() {
-        assert_eq!(i32::MIN, round_trip(&i32::MIN).unwrap());
-        assert_eq!(i32::MAX, round_trip(&i32::MAX).unwrap());
+        check(i32::MIN);
+        check(0i32);
+        check(i32::MAX);
     }
     #[test]
     fn signed_8_bytes() {
-        assert_eq!(i64::MIN, round_trip(&i64::MIN).unwrap());
-        assert_eq!(i64::MAX, round_trip(&i64::MAX).unwrap());
+        check(i64::MIN);
+        check(0i64);
+        check(i64::MAX);
     }
     #[test]
     fn signed_16_bytes() {
-        assert_eq!(i128::MIN, round_trip(&i128::MIN).unwrap());
-        assert_eq!(i128::MAX, round_trip(&i128::MAX).unwrap());
+        check(i128::MIN);
+        check(0i128);
+        check(i128::MAX);
     }
     #[test]
     fn unsigned_1_byte() {
-        assert_eq!(u8::MIN, round_trip(&u8::MIN).unwrap());
-        assert_eq!(u8::MAX, round_trip(&u8::MAX).unwrap());
+        check(u8::MIN);
+        check(u8::MAX);
     }
     #[test]
     fn unsigned_2_bytes() {
-        assert_eq!(u16::MIN, round_trip(&u16::MIN).unwrap());
-        assert_eq!(u16::MAX, round_trip(&u16::MAX).unwrap());
+        check(u16::MIN);
+        check(u16::MAX);
     }
     #[test]
     fn unsigned_4_bytes() {
-        assert_eq!(u32::MIN, round_trip(&u32::MIN).unwrap());
-        assert_eq!(u32::MAX, round_trip(&u32::MAX).unwrap());
+        check(u32::MIN);
+        check(u32::MAX);
     }
     #[test]
     fn unsigned_8_bytes() {
-        assert_eq!(u64::MIN, round_trip(&u64::MIN).unwrap());
-        assert_eq!(u64::MAX, round_trip(&u64::MAX).unwrap());
+        check(u64::MIN);
+        check(u64::MAX);
     }
     #[test]
     fn unsigned_16_bytes() {
-        assert_eq!(u128::MIN, round_trip(&u128::MIN).unwrap());
-        assert_eq!(u128::MAX, round_trip(&u128::MAX).unwrap());
+        check(u128::MIN);
+        check(u128::MAX);
     }
     #[test]
     fn float_4_bytes() {
-        assert_eq!(f32::MIN, round_trip(&f32::MIN).unwrap());
-        assert_eq!(f32::MAX, round_trip(&f32::MAX).unwrap());
-        assert_eq!(f32::EPSILON, round_trip(&f32::EPSILON).unwrap());
-        assert_eq!(f32::MIN_POSITIVE, round_trip(&f32::MIN_POSITIVE).unwrap());
-        const E: f32 = std::f32::consts::E;
-        assert_eq!(E, round_trip(&E).unwrap());
-        const PI: f32 = std::f32::consts::PI;
-        assert_eq!(PI, round_trip(&PI).unwrap());
+        check(f32::MIN);
+        check(f32::MAX);
+        check(f32::EPSILON);
+        check(f32::MIN_POSITIVE);
+        check(std::f32::consts::E);
+        check(std::f32::consts::PI);
     }
     #[test]
     fn float_8_bytes() {
-        assert_eq!(f64::MIN, round_trip(&f64::MIN).unwrap());
-        assert_eq!(f64::MAX, round_trip(&f64::MAX).unwrap());
-        assert_eq!(f64::EPSILON, round_trip(&f64::EPSILON).unwrap());
-        assert_eq!(f64::MIN_POSITIVE, round_trip(&f64::MIN_POSITIVE).unwrap());
-        const E: f64 = std::f64::consts::E;
-        assert_eq!(E, round_trip(&E).unwrap());
-        const PI: f64 = std::f64::consts::PI;
-        assert_eq!(PI, round_trip(&PI).unwrap());
+        check(f64::MIN);
+        check(f64::MAX);
+        check(f64::EPSILON);
+        check(f64::MIN_POSITIVE);
+        check(std::f64::consts::E);
+        check(std::f64::consts::PI);
     }
     #[test]
     fn character() {
-        assert_eq!(char::MIN, round_trip(&char::MIN).unwrap());
-        assert_eq!(char::MAX, round_trip(&char::MAX).unwrap());
+        check(char::MIN);
+        check(char::MAX);
     }
     #[test]
     fn string() {
-        let data = String::from("");
-        assert_eq!(data, round_trip(&data).unwrap());
-        let data = String::from("hello");
-        assert_eq!(data, round_trip(&data).unwrap());
-        // TODO: let data = "";
-        // assert_eq!(data, round_trip(&data).unwrap());
+        check(String::from(""));
+        check(String::from("hello"));
+        //check("");
     }
     #[test]
     fn byte_array() {
-        let data = Vec::<u8>::new();
-        assert_eq!(data, round_trip(&data).unwrap());
-        let data = vec![u8::MIN, u8::MAX];
-        assert_eq!(data, round_trip(&data).unwrap());
+        check(Vec::<u8>::new());
+        check(vec![u8::MIN, u8::MAX]);
     }
     #[test]
     fn option_and_unit() {
-        assert_eq!((), round_trip(&()).unwrap());
-        let data: Option<u8> = None;
-        assert_eq!(data, round_trip(&data).unwrap());
-        let data: Option<u8> = Some(u8::MAX);
-        assert_eq!(data, round_trip(&data).unwrap());
-        let data: Option<()> = Some(());
-        assert_eq!(data, round_trip(&data).unwrap());
-        let data: Option<Option<u8>> = Some(None);
-        assert_eq!(data, round_trip(&data).unwrap());
+        check(());
+        check(Option::<u8>::None);
+        check(Some(u8::MAX));
+        check(Some(()));
+        check(Option::<Option<u8>>::Some(None));
     }
     #[test]
     fn tuple() {
-        let data = (false, true);
-        assert_eq!(data, round_trip(&data).unwrap());
-        let data = [0, 1, 2, 3, 4, 5, 6];
-        assert_eq!(data, round_trip(&data).unwrap());
+        check((false, true));
+        check([0, 1, 2, 3, 4, 5]);
     }
     #[test]
     fn enums() {
@@ -442,62 +440,49 @@ mod data_format {
             Tuple(bool, bool),
             Struct { one: bool, two: bool },
         }
-        let data = Enum::Unit;
-        assert_eq!(data, round_trip(&data).unwrap());
-        let data = Enum::Newtype(false);
-        assert_eq!(data, round_trip(&data).unwrap());
-        let data = Enum::Tuple(false, true);
-        assert_eq!(data, round_trip(&data).unwrap());
-        let data = Enum::Struct {
+        check(Enum::Unit);
+        check(Enum::Newtype(false));
+        check(Enum::Tuple(false, true));
+        check(Enum::Struct {
             one: false,
             two: true,
-        };
-        assert_eq!(data, round_trip(&data).unwrap());
+        });
     }
     #[test]
     fn structs() {
         #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
         struct Unit;
-        let data = Unit;
-        assert_eq!(data, round_trip(&data).unwrap());
-
+        check(Unit);
         #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
         struct Newtype(bool);
-        let data = Newtype(false);
-        assert_eq!(data, round_trip(&data).unwrap());
-
+        check(Newtype(false));
         #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
         struct Tuple(bool, bool);
-        let data = Tuple(false, true);
-        assert_eq!(data, round_trip(&data).unwrap());
-
+        check(Tuple(false, true));
         #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
         struct Struct {
             one: bool,
             two: bool,
         }
-        let data = Struct {
+        check(Struct {
             one: false,
             two: true,
-        };
-        assert_eq!(data, round_trip(&data).unwrap());
+        });
     }
     #[test]
     fn seq() {
-        let data = Vec::<bool>::new();
-        assert_eq!(data, round_trip(&data).unwrap());
-        let data = vec!['a', 'b', 'c', 'd', 'e'];
-        assert_eq!(data, round_trip(&data).unwrap());
+        check(Vec::<bool>::new());
+        check(vec!['a', 'b', 'c', 'd', 'e']);
     }
     #[test]
     fn map() {
-        let mut data = BTreeMap::<String, char>::new();
-        assert_eq!(data, round_trip(&data).unwrap());
-        data.insert("zero".into(), '0');
-        data.insert("one".into(), '1');
-        data.insert("two".into(), '2');
-        data.insert("three".into(), '3');
-        assert_eq!(data, round_trip(&data).unwrap());
+        check(BTreeMap::<String, char>::new());
+        let mut map = BTreeMap::<String, char>::new();
+        map.insert("zero".into(), '0');
+        map.insert("one".into(), '1');
+        map.insert("two".into(), '2');
+        map.insert("three".into(), '3');
+        check(map);
     }
 }
 

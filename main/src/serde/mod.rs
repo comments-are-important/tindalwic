@@ -105,16 +105,13 @@ enum FileFields {
     Array,
 }
 
-#[cfg(feature = "bumpalo")]
 pub mod format {
     //! our serde data format
     extern crate alloc;
-    use crate::bumpalo::Arena;
     use crate::parse::{Build, Parse};
     use crate::{Entry, File, Item, Value};
     use ::serde::{de, ser};
     use alloc::string::{String, ToString};
-    use bumpalo::Bump;
     use core::fmt::{self, Display};
     use de::{Deserializer as _, Error as _};
 
@@ -147,7 +144,7 @@ pub mod format {
         }
     }
 
-    /// pack any `T: Serialize` into a tindalwic [`Item`], built into `build`'s arena.
+    /// build a tindalwic [`Item`] from any `T: Serialize`
     struct ItemSer<'b, 'a> {
         build: &'b mut dyn Build<'a>,
     }
@@ -583,15 +580,13 @@ pub mod format {
         }
     }
 
-    /// encode any `T: Serialize` into the tindalwic format. the top-level value must
-    /// serialize to a map/struct — tindalwic has no free-standing items.
-    pub fn to_tindalwic<T: ?Sized + ser::Serialize>(value: &T) -> Result<String> {
-        let bump = Bump::new();
-        let mut arena = Arena::new(&bump);
+    /// encode a type that is compatible with dictionary into a tindalwic data file.
+    pub fn to_tindalwic<T: ?Sized + ser::Serialize>(
+        build: &mut dyn Build,
+        value: &T,
+    ) -> Result<String> {
         let item = {
-            let mut ser = ItemSer {
-                build: arena.builder(),
-            };
+            let mut ser = ItemSer { build };
             value.serialize(&mut ser)?
         };
         let file = File::try_from_dict_without_epilog(&item)
@@ -1017,12 +1012,13 @@ pub mod format {
             }
         }
     }
-    /// unpack tindalwic data into any type that can visit {map,seq,str}
-    pub fn from_tindalwic<'de, T: ::serde::Deserialize<'de>>(encoded: &'de str) -> Result<T> {
-        let bump = Bump::new();
-        let mut arena = Arena::new(&bump);
-        let item = arena
-            .describe_errors(encoded, usize::MAX)
+    /// decode tindalwic data file into a type that is compatible with dictionary
+    pub fn from_tindalwic<'de, T: ::serde::Deserialize<'de>>(
+        parse: &mut (dyn Parse<'de> + 'de),
+        encoded: &'de str,
+    ) -> Result<T> {
+        let item = parse
+            .first_error(encoded)
             .map_err(Error::custom)?
             .embed_without_hashbang();
         let value = T::deserialize(ItemDe { encoded, item })?;

@@ -301,6 +301,7 @@ mod data_format {
     use ::serde::{Deserialize, Serialize};
     use std::collections::BTreeMap;
     use std::fmt::Debug;
+    use tindalwic::parse::Parse as _;
     use tindalwic::serde::format::{from_tindalwic, to_tindalwic};
 
     fn check<T>(value: T)
@@ -316,9 +317,11 @@ mod data_format {
         }
         let mut data = BTreeMap::new();
         data.insert("data", &value);
-        let string = to_tindalwic(&data).unwrap();
+        let bump = bumpalo::Bump::new();
+        let mut arena = tindalwic::bumpalo::Arena::new(&bump);
+        let string = to_tindalwic(arena.builder(), &data).unwrap();
         println!("## tindalwic\n{string}");
-        let mut file: BTreeMap<&str, T> = from_tindalwic(&string).unwrap();
+        let mut file: BTreeMap<&str, T> = from_tindalwic(&mut arena, &string).unwrap();
         // TODO: be better than json, be equal to value...
         assert_eq!(json, file.remove("data").unwrap());
         assert!(file.is_empty());

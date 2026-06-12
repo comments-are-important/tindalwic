@@ -101,6 +101,15 @@ pub trait Parse<'a> {
     ) -> Option<File<'a>> {
         Input::parse(self.builder(), content, report)
     }
+    /// call the parser on the provided content, give up at first error.
+    fn first_error(&mut self, content: &'a str) -> Result<File<'a>, ParseError> {
+        let mut first: Option<ParseError> = None;
+        self.report_errors(content, &mut |error| {
+            first = Some(error);
+            Reported::Abort
+        })
+        .ok_or_else(|| first.expect("error should have been reported"))
+    }
     /// call the parser on the provided content, panic if the content isn't legit.
     fn panic_first_error(&mut self, content: &'a str) -> File<'a> {
         self.report_errors(content, &mut |error| panic!("{error}"))

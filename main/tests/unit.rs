@@ -299,17 +299,26 @@ fn change_structure() {
 #[cfg(all(feature = "bumpalo", feature = "serde"))]
 mod data_format {
     use ::serde::{Deserialize, Serialize};
+    use bumpalo::Bump;
+    use rstest::{fixture, rstest};
     use std::collections::BTreeMap;
     use std::fmt::Debug;
     use tindalwic::parse::Parse as _;
     use tindalwic::serde::format::{from_tindalwic, to_tindalwic};
 
-    fn check<T>(value: T)
+    #[fixture]
+    fn bump() -> Bump {
+        bumpalo::Bump::new()
+    }
+
+    fn check<'de, T>(bump: &'de Bump, value: T)
     where
-        T: Debug + PartialEq + Serialize + for<'de> Deserialize<'de>,
+        T: Debug + PartialEq + Serialize + Deserialize<'de>,
     {
+        let mut arena = tindalwic::bumpalo::Arena::new(bump);
         println!("# {value:?}");
         let json = serde_json::to_string_pretty(&value).unwrap();
+        let json = arena.builder().intern(&json).unwrap();
         println!("## serde_json\n{}", json);
         let json: T = serde_json::from_str(&json).unwrap();
         if json != value {
@@ -317,9 +326,8 @@ mod data_format {
         }
         let mut data = BTreeMap::new();
         data.insert("data", &value);
-        let bump = bumpalo::Bump::new();
-        let mut arena = tindalwic::bumpalo::Arena::new(&bump);
         let string = to_tindalwic(arena.builder(), &data).unwrap();
+        let string = arena.builder().intern(&string).unwrap();
         println!("## tindalwic\n{string}");
         let mut file: BTreeMap<&str, T> = from_tindalwic(&mut arena, &string).unwrap();
         // TODO: be better than json, be equal to value...
@@ -327,115 +335,95 @@ mod data_format {
         assert!(file.is_empty());
     }
 
-    #[test]
-    fn boolean() {
-        check(true);
-        check(false);
+    #[rstest]
+    fn boolean(bump: Bump, #[values(false, true)] value: bool) {
+        check(&bump, value);
     }
-    #[test]
-    fn signed_1_byte() {
-        check(i8::MIN);
-        check(0i8);
-        check(i8::MAX);
+    #[rstest]
+    fn signed_1_byte(bump: Bump, #[values(i8::MIN, 0i8, i8::MAX)] value: i8) {
+        check(&bump, value);
     }
-    #[test]
-    fn signed_2_bytes() {
-        check(i16::MIN);
-        check(0i16);
-        check(i16::MAX);
+    #[rstest]
+    fn signed_2_bytes(bump: Bump, #[values(i16::MIN, 0i16, i16::MAX)] value: i16) {
+        check(&bump, value);
     }
-    #[test]
-    fn signed_4_bytes() {
-        check(i32::MIN);
-        check(0i32);
-        check(i32::MAX);
+    #[rstest]
+    fn signed_4_bytes(bump: Bump, #[values(i32::MIN, 0i32, i32::MAX)] value: i32) {
+        check(&bump, value);
     }
-    #[test]
-    fn signed_8_bytes() {
-        check(i64::MIN);
-        check(0i64);
-        check(i64::MAX);
+    #[rstest]
+    fn signed_8_bytes(bump: Bump, #[values(i64::MIN, 0i64, i64::MAX)] value: i64) {
+        check(&bump, value);
     }
-    #[test]
-    fn signed_16_bytes() {
-        check(i128::MIN);
-        check(0i128);
-        check(i128::MAX);
+    #[rstest]
+    fn signed_16_bytes(bump: Bump, #[values(i128::MIN, 0i128, i128::MAX)] value: i128) {
+        check(&bump, value);
     }
-    #[test]
-    fn unsigned_1_byte() {
-        check(u8::MIN);
-        check(u8::MAX);
+    #[rstest]
+    fn unsigned_1_byte(bump: Bump, #[values(u8::MIN, u8::MAX)] value: u8) {
+        check(&bump, value);
     }
-    #[test]
-    fn unsigned_2_bytes() {
-        check(u16::MIN);
-        check(u16::MAX);
+    #[rstest]
+    fn unsigned_2_bytes(bump: Bump, #[values(u16::MIN, u16::MAX)] value: u16) {
+        check(&bump, value);
     }
-    #[test]
-    fn unsigned_4_bytes() {
-        check(u32::MIN);
-        check(u32::MAX);
+    #[rstest]
+    fn unsigned_4_bytes(bump: Bump, #[values(u32::MIN, u32::MAX)] value: u32) {
+        check(&bump, value);
     }
-    #[test]
-    fn unsigned_8_bytes() {
-        check(u64::MIN);
-        check(u64::MAX);
+    #[rstest]
+    fn unsigned_8_bytes(bump: Bump, #[values(u64::MIN, u64::MAX)] value: u64) {
+        check(&bump, value);
     }
-    #[test]
-    fn unsigned_16_bytes() {
-        check(u128::MIN);
-        check(u128::MAX);
+    #[rstest]
+    fn unsigned_16_bytes(bump: Bump, #[values(u128::MIN, u128::MAX)] value: u128) {
+        check(&bump, value);
     }
-    #[test]
-    fn float_4_bytes() {
-        check(f32::MIN);
-        check(f32::MAX);
-        check(f32::EPSILON);
-        check(f32::MIN_POSITIVE);
-        check(std::f32::consts::E);
-        check(std::f32::consts::PI);
+    #[rstest]
+    fn float_4_bytes(
+        bump: Bump,
+        #[values(f32::MIN, f32::MAX, f32::EPSILON, f32::MIN_POSITIVE)] value: f32,
+    ) {
+        check(&bump, value);
     }
-    #[test]
-    fn float_8_bytes() {
-        check(f64::MIN);
-        check(f64::MAX);
-        check(f64::EPSILON);
-        check(f64::MIN_POSITIVE);
-        check(std::f64::consts::E);
-        check(std::f64::consts::PI);
+    #[rstest]
+    fn float_8_bytes(
+        bump: Bump,
+        #[values(f64::MIN, f64::MAX, f64::EPSILON, f64::MIN_POSITIVE)] value: f64,
+    ) {
+        check(&bump, value);
     }
-    #[test]
-    fn character() {
-        check(char::MIN);
-        check(char::MAX);
+    #[rstest]
+    fn character(bump: Bump, #[values(char::MIN, char::MAX)] value: char) {
+        check(&bump, value);
     }
-    #[test]
-    fn string() {
-        check(String::from(""));
-        check(String::from("hello"));
-        //check("");
+    #[rstest]
+    fn string(bump: Bump) {
+        check(&bump, String::from(""));
+        check(&bump, String::from("hello"));
+        check(&bump, "");
+        check(&bump, "world");
     }
-    #[test]
-    fn byte_array() {
-        check(Vec::<u8>::new());
-        check(vec![u8::MIN, u8::MAX]);
+    #[rstest]
+    fn byte_array(bump: Bump) {
+        check(&bump, Vec::<u8>::new());
+        check(&bump, vec![u8::MIN, u8::MAX]);
     }
-    #[test]
-    fn option_and_unit() {
-        check(());
-        check(Option::<u8>::None);
-        check(Some(u8::MAX));
-        check(Some(()));
-        check(Option::<Option<u8>>::Some(None));
+    #[rstest]
+    fn option_and_unit(bump: Bump) {
+        check(&bump, ());
+        check(&bump, Option::<u8>::None);
+        check(&bump, Some(u8::MAX));
+        check(&bump, Some(()));
+        check(&bump, Option::<Option<u8>>::Some(None));
     }
-    #[test]
-    fn tuple() {
-        check((false, true));
-        check([0, 1, 2, 3, 4, 5]);
+    #[rstest]
+    fn tuple(bump: Bump) {
+        check(&bump, (false, true));
+        check(&bump, [0, 1, 2, 3, 4, 5]);
     }
-    #[test]
-    fn enums() {
+    #[rstest]
+    fn enums(bump: Bump) {
         #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
         enum Enum {
             Unit,
@@ -443,49 +431,55 @@ mod data_format {
             Tuple(bool, bool),
             Struct { one: bool, two: bool },
         }
-        check(Enum::Unit);
-        check(Enum::Newtype(false));
-        check(Enum::Tuple(false, true));
-        check(Enum::Struct {
-            one: false,
-            two: true,
-        });
+        check(&bump, Enum::Unit);
+        check(&bump, Enum::Newtype(false));
+        check(&bump, Enum::Tuple(false, true));
+        check(
+            &bump,
+            Enum::Struct {
+                one: false,
+                two: true,
+            },
+        );
     }
-    #[test]
-    fn structs() {
+    #[rstest]
+    fn structs(bump: Bump) {
         #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
         struct Unit;
-        check(Unit);
+        check(&bump, Unit);
         #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
         struct Newtype(bool);
-        check(Newtype(false));
+        check(&bump, Newtype(false));
         #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
         struct Tuple(bool, bool);
-        check(Tuple(false, true));
+        check(&bump, Tuple(false, true));
         #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
         struct Struct {
             one: bool,
             two: bool,
         }
-        check(Struct {
-            one: false,
-            two: true,
-        });
+        check(
+            &bump,
+            Struct {
+                one: false,
+                two: true,
+            },
+        );
     }
-    #[test]
-    fn seq() {
-        check(Vec::<bool>::new());
-        check(vec!['a', 'b', 'c', 'd', 'e']);
+    #[rstest]
+    fn seq(bump: Bump) {
+        check(&bump, Vec::<bool>::new());
+        check(&bump, vec!['a', 'b', 'c', 'd', 'e']);
     }
-    #[test]
-    fn map() {
-        check(BTreeMap::<String, char>::new());
+    #[rstest]
+    fn map(bump: Bump) {
+        check(&bump, BTreeMap::<String, char>::new());
         let mut map = BTreeMap::<String, char>::new();
         map.insert("zero".into(), '0');
         map.insert("one".into(), '1');
         map.insert("two".into(), '2');
         map.insert("three".into(), '3');
-        check(map);
+        check(&bump, map);
     }
 }
 

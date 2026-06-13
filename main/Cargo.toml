@@ -31,6 +31,7 @@ assert-json-diff = { workspace = true }
 criterion = { workspace = true, features = ["html_reports"] }
 markdown = { workspace = true }
 rand = { workspace = true }
+rstest = { workspace = true }
 serde_json = { workspace = true, features = ["alloc"] }
 trybuild = { workspace = true }
 

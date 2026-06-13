@@ -581,8 +581,8 @@ pub mod format {
     }
 
     /// encode a type that is compatible with dictionary into a tindalwic data file.
-    pub fn to_tindalwic<T: ?Sized + ser::Serialize>(
-        build: &mut dyn Build,
+    pub fn to_tindalwic<'a, T: ?Sized + ser::Serialize>(
+        build: &mut dyn Build<'a>,
         value: &T,
     ) -> Result<String> {
         let item = {

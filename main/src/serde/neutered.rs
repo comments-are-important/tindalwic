@@ -52,11 +52,15 @@ seeded! {
         }
         fn visit_f32() {
             let mut buffer = ryu::Buffer::new();
-            Ok(Item::text(build.intern(buffer.format(v)).map_err(E::custom)?))
+            Ok(Item::text(
+                build.intern(buffer.format(v)).map_err(E::custom)?,
+            ))
         }
         fn visit_f64() {
             let mut buffer = ryu::Buffer::new();
-            Ok(Item::text(build.intern(buffer.format(v)).map_err(E::custom)?))
+            Ok(Item::text(
+                build.intern(buffer.format(v)).map_err(E::custom)?,
+            ))
         }
         fn visit_char() {
             Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
@@ -126,8 +130,11 @@ seeded! {
             let mut map = s.serialize_map(Some(this.len()))?;
             for cell in this.iter() {
                 let Entry { key, item, .. } = cell.get();
-                let first = key.lines().next().unwrap_or(""); // TODO key.one_liner
-                map.serialize_entry(first, &ItemSer(item))?;
+                if let Some(verbatim) = key.verbatim(0) {
+                    map.serialize_entry(verbatim, &ItemSer(item))?;
+                } else {
+                    map.serialize_entry(&key.joined(), &ItemSer(item))?;
+                }
             }
             map.end()
         }

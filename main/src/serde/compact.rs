@@ -212,8 +212,11 @@ seeded! {
                 fields.serialize_field("before", &CommentSer(this.before))?;
             }
             if key != 0 {
-                let first = this.key.lines().next().unwrap_or(""); // TODO key.one_liner
-                fields.serialize_field("key", first)?;
+                if let Some(verbatim) = this.key.verbatim(0) {
+                    fields.serialize_field("key", verbatim)?;
+                } else {
+                    fields.serialize_field("key", &this.key.joined())?;
+                }
             }
             if item != 0 {
                 fields.serialize_field("item", &ItemSer(this.item))?;

@@ -196,11 +196,14 @@ seeded! {
     #[deserialize_struct]
     impl Entry {
         fn serialize() {
-            let first = this.key.lines().next().unwrap_or(""); // TODO key.one_liner
             let mut fields = s.serialize_struct("Entry", 4)?;
             fields.serialize_field("gap", &this.gap)?;
             fields.serialize_field("before", &CommentSer(this.before))?;
-            fields.serialize_field("key", first)?;
+            if let Some(verbatim) = this.key.verbatim(0) {
+                fields.serialize_field("key", verbatim)?;
+            } else {
+                fields.serialize_field("key", &this.key.joined())?;
+            }
             fields.serialize_field("item", &ItemSer(this.item))?;
             fields.end()
         }

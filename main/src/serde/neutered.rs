@@ -51,10 +51,12 @@ seeded! {
             Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
         }
         fn visit_f32() {
-            Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
+            let mut buffer = ryu::Buffer::new();
+            Ok(Item::text(build.intern(buffer.format(v)).map_err(E::custom)?))
         }
         fn visit_f64() {
-            Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
+            let mut buffer = ryu::Buffer::new();
+            Ok(Item::text(build.intern(buffer.format(v)).map_err(E::custom)?))
         }
         fn visit_char() {
             Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))

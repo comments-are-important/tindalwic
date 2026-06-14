@@ -144,7 +144,7 @@ pub mod format {
         }
     }
 
-    /// build a tindalwic [`Item`] from any `T: Serialize`
+    /// build a tindalwic [Item] from any `T: Serialize`
     struct ItemSer<'b, 'a> {
         build: &'b mut dyn Build<'a>,
     }
@@ -213,61 +213,55 @@ pub mod format {
             ))
         }
         fn serialize_f32(self, v: f32) -> Result<Item<'a>> {
+            let mut buffer = ryu::Buffer::new();
             Ok(Item::text(
-                self.build.intern(&v.to_string()).map_err(Error::new)?,
+                self.build.intern(buffer.format(v)).map_err(Error::new)?,
             ))
         }
         fn serialize_f64(self, v: f64) -> Result<Item<'a>> {
+            let mut buffer = ryu::Buffer::new();
             Ok(Item::text(
-                self.build.intern(&v.to_string()).map_err(Error::new)?,
+                self.build.intern(buffer.format(v)).map_err(Error::new)?,
             ))
         }
-
         fn serialize_char(self, v: char) -> Result<Item<'a>> {
             Ok(Item::text(
                 self.build.intern(&v.to_string()).map_err(Error::new)?,
             ))
         }
+
         fn serialize_str(self, v: &str) -> Result<Item<'a>> {
             Ok(Item::text(self.build.intern(v).map_err(Error::new)?))
         }
         fn serialize_bytes(self, v: &[u8]) -> Result<Item<'a>> {
-            // differs from Neutered on purpose: no lossy Latin-1 round-trip.
-            // ItemDe::deserialize_bytes hands back the text's UTF-8 bytes, so only
-            // valid UTF-8 can round-trip; reject the rest rather than lie.
-            match core::str::from_utf8(v) {
-                Ok(s) => Ok(Item::text(self.build.intern(s).map_err(Error::new)?)),
-                Err(_) => Err(Error::new(
-                    "non-UTF-8 bytes cannot be encoded as tindalwic text",
-                )),
+            if v.is_ascii() {
+                // SAFETY: Verified it is ASCII.
+                let value = unsafe { str::from_utf8_unchecked(v) };
+                Ok(Item::text(self.build.intern(value).map_err(Error::new)?))
+            } else {
+                let value: String = v.iter().map(|&b| char::from(b)).collect();
+                Ok(Item::text(self.build.intern(&value).map_err(Error::new)?))
             }
         }
 
-        // empty Text -> None / unit on the read side
         fn serialize_none(self) -> Result<Item<'a>> {
-            Ok(Item::default())
+            Ok(Item::list(&[]))
         }
-        fn serialize_unit(self) -> Result<Item<'a>> {
-            Ok(Item::default())
-        }
-        fn serialize_unit_struct(self, _name: &'static str) -> Result<Item<'a>> {
-            // NB: ItemDe::deserialize_unit_struct routes to deserialize_any, so this
-            // won't round-trip until that's fixed to hit the unit path.
-            Ok(Item::default())
-        }
-
-        // Some(x) and newtype(x) are encoded as bare x
         fn serialize_some<T: ?Sized + ser::Serialize>(self, value: &T) -> Result<Item<'a>> {
-            value.serialize(self)
-        }
-        fn serialize_newtype_struct<T: ?Sized + ser::Serialize>(
-            self,
-            _name: &'static str,
-            value: &T,
-        ) -> Result<Item<'a>> {
-            value.serialize(self)
+            let mut seq = SerializeSeq {
+                ser: self,
+                count: 0,
+            };
+            seq.push(value)?;
+            seq.list()
         }
 
+        fn serialize_unit(self) -> Result<Item<'a>> {
+            self.serialize_none()
+        }
+        fn serialize_unit_struct(self, name: &'static str) -> Result<Item<'a>> {
+            Ok(Item::text(name))
+        }
         fn serialize_unit_variant(
             self,
             _name: &'static str,
@@ -275,6 +269,14 @@ pub mod format {
             variant: &'static str,
         ) -> Result<Item<'a>> {
             Ok(Item::text(self.build.intern(variant).map_err(Error::new)?))
+        }
+
+        fn serialize_newtype_struct<T: ?Sized + ser::Serialize>(
+            self,
+            _name: &'static str,
+            value: &T,
+        ) -> Result<Item<'a>> {
+            value.serialize(self)
         }
         fn serialize_newtype_variant<T: ?Sized + ser::Serialize>(
             self,
@@ -645,6 +647,9 @@ pub mod format {
     impl<'de, 'a> de::Deserializer<'de> for ItemDe<'de, 'a> {
         type Error = Error;
 
+        /// use Item kind (without conversion) to dispatch to visitor.
+        /// all other methods attempt a conversion but fall back here to get
+        /// the no conversion behavior or (more often) a good error.
         fn deserialize_any<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value> {
             match self.item {
                 Item::Text { value, .. } => {
@@ -654,133 +659,115 @@ pub mod format {
                         v.visit_string(value.joined())
                     }
                 }
-                Item::List { cells, .. } => v.visit_seq(de::value::SeqDeserializer::new(
-                    cells.iter().map(|cell| self.with_item(cell.get())),
-                )),
+                Item::List { cells, .. } => {
+                    let items = cells.iter().map(|cell| self.with_item(cell.get()));
+                    v.visit_seq(de::value::SeqDeserializer::new(items))
+                }
                 Item::Dict { cells, .. } => {
-                    v.visit_map(de::value::MapDeserializer::new(cells.iter().map(|cell| {
+                    let entries = cells.iter().map(|cell| {
                         let Entry { key, item, .. } = cell.get();
                         (self.with_text(key), self.with_item(item))
-                    })))
+                    });
+                    v.visit_map(de::value::MapDeserializer::new(entries))
                 }
             }
         }
 
         fn deserialize_bool<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value> {
             if let Some(value) = self.parse::<bool>() {
-                v.visit_bool(value)
-            } else {
-                self.deserialize_any(v)
+                return v.visit_bool(value);
             }
+            self.deserialize_any(v)
         }
         fn deserialize_i8<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value> {
             if let Some(value) = self.parse::<i8>() {
-                v.visit_i8(value)
-            } else {
-                self.deserialize_any(v)
+                return v.visit_i8(value);
             }
+            self.deserialize_any(v)
         }
         fn deserialize_i16<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value> {
             if let Some(value) = self.parse::<i16>() {
-                v.visit_i16(value)
-            } else {
-                self.deserialize_any(v)
+                return v.visit_i16(value);
             }
+            self.deserialize_any(v)
         }
         fn deserialize_i32<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value> {
             if let Some(value) = self.parse::<i32>() {
-                v.visit_i32(value)
-            } else {
-                self.deserialize_any(v)
+                return v.visit_i32(value);
             }
+            self.deserialize_any(v)
         }
         fn deserialize_i64<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value> {
             if let Some(value) = self.parse::<i64>() {
-                v.visit_i64(value)
-            } else {
-                self.deserialize_any(v)
+                return v.visit_i64(value);
             }
+            self.deserialize_any(v)
         }
         fn deserialize_i128<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value> {
             if let Some(value) = self.parse::<i128>() {
-                v.visit_i128(value)
-            } else {
-                self.deserialize_any(v)
+                return v.visit_i128(value);
             }
+            self.deserialize_any(v)
         }
         fn deserialize_u8<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value> {
             if let Some(value) = self.parse::<u8>() {
-                v.visit_u8(value)
-            } else {
-                self.deserialize_any(v)
+                return v.visit_u8(value);
             }
+            self.deserialize_any(v)
         }
         fn deserialize_u16<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value> {
             if let Some(value) = self.parse::<u16>() {
-                v.visit_u16(value)
-            } else {
-                self.deserialize_any(v)
+                return v.visit_u16(value);
             }
+            self.deserialize_any(v)
         }
         fn deserialize_u32<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value> {
             if let Some(value) = self.parse::<u32>() {
-                v.visit_u32(value)
-            } else {
-                self.deserialize_any(v)
+                return v.visit_u32(value);
             }
+            self.deserialize_any(v)
         }
         fn deserialize_u64<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value> {
             if let Some(value) = self.parse::<u64>() {
-                v.visit_u64(value)
-            } else {
-                self.deserialize_any(v)
+                return v.visit_u64(value);
             }
+            self.deserialize_any(v)
         }
         fn deserialize_u128<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value> {
             if let Some(value) = self.parse::<u128>() {
-                v.visit_u128(value)
-            } else {
-                self.deserialize_any(v)
+                return v.visit_u128(value);
             }
+            self.deserialize_any(v)
         }
         fn deserialize_f32<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value> {
             if let Some(value) = self.parse::<f32>() {
-                v.visit_f32(value)
-            } else {
-                self.deserialize_any(v)
+                return v.visit_f32(value);
             }
+            self.deserialize_any(v)
         }
         fn deserialize_f64<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value> {
             if let Some(value) = self.parse::<f64>() {
-                v.visit_f64(value)
-            } else {
-                self.deserialize_any(v)
+                return v.visit_f64(value);
             }
+            self.deserialize_any(v)
         }
-
         fn deserialize_char<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value> {
             fn only_char(of: &str) -> Option<char> {
-                let mut iter = of.chars();
-                if let Some(first) = iter.next() {
-                    if iter.next() == None {
-                        return Some(first);
-                    }
+                let mut iter = of.trim().chars();
+                match (iter.next(), iter.next()) {
+                    (Some(first), None) => Some(first),
+                    _ => None,
                 }
-                None
             }
             if let Item::Text { value, .. } = self.item {
                 if let Some(verbatim) = value.verbatim(0) {
                     if let Some(only) = only_char(verbatim) {
                         return v.visit_char(only);
-                    } else if let Some(trimmed) = only_char(verbatim.trim()) {
-                        return v.visit_char(trimmed);
                     }
                 } else {
                     let joined = value.joined();
                     if let Some(only) = only_char(&joined) {
                         return v.visit_char(only);
-                    } else if let Some(trimmed) = only_char(joined.trim()) {
-                        return v.visit_char(trimmed);
                     }
                 }
             }
@@ -793,14 +780,21 @@ pub mod format {
         fn deserialize_string<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value> {
             self.deserialize_any(v)
         }
-
         fn deserialize_bytes<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value> {
             if let Item::Text { value, .. } = self.item {
-                if let Some(verbatim) = self.outlive(value) {
+                if let Some(verbatim) = self.outlive(value).filter(|it| it.is_ascii()) {
                     return v.visit_borrowed_bytes(verbatim.as_bytes());
-                } else {
-                    return v.visit_byte_buf(value.joined().as_bytes().to_vec());
                 }
+                use ::bytes::{BufMut, BytesMut};
+                let value = value.joined();
+                let mut bytes = BytesMut::with_capacity(value.len());
+                for ch in value.chars() {
+                    bytes.put_u8(
+                        u8::try_from(ch)
+                            .map_err(|_| Error::new("text has char too big to fit in u8"))?,
+                    );
+                }
+                return v.visit_byte_buf(bytes.to_vec());
             }
             self.deserialize_any(v)
         }
@@ -809,34 +803,21 @@ pub mod format {
         }
 
         fn deserialize_option<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value> {
-            match self.item {
-                Item::Text { value, .. } => {
-                    if value.is_empty() {
-                        v.visit_none()
-                    } else {
-                        v.visit_some(self)
-                    }
-                }
-                Item::List { cells, .. } => {
-                    if cells.is_empty() {
-                        v.visit_none()
-                    } else {
-                        v.visit_some(self)
-                    }
-                }
-                Item::Dict { cells, .. } => {
-                    if cells.is_empty() {
-                        v.visit_none()
-                    } else {
-                        v.visit_some(self)
-                    }
-                }
+            if let Item::List { cells, .. } = self.item {
+                return match cells {
+                    [] => v.visit_none(),
+                    [value] => v.visit_some(self.with_item(value.get())),
+                    _ => Err(Error::new(
+                        "can't make option from list with more than one item",
+                    )),
+                };
             }
+            self.deserialize_any(v)
         }
 
         fn deserialize_unit<V: de::Visitor<'de>>(self, v: V) -> Result<V::Value> {
-            if let Item::Text { value, .. } = self.item {
-                if value.is_empty() {
+            if let Item::List { cells, .. } = self.item {
+                if cells.is_empty() {
                     return v.visit_unit();
                 }
             }
@@ -845,10 +826,22 @@ pub mod format {
 
         fn deserialize_unit_struct<V: de::Visitor<'de>>(
             self,
-            _name: &'static str,
+            name: &'static str,
             v: V,
         ) -> Result<V::Value> {
-            self.deserialize_unit(v)
+            if let Item::Text { value, .. } = self.item {
+                if let Some(verbatim) = value.verbatim(0) {
+                    if verbatim == name {
+                        return v.visit_unit();
+                    }
+                } else {
+                    let joined = value.joined();
+                    if joined == name {
+                        return v.visit_unit();
+                    }
+                }
+            }
+            self.deserialize_any(v)
         }
 
         fn deserialize_newtype_struct<V: de::Visitor<'de>>(

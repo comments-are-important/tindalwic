@@ -14,7 +14,7 @@ all-features = true
 [features]
 alloc = []
 bumpalo = ["alloc", "dep:bumpalo"]
-serde = ["alloc", "dep:serde"]
+serde = ["alloc", "dep:serde", "dep:ryu", "dep:bytes"]
 
 [[bench]]
 name = "rand"
@@ -23,6 +23,8 @@ harness = false
 
 [dependencies]
 bumpalo = { workspace = true, optional = true }
+bytes = { workspace = true, optional = true, features = ["serde"]}
+ryu = { workspace = true, optional = true }
 serde = { workspace = true, optional = true, features = ["derive"] }
 tindalwic-macros = { path = "../macros" }
 

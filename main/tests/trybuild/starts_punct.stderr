@@ -1,0 +1,5 @@
+error: expecting a `let` statement
+ --> tests/trybuild/starts_punct.rs:3:11
+  |
+3 |     json!(+ then more)
+  |           ^

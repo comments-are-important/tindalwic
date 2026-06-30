@@ -21,8 +21,7 @@ use syn::parse::{Parse, ParseStream, Parser};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::token::{Brace, Bracket, Paren};
-use syn::{Block, ImplItem, ItemImpl, Meta, ReturnType, Type};
-use syn::{Error, Ident, ImplItemFn, LitInt, Result, Visibility};
+use syn::{Error, Ident, LitInt, Result};
 use syn::{Token, braced, bracketed, parenthesized, parse_macro_input};
 
 #[proc_macro]
@@ -42,18 +41,6 @@ mod path;
 #[proc_macro]
 pub fn path(input: RawStream) -> RawStream {
     let output = parse_macro_input!(input as DollarCrate<path::Path>);
-    quote!(#output).into()
-}
-
-mod serde;
-/// this is too tailored to the way tindalwic implements serde to be useful outside.
-/// it has to be a proc_macro, so it has to be over here, so it has to be accessible,
-/// but it isn't reexported from the lib crate, and isn't intended for public use.
-/// the input syntax is weird, but it helps clarity by hiding boilerplate, and helps
-/// prevent bugs via a predictable pattern that works with DeserializeSeed.
-#[proc_macro]
-pub fn serialize_deserialize_seed_visit(input: RawStream) -> RawStream {
-    let output = parse_macro_input!(input as serde::SerDe);
     quote!(#output).into()
 }
 

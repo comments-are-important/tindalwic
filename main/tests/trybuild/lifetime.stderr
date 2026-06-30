@@ -1,0 +1,9 @@
+error[E0502]: cannot borrow `encoded` as mutable because it is also borrowed as immutable
+ --> tests/trybuild/lifetime.rs:6:5
+  |
+5 |     let file = arena.panic_first_error(&encoded);
+  |                                        -------- immutable borrow occurs here
+6 |     encoded.clear();
+  |     ^^^^^^^^^^^^^^^ mutable borrow occurs here
+7 |     assert!(file.hashbang.is_none());
+  |             ------------- immutable borrow later used here

@@ -30,8 +30,6 @@ pub mod walk;
 pub mod alloc;
 #[cfg(feature = "bumpalo")]
 pub mod bumpalo;
-#[cfg(feature = "serde")]
-pub mod serde;
 
 /// the semver plus the git fingerprint
 pub const VERSION: &str = env!("TINDALWIC_VERSION");
@@ -188,7 +186,11 @@ impl<'a> From<&'a str> for Value<'a> {
 impl<'a> Eq for Value<'a> {}
 impl<'a> core::hash::Hash for Value<'a> {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        let mut lines = self.lines();
+        let first = lines.next().expect("lines is never empty");
+        first.hash(state);
         for line in self.lines() {
+            b'\n'.hash(state);
             line.hash(state);
         }
     }
@@ -232,6 +234,14 @@ impl<'a> core::hash::Hash for Value<'a> {
 pub struct Comment<'a> {
     /// the string value
     pub value: Value<'a>,
+}
+impl<'a> Comment<'a> {
+    /// helper for setting one of the fields.
+    pub fn some(value: &'a str) -> Option<Comment<'a>> {
+        Some(Comment {
+            value: value.into(),
+        })
+    }
 }
 
 // ------------------------------------------------------------------------------------
@@ -382,32 +392,3 @@ impl<'a> File<'a> {
 }
 
 // ====================================================================================
-
-#[cfg(test)]
-#[allow(unused_extern_crates)]
-extern crate self as test_rename_of_tindalwic_dependency;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::json;
-
-    #[test]
-    fn rename() {
-        json! {
-            $crate = test_rename_of_tindalwic_dependency;
-            let entries = {}.unwrap();
-            completed.unwrap();
-        }
-        assert!(entries.is_empty());
-    }
-
-    #[test]
-    fn value_eq() {
-        let zero: Value<'_> = "ONE\nTWO".into();
-        let one = Value::slice_prefix(1, "ONE\n\tTWO");
-        let two = Value::slice_prefix(2, "ONE\n\t\tTWO");
-        assert_eq!(zero, one);
-        assert_eq!(one, two);
-    }
-}

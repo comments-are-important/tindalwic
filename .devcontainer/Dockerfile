@@ -21,3 +21,5 @@ RUN set -x \
  && mkdir -p ../../.cargo/bin && mv cargo-binstall ../../.cargo/bin
 
 ENV PATH="/home/node/.cargo/bin:${PATH}"
+
+COPY --from=ghcr.io/casey/just:latest /just /usr/local/bin/

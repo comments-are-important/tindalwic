@@ -1,0 +1,27 @@
+[package]
+name = "tindalwic-serde"
+description = "a serde data format for tindalwic"
+version = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+repository = { workspace = true }
+license = { workspace = true }
+
+[[bench]]
+name = "rand"
+harness = false
+
+[dependencies]
+bumpalo = { workspace = true }
+bytes = { workspace = true, features = ["serde"]}
+ryu = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+tindalwic = { path = "../main", features = ["bumpalo"] }
+
+[dev-dependencies]
+assert-json-diff = { workspace = true }
+criterion = { workspace = true, features = ["html_reports"] }
+rand = { workspace = true }
+rstest = { workspace = true }
+serde_json = { workspace = true, features = ["alloc"] }

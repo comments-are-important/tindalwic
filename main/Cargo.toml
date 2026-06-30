@@ -14,27 +14,13 @@ all-features = true
 [features]
 alloc = []
 bumpalo = ["alloc", "dep:bumpalo"]
-serde = ["alloc", "dep:serde", "dep:ryu", "dep:bytes"]
-
-[[bench]]
-name = "rand"
-required-features = ["serde"]
-harness = false
 
 [dependencies]
 bumpalo = { workspace = true, optional = true }
-bytes = { workspace = true, optional = true, features = ["serde"]}
-ryu = { workspace = true, optional = true }
-serde = { workspace = true, optional = true, features = ["derive"] }
 tindalwic-macros = { path = "../macros" }
 
 [dev-dependencies]
-assert-json-diff = { workspace = true }
-criterion = { workspace = true, features = ["html_reports"] }
 markdown = { workspace = true }
-rand = { workspace = true }
-rstest = { workspace = true }
-serde_json = { workspace = true, features = ["alloc"] }
 trybuild = { workspace = true }
 
 [lints]

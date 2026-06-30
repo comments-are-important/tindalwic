@@ -1,6 +1,5 @@
 [workspace]
-members = ["macros", "main", "webapp"]
-default-members = ["macros", "main"]
+members = ["macros", "main", "serde", "webapp"]
 resolver = "2"
 
 [workspace.package]

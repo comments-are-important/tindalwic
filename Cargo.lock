@@ -786,16 +786,8 @@ dependencies = [
 name = "tindalwic"
 version = "0.4.0"
 dependencies = [
- "assert-json-diff",
  "bumpalo",
- "bytes",
- "criterion",
  "markdown",
- "rand",
- "rstest",
- "ryu",
- "serde",
- "serde_json",
  "tindalwic-macros",
  "trybuild",
 ]
@@ -810,6 +802,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "tindalwic-serde"
+version = "0.4.0"
+dependencies = [
+ "assert-json-diff",
+ "bumpalo",
+ "bytes",
+ "criterion",
+ "rand",
+ "rstest",
+ "ryu",
+ "serde",
+ "serde_json",
+ "tindalwic",
+]
+
+[[package]]
 name = "tindalwic-webapp"
 version = "0.4.0"
 dependencies = [
@@ -819,6 +827,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tindalwic",
+ "tindalwic-serde",
  "toml_edit",
  "wasm-bindgen",
  "web-sys",

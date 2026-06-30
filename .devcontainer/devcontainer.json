@@ -15,7 +15,7 @@
         "UV_PROJECT_ENVIRONMENT": "/home/node/tindalwic.venv"
     },
     "onCreateCommand": {
-        "id": "echo '${devcontainerId}' >/tmp/.devcontainerId",
+        "id": "echo -n '${devcontainerId}' >/tmp/.devcontainerId",
         "uv": "test -e /home/node/tindalwic.venv || uv sync"
     },
     "postCreateCommand": {

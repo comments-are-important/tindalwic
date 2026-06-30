@@ -16,8 +16,8 @@ use rand::{Rng, RngExt, SeedableRng};
 use std::fmt::{self, Write};
 use tindalwic::bumpalo::Arena;
 use tindalwic::parse::{Parse, ParseError};
-use tindalwic::serde::Verbose;
 use tindalwic::{Comment, Entry, File, Item};
+use tindalwic_serde::Verbose;
 
 /// a very blurry outline of some data. created first to be able to call the
 /// Arena/Builder API in the order it requires.

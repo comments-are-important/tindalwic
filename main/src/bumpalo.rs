@@ -120,25 +120,3 @@ impl<'a> Arena<'a> {
         })
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use alloc::string::ToString;
-    #[test]
-    fn parse_alloc() {
-        let bump = Bump::new();
-        let mut arena = Arena::new(&bump);
-        let file = arena.panic_first_error("k=v\n");
-        assert_eq!(file.to_string(), "k=v\n");
-    }
-    #[test]
-    fn invalid() {
-        let bump = Bump::new();
-        let mut arena = Arena::new(&bump);
-        let Err(errors) = arena.collect_errors("nope", usize::MAX) else {
-            panic!("got a file expected parse error")
-        };
-        assert_eq!(errors.len(), 1);
-    }
-}

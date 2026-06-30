@@ -3,7 +3,7 @@ use serde::Serialize;
 use serde::de::DeserializeSeed;
 use tindalwic::File;
 use tindalwic::bumpalo::Arena;
-use tindalwic::serde::{Compact, Neutered, Verbose};
+use tindalwic_serde::{Compact, Neutered, Verbose};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(start)]

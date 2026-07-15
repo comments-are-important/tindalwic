@@ -51,7 +51,7 @@ test *OPTS: _is_running_inside_devcontainer
 
 coverage: _is_running_inside_devcontainer (_binstall "cargo-llvm-cov") _nightly
     LLVM_COV_FLAGS="--show-expansions --show-instantiations" \
-      cargo +nightly llvm-cov -p tindalwic --branch --html --test unit --all-features --show-missing-lines -vvv
+      cargo +nightly llvm-cov --html --branch -p tindalwic --test unit --all-features --show-missing-lines
 
 doc: _is_running_inside_devcontainer
     cargo doc --all-features --no-deps --document-private-items

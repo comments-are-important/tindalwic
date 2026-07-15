@@ -36,7 +36,7 @@ impl<'a, T> LowToHigh<'a, T> {
         Some(())
     }
     fn finish(&mut self, count: usize) -> Option<&'a [Cell<T>]> {
-        if self.next < count || self.next > self.done {
+        if self.next < count {
             return None;
         }
         if self.next == self.done {

@@ -7,7 +7,7 @@
             "label": "just: all",
             "group": "build",
             "type": "shell",
-            "command": "just all"
+            "command": "clear ; just all"
         }
     ]
 }

@@ -41,13 +41,6 @@ pub struct Path<'p, const ENTRY: bool> {
     branches: &'p [Branch<'p>],
 }
 impl<'p, const ENTRY: bool> Path<'p, ENTRY> {
-    /// construct an error indicating the last path step failed
-    fn error_full(&self, message: &'static str) -> PathError<'p> {
-        PathError {
-            failed: &self.branches[..],
-            message,
-        }
-    }
     /// construct an error indicating the given path step failed
     fn error_at(&self, bad: usize, message: &'static str) -> PathError<'p> {
         PathError {
@@ -98,9 +91,16 @@ impl<'p> Path<'p, false> {
                 (Branch::Text, Item::Text { .. })
                 | (Branch::List, Item::List { .. })
                 | (Branch::Dict, Item::Dict { .. }) => {
-                    return cell.ok_or_else(|| {
-                        self.error_full("path did not end at an item inside a list")
-                    });
+                    // the else branch might be impossible (because error already happened)
+                    // avoid using .ok_or_else so the closure is not an uncovered fn...
+                    return if let Some(found) = cell {
+                        Ok(found)
+                    } else {
+                        Err(self.error_at(
+                            self.branches.len() - 1,
+                            "path did not end at an item inside a list",
+                        ))
+                    };
                 }
                 _ => return Err(self.error_at(step, "wrong type of item")),
             }
@@ -151,9 +151,16 @@ impl<'p> Path<'p, true> {
                 (Branch::Text, Item::Text { .. })
                 | (Branch::List, Item::List { .. })
                 | (Branch::Dict, Item::Dict { .. }) => {
-                    return cell.ok_or_else(|| {
-                        self.error_full("path did not end at an entry inside a dict")
-                    });
+                    // the else branch might be impossible (because error already happened)
+                    // avoid using .ok_or_else so the closure is not an uncovered fn...
+                    return if let Some(found) = cell {
+                        Ok(found)
+                    } else {
+                        Err(self.error_at(
+                            self.branches.len() - 1,
+                            "path did not end at an item inside a list",
+                        ))
+                    };
                 }
                 _ => return Err(self.error_at(step, "wrong type of item")),
             }

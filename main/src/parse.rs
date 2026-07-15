@@ -2,6 +2,11 @@
 
 use crate::{Comment, Entries, Entry, File, Item, Items, Value};
 
+// there are some lines/branches here that are impossible to get coverage for,
+// and the mechanisms for suppressing the report are inadequate ... until:
+//  + https://github.com/rust-lang/rust/issues/84605
+//  + https://github.com/rust-lang/rust/issues/15701
+
 /// parsing problems
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParseError {
@@ -23,7 +28,7 @@ pub enum ParseError {
 impl core::error::Error for ParseError {}
 impl ParseError {
     /// make a Syntax error with an arbitrary span of lines.
-    fn new(start: usize, end: usize, message: &'static str) -> Self {
+    pub fn new(start: usize, end: usize, message: &'static str) -> Self {
         ParseError::Syntax {
             start,
             end,
@@ -31,7 +36,7 @@ impl ParseError {
         }
     }
     /// make a Syntax error for a single line.
-    fn at(line: usize, message: &'static str) -> Self {
+    pub fn at(line: usize, message: &'static str) -> Self {
         ParseError::new(line, line + 1, message)
     }
 }
@@ -165,9 +170,10 @@ impl<'a, 'r> Input<'a, 'r> {
             good: true,
         };
         if utf8.len() >= usize::MAX {
-            // MAX is a sentinel, so it also can't be a len. the wrap-around will almost
-            // certainly never actually occur because the arena is guaranteed to fill up
-            // long before that, but it's an easy sanity check...
+            // not covered (impossible to get, can't suppress completely).
+            // MAX is a sentinel (in Value::indent), so it can't also be a length.
+            // paranoid: no str can be this big (assuming usize correctly implemented),
+            // but it is simple and cheap to be explicit about the contract.
             input.report(ParseError::Memory("way too big"))?;
             return None;
         }
@@ -176,6 +182,9 @@ impl<'a, 'r> Input<'a, 'r> {
         let prolog = input.comment(0, b"#")?;
         let cells = input.entries(0, arena)?;
         if input.start != usize::MAX {
+            // not covered (impossible to get, can't suppress completely).
+            // current code will always report an error in `.entries()` call above,
+            // but this safety net is simple and cheap.
             input.report(ParseError::at(input.line, "unexpected leftovers"))?;
         }
         if !input.good {
@@ -193,7 +202,7 @@ impl<'a, 'r> Input<'a, 'r> {
         self.good = false;
         match (self.report)(err) {
             Reported::Abort => None,
-            _ => {
+            Reported::Continue => {
                 if let ParseError::Memory(_) = err {
                     None
                 } else {

@@ -7,20 +7,22 @@ use crate::{Comment, Entry, File, Item};
 
 use core::cell::Cell;
 use core::fmt::{Display, Formatter, Result, Write};
+use core::write;
 
 impl Display for ParseError {
     fn fmt(&self, out: &mut Formatter<'_>) -> Result {
         match self {
-            ParseError::Memory(message) => out.write_str(message),
+            ParseError::Memory(message) => write!(out, "0: error: {message}"),
             ParseError::Syntax {
                 start,
                 end,
                 message,
             } => {
-                if start + 1 == *end {
-                    write!(out, "{}: {}", start, message)
+                let last = end - 1;
+                if *start >= last {
+                    write!(out, "{start}: error: {message}")
                 } else {
-                    write!(out, "{}-{}: {}", start, end - 1, message)
+                    write!(out, "{start}: error: (thru line {last}) {message}")
                 }
             }
         }
@@ -28,7 +30,7 @@ impl Display for ParseError {
 }
 impl<'p> Display for PathError<'p> {
     fn fmt(&self, out: &mut Formatter<'_>) -> Result {
-        out.write_str("walk failed: ")?;
+        out.write_str("walk (")?;
         for branch in self.failed {
             match branch {
                 crate::walk::Branch::Item(at) => write!(out, "[{}]", at)?,
@@ -38,6 +40,8 @@ impl<'p> Display for PathError<'p> {
                 crate::walk::Branch::Dict => out.write_str("Dict")?,
             }
         }
+        out.write_str("): ")?;
+        out.write_str(self.message)?;
         Ok(())
     }
 }
@@ -48,8 +52,13 @@ impl<'a> Display for Value<'a> {
         if let Some(verbatim) = self.verbatim(0) {
             out.write_str(verbatim)
         } else {
-            for line in self.lines() {
-                out.write_str(line)?;
+            let mut lines = self.lines();
+            if let Some(first) = lines.next() {
+                out.write_str(first)?;
+                for line in lines {
+                    out.write_char('\n')?;
+                    out.write_str(line)?;
+                }
             }
             Ok(())
         }

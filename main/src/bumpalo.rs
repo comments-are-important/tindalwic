@@ -4,10 +4,12 @@ extern crate alloc;
 
 use crate::parse::{Build, Parse, ParseError, Reported};
 use crate::{Entries, Entry, File, Item, Items};
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
 use bumpalo::Bump;
 use core::cell::Cell;
+use core::fmt::Write;
+use core::writeln;
 
 /// this pattern is typically implemented atop RefCell, but because this is in a
 /// critical path, small unsafe blocks avoid the cost of those runtime checks.
@@ -101,22 +103,22 @@ impl<'a> Arena<'a> {
         })
         .ok_or_else(|| errors)
     }
-    /// call the parser on the provided content, describe any errors.
-    pub fn describe_errors(&mut self, content: &'a str, count: usize) -> Result<File<'a>, String> {
-        self.collect_errors(content, count).map_err(|errors| {
+    /// call the parser on the provided content, describe any errors using GCC format.
+    pub fn format_errors(
+        &mut self,
+        path: &str,
+        content: &'a str,
+        count: usize,
+    ) -> Result<File<'a>, String> {
+        self.collect_errors(content, count).map_err(|mut errors| {
             if errors.is_empty() {
-                String::from("an unknown error occurred")
-            } else if errors.len() == 1 {
-                errors.first().expect("len == 1").to_string()
-            } else {
-                let mut message = errors.len().to_string();
-                message.push_str(" errors:");
-                for error in errors {
-                    message.push_str("\nline #");
-                    message.push_str(&error.to_string());
-                }
-                message
+                errors.push(ParseError::at(0, "an unknown error occurred"));
             }
+            let mut out = String::new();
+            for error in errors {
+                writeln!(out, "{path}:{error}").expect("write! failed");
+            }
+            out
         })
     }
 }

@@ -15,6 +15,14 @@ fn value_eq() {
         Value::slice_prefix(1, "X\n\t").verbatim(1).unwrap().len()
     );
 }
+#[cfg(feature = "alloc")]
+#[test]
+fn value_joined() {
+    let value = Value::slice_prefix(2, "ONE\n\t\tTWO\n\t\tTHREE");
+    let expect = "ONE\nTWO\nTHREE";
+    assert_eq!(value.joined(), expect);
+    assert_eq!(value.to_string(), expect);
+}
 
 #[test]
 fn from_dict() {
@@ -95,9 +103,9 @@ fn two_lines() {
 #[test]
 fn multi_line_key() {
     arena! {
-        let mut arena = <2dict>;
+        let mut arena = <4dict,1list>;
     }
-    let data = "@one\n\ttwo\n<>\n\tv\n";
+    let data = "@one\n\ttwo\n<>\n\tv\n@l\n\t\n[]\n@d\n\t\n{}\n";
     let file = arena.panic_first_error(data);
     assert_eq!(file.to_string(), data);
     let report = &mut |err| {
@@ -112,6 +120,24 @@ fn multi_line_key() {
     assert!(arena.report_errors("@k\n<x>", report).is_none());
 }
 
+#[test]
+#[cfg(feature = "bumpalo")]
+fn walk_error() {
+    let bump = bumpalo::Bump::new();
+    let mut arena = tindalwic::bumpalo::Arena::new(&bump);
+    let file = arena
+        .panic_first_error("[data]\n\tzero\n\t{}\n\t\tk=v")
+        .embed_without_hashbang();
+    path!({"data"}List).walk(file).unwrap();
+    path!({"data"}[0]List).walk(file).unwrap_err();
+    path!({"data"}[0]Text).walk(file).unwrap();
+    path!({"data"}[1]{"x"}Text).walk(file).unwrap_err();
+    path!({"data"}[1]{"k"}Text).walk(file).unwrap();
+    assert_eq!(
+        path!({"data"}[7]Text).walk(file).unwrap_err().to_string(),
+        "walk ({data}[7]): index out of bounds"
+    );
+}
 #[test]
 fn nested_lists() {
     json! {
@@ -370,4 +396,155 @@ fn sub_dict() {
         panic!("not text?")
     };
     assert_lines_eq!(value, "v");
+}
+
+#[cfg(feature = "bumpalo")]
+mod parse_err {
+    use bumpalo::Bump;
+    use std::cell::Cell;
+    //use tindalwic::alloc::from_literal;
+    use tindalwic::bumpalo::Arena as HeapArena;
+    use tindalwic::capped::Arena as StackArena;
+    use tindalwic::parse::{Parse, ParseError};
+    use tindalwic::{Entries, Entry, Item, Items, path};
+    const NO_ITEMS: Items = &[];
+    const NO_ENTRIES: Entries = &[];
+
+    #[test]
+    fn intern_needs_bumpalo() {
+        let mut arena = StackArena::wrap(NO_ITEMS, NO_ENTRIES);
+        assert_eq!(arena.builder().intern(""), Err("intern not supported"));
+    }
+
+    #[test]
+    fn not_enough_room() {
+        let mut arena = StackArena::wrap(NO_ITEMS, NO_ENTRIES);
+        assert_eq!(
+            arena.builder().push_item(Item::default()),
+            Err("no room for item")
+        );
+        assert_eq!(
+            arena.builder().push_entry(Entry::default()),
+            Err("no room for entry")
+        );
+        assert!(arena.completed().is_some());
+        assert_eq!(0, arena.item_slots());
+        assert_eq!(0, arena.entry_slots());
+    }
+
+    #[test]
+    #[should_panic]
+    fn panic_first_error() {
+        let mut arena = StackArena::wrap(NO_ITEMS, NO_ENTRIES);
+        arena.panic_first_error("invalid");
+    }
+    #[test]
+    fn intern() {
+        let bump = Bump::new();
+        let mut arena = HeapArena::new(&bump);
+        assert_eq!(Ok("x"), arena.builder().intern("x"));
+    }
+    #[test]
+    fn format_errors() {
+        let bump = Bump::new();
+        let mut arena = HeapArena::new(&bump);
+        let content = "\tx\n\tx\nk=v";
+        let errors = arena.format_errors("", content, 1).unwrap_err();
+        assert_eq!(errors, ":1: error: (thru line 2) excess indentation\n");
+        let errors = arena.format_errors("", content, usize::MAX).unwrap_err();
+        assert_eq!(errors, ":1: error: (thru line 2) excess indentation\n");
+        let content = "\n\n\tx\nk=v";
+        let errors = arena.format_errors("", content, 1).unwrap_err();
+        assert_eq!(errors, ":1: error: consecutive empty lines\n");
+        let errors = arena.format_errors("", content, usize::MAX).unwrap_err();
+        assert_eq!(
+            errors,
+            ":1: error: consecutive empty lines\n:2: error: (thru line 3) excess indentation\n"
+        );
+    }
+    #[test]
+    fn excess_indent() {
+        let bump = Bump::new();
+        let mut arena = HeapArena::new(&bump);
+        let content = "\tx\n\tx\nk=v";
+        let errors = arena
+            .collect_errors(&content, usize::MAX)
+            .expect_err("invalid");
+        assert_eq!(errors, vec!(ParseError::new(1, 3, "excess indentation")));
+    }
+    #[test]
+    fn consecutive_empty() {
+        let bump = Bump::new();
+        let mut arena = HeapArena::new(&bump);
+        let content = "\n\n\nk=v";
+        let errors = arena
+            .collect_errors(&content, usize::MAX)
+            .expect_err("invalid");
+        assert_eq!(
+            errors,
+            vec!(ParseError::new(1, 3, "consecutive empty lines"))
+        );
+    }
+    #[test]
+    fn list_shortcut() {
+        let bump = Bump::new();
+        let mut arena = HeapArena::new(&bump);
+        let content = "[data]\n\t\n";
+        let file = arena.collect_errors(&content, usize::MAX).unwrap();
+        let cell = path!({"data"}List)
+            .walk(file.embed_without_hashbang())
+            .unwrap();
+        assert_eq!(cell.get().item, Item::list(&[Cell::new(Item::default())]));
+    }
+    #[test]
+    fn list_errors() {
+        let bump = Bump::new();
+        let mut arena = HeapArena::new(&bump);
+        let content = "[data]\n\t/\n\t#\n\t//\n\t<_\n\t[_\n\t{_\n\t<>\n\t[]\n\t{}";
+        let errors = arena
+            .collect_errors(&content, usize::MAX)
+            .expect_err("invalid");
+        assert_eq!(
+            errors,
+            vec!(
+                ParseError::at(2, "malformed // comment"),
+                ParseError::at(3, "stray `#` comment"),
+                ParseError::at(4, "no // comments in lists"),
+                ParseError::at(5, "malformed `<>` in list"),
+                ParseError::at(6, "malformed `[]` in list"),
+                ParseError::at(7, "malformed `{}` in list"),
+            )
+        );
+    }
+    #[test]
+    fn dict_gap_error() {
+        let mut arena = StackArena::wrap(NO_ITEMS, NO_ENTRIES);
+        assert_eq!(
+            arena.first_error("//"),
+            Err(ParseError::at(2, "gap/before but no key"))
+        );
+        assert_eq!(
+            arena.first_error("\n"),
+            Err(ParseError::at(2, "gap/before but no key"))
+        );
+    }
+    #[test]
+    fn dict_errors() {
+        let bump = Bump::new();
+        let mut arena = HeapArena::new(&bump);
+        let content = "{data}\n\t/\n\t#\n\t<_\n\t[_\n\t{_\n\t<t>\n\t[l]\n\t{d}";
+        let errors = arena
+            .collect_errors(&content, usize::MAX)
+            .expect_err("invalid");
+        assert_eq!(
+            errors,
+            vec!(
+                ParseError::at(2, "malformed // comment"),
+                ParseError::at(3, "stray `#` comment"),
+                ParseError::at(4, "malformed `<key>` in dict"),
+                ParseError::at(5, "malformed `[key]` in dict"),
+                ParseError::at(6, "malformed `{key}` in dict"),
+            )
+        );
+    }
 }

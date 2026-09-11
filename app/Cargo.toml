@@ -1,0 +1,20 @@
+[package]
+name = "tindalwic-cli"
+description = "do tindalwic things from the shell"
+version = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+repository = { workspace = true }
+license = { workspace = true }
+
+[dependencies]
+bumpalo = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+rand = { workspace = true }
+tindalwic = { path = "../core", features = ["bumpalo"] }
+tindalwic-serde = { path = "../serde" }
+
+[[bin]]
+name = "tindalwic"
+path = "src/main.rs"

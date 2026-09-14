@@ -1,81 +1,162 @@
-use bumpalo::Bump;
-use clap::{Parser, Subcommand};
-use rand::rngs::SmallRng;
-use rand::{RngExt, SeedableRng};
-use tindalwic::bumpalo::Arena;
-use tindalwic::{Entry, Item};
-use tindalwic_cli::random::Random;
+use std::io::prelude::*;
+use std::path::PathBuf;
+use std::{fs, io};
 
-fn parse_hex(s: &str) -> Result<u64, std::num::ParseIntError> {
-    u64::from_str_radix(s, 16)
+use anyhow::{Error, Result, bail};
+use bumpalo::Bump;
+use clap::{Parser, Subcommand, ValueEnum};
+use tindalwic::bumpalo::Arena;
+use tindalwic_cli::*;
+use tindalwic_serde::Neutered;
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+enum Input {
+    YAML,
+    TOML,
+    JSON,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+enum Output {
+    YAML,
+    TOML,
+    JSON,
+    SCM, // https://tree-sitter.github.io/tree-sitter/cli/parse.html#--no-ranges
 }
 
 #[derive(Parser)]
-#[command(version, about, long_about = None)]
+#[command(version = tindalwic::VERSION)]
+#[command(about = "Text In Nested Dictionaries And Lists With Important Comments")]
+#[command(after_help = "Default FORMAT is tindalwic.")]
 struct Cli {
+    /// default is to read input, subcommand generates instead of reading
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
+
+    #[arg(short, long, value_name = "FORMAT")]
+    read: Option<Input>,
+    #[arg(short, long, value_name = "FORMAT")]
+    write: Option<Output>,
+
+    /// Instead of stdin  (FORMAT from .ext if no --read)
+    #[arg(short, long, value_name = "FILE")]
+    input: Option<PathBuf>,
+    /// Instead of stdout (FORMAT from .ext if no --write)
+    #[arg(short, long, value_name = "FILE")]
+    output: Option<PathBuf>,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 enum Command {
-    /// generate a file with random structure and values
-    Random {
-        /// how many nodes?
-        #[arg(default_value_t = 10)]
-        nodes: usize,
-        /// use full range of chars instead of just lower-case ascii
-        #[arg(long)]
-        unicode: bool,
-        /// specify the random seed
-        #[arg(long, value_parser = parse_hex)]
-        seed: Option<u64>,
-    },
+    /// Generate a file with random structure and values (no input)
+    Random(random::Args),
+    /// Error if re-encoding differs from input (no output)
+    Check,
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let cli = Cli::parse();
+impl Cli {
+    fn normalize() -> Result<Self> {
+        let mut cli = Cli::parse();
+    if cli.read.is_none() {
+        if let Some(input) = &cli.input {
+            cli.read = if let Some(ext) = input.extension() {
+                match ext.as_encoded_bytes() {
+                    b"tindalwic" | b"TINDALWIC" => None,
+                    b"yml" | b"YML" => Some(Input::YAML),
+                    b"yaml" | b"YAML" => Some(Input::YAML),
+                    b"toml" | b"TOML" => Some(Input::TOML),
+                    b"json" | b"JSON" => Some(Input::JSON),
+                    _ => bail!("unknown .{} extension", ext.to_string_lossy()),
+                }
+            } else {
+                bail!("need --read when --input lacks .ext")
+            }
+        }
+    }
+    if cli.write.is_none() {
+        if let Some(output) = &cli.output {
+            cli.write = if let Some(ext) = output.extension() {
+                match ext.as_encoded_bytes() {
+                    b"tindalwic" | b"TINDALWIC" => None,
+                    b"yml" | b"YML" => Some(Output::YAML),
+                    b"yaml" | b"YAML" => Some(Output::YAML),
+                    b"toml" | b"TOML" => Some(Output::TOML),
+                    b"json" | b"JSON" => Some(Output::JSON),
+                    b"scm" | b"SCM" => Some(Output::SCM),
+                    _ => bail!("unknown .{} extension", ext.to_string_lossy()),
+                }
+            } else {
+                bail!("need --write when --output lacks .ext")
+            }
+        }
+    }
     match &cli.command {
-        Command::Random {
-            nodes,
-            unicode,
-            seed,
-        } => {
-            let mut rng;
-            let hex = if let Some(provided) = seed {
-                rng = SmallRng::seed_from_u64(*provided);
-                String::new()
-            } else {
-                let seed = rand::rng().random();
-                rng = SmallRng::seed_from_u64(seed);
-                format!("{:X}", seed)
+        Some(Command::Random(_)) => {
+            if cli.input.is_some() || cli.read.is_some() {
+                bail!("random precludes: --input, --read");
+            }
+        }, Some(Command::Check) => {
+            if cli.output.is_some() || cli.write.is_some() {
+                bail!("check precludes: --output, --write");
+            }
+            cli.write = match &cli.read{
+                None => None,
+                Some(Input::YAML) => Some(Output::YAML),
+                Some(Input::TOML) => Some(Output::TOML),
+                Some(Input::JSON) => Some(Output::JSON),
             };
-            let bump = &Bump::new();
-            let arena = &mut Arena::new(bump);
-            let mut random = Random::new(
-                bump,
-                arena,
-                &mut rng,
-                if *unicode {
-                    ""
-                } else {
-                    "abcdefghijklmnopqrstuvwxyz"
-                },
-            )?;
-            let file = if seed.is_some() {
-                random.file(*nodes)
+        }, _=>{},
+    }
+    Ok(cli)
+    }
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::normalize()?;
+    let bump = Bump::new();
+    let mut arena = Arena::new(&bump);
+    let mut content = String::new();
+    let file = match &cli.command {
+        Some(Command::Random(generate)) => {
+            generate.file(&mut arena)?
+        }
+        _ => {
+            let path = if let Some(input) = &cli.input {
+                content = fs::read_to_string(input)?;
+                arena.intern(&input.to_string_lossy())
             } else {
-                random.embedded(
-                    "data".into(),
-                    *nodes,
-                    Entry {
-                        key: "--seed".into(),
-                        item: Item::text(&hex),
-                        ..Default::default()
-                    },
-                )
-            }?;
-            print!("{}", file);
+                io::stdin().read_to_string(&mut content)?;
+                "<stdin>"
+            };
+            match &cli.read {
+                None => arena
+                    .format_errors(path, &content, usize::MAX)
+                    .map_err(Error::msg)?,
+                Some(Input::YAML) => from_yaml(&content, Neutered::seed(&mut arena))?,
+                Some(Input::TOML) => from_toml(&content, Neutered::seed(&mut arena))?,
+                Some(Input::JSON) => from_json(&content, Neutered::seed(&mut arena))?,
+            }
+        }
+    };
+    let encoded = match &cli.write {
+        None => file.to_string(),
+        Some(Output::YAML) => into_yaml(&Neutered(file))?,
+        Some(Output::TOML) => into_toml(&Neutered(file))?,
+        Some(Output::JSON) => into_json(&Neutered(file))?,
+        Some(Output::SCM) => sitter::Sitter::to_scheme(&file)?,
+    };
+    match &cli.command {
+        Some(Command::Check) => {
+            if encoded != content {
+                bail!("different")
+            }
+        }
+        _ => {
+            if let Some(output) = &cli.output {
+                fs::write(output, encoded)?;
+            } else {
+                print!("{encoded}");
+            }
         }
     }
     Ok(())

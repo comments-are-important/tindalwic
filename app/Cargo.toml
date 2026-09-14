@@ -9,11 +9,17 @@ repository = { workspace = true }
 license = { workspace = true }
 
 [dependencies]
+anyhow = { workspace = true }
 bumpalo = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 rand = { workspace = true }
+time = { workspace = true, features = ["formatting"] }
 tindalwic = { path = "../core", features = ["bumpalo"] }
 tindalwic-serde = { path = "../serde" }
+serde = { workspace = true }
+serde_json = { workspace = true, features = ["alloc"] }
+toml_edit = { workspace = true, features = ["serde"] }
+yaml_serde = { workspace = true }
 
 [[bin]]
 name = "tindalwic"

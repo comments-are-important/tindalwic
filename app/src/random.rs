@@ -1,17 +1,55 @@
-//! generate random files, run them through the library algorithms.
-//! the randomness is not attempting to produce data that mimics the real world in any
-//! way. other benchmarks do that. instead, the ratios here are chosen to even out the
-//! library profiling line hit counts that would happen during this test: all the
-//! branches coming from each decision point in the algorithms should be taken roughly
-//! the same number of times.
-
-use bumpalo::Bump;
 use rand::prelude::IndexedRandom;
-use rand::{Rng, RngExt};
+use rand::rngs::SmallRng;
+use rand::{Rng, RngExt, SeedableRng as _};
 use std::fmt::{self, Write};
 use tindalwic::bumpalo::Arena;
 use tindalwic::parse::Parse as _;
-use tindalwic::{Comment, Entry, File, Item, Value};
+use tindalwic::{Comment, Entry, File, Item, VERSION};
+
+#[derive(clap::Args, Debug)]
+pub struct Args {
+    /// how many items?
+    #[arg(default_value_t = 10)]
+    items: usize,
+    /// use full range of chars instead of just lower-case ascii
+    #[arg(long)]
+    unicode: bool,
+    /// specify the random seed
+    #[arg(long, value_parser = |s:&str|u64::from_str_radix(s, 16))]
+    seed: Option<u64>,
+}
+impl Args {
+    pub fn file<'a>(&self, arena: &mut Arena<'a>) -> anyhow::Result<File<'a>> {
+        let mut hashbang = String::new();
+        for arg in std::env::args() {
+            if hashbang.is_empty() {
+                hashbang.push_str("/usr/bin/env -S tindalwic");
+            } else {
+                hashbang.push(' ');
+                hashbang.push_str(&arg);
+            }
+        }
+        let mut seed = self.seed.unwrap_or_default();
+        if self.seed.is_none() {
+            seed = rand::rng().random();
+            hashbang.push_str(" --seed=");
+            write!(hashbang, "{:X}", seed)?;
+        }
+        hashbang.push_str("\nat ");
+        hashbang.push_str(&super::now());
+        hashbang.push_str(" by version ");
+        hashbang.push_str(VERSION);
+        let mut rng = SmallRng::seed_from_u64(seed);
+        let sample = if self.unicode {
+            ""
+        } else {
+            "abcdefghijklmnopqrstuvwxyz"
+        };
+        let mut file = Random::new(arena, &mut rng, sample)?.file(self.items)?;
+        file.hashbang = Comment::some(arena.intern(&hashbang));
+        Ok(file)
+    }
+}
 
 /// a very blurry outline of some data. created first to be able to call the
 /// Arena API in the order it requires.
@@ -82,24 +120,21 @@ impl fmt::Display for Silhouette {
 
 /// generate random files containing the requested number of items.
 pub struct Random<'a, 'r, R: Rng + ?Sized> {
-    bump: &'a Bump,
     arena: &'r mut Arena<'a>,
     rng: &'r mut R,
     sample: Vec<char>,
 }
 impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
     pub fn new(
-        bump: &'a Bump,
         arena: &'r mut Arena<'a>,
         rng: &'r mut R,
         sample: &'static str,
-    ) -> Result<Self, &'static str> {
+    ) -> anyhow::Result<Self> {
         let sample: Vec<char> = sample.chars().collect();
         if sample.contains(&'\n') {
-            return Err("can't have LF char in sample");
+            anyhow::bail!("can't have LF char in sample");
         }
         Ok(Random {
-            bump,
             arena,
             rng,
             sample,
@@ -134,7 +169,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
                 }
             }
         }
-        self.bump.alloc_str(&value)
+        self.arena.intern(&value)
     }
     fn comment(&mut self) -> Option<Comment<'a>> {
         if self.rng.random_bool(0.5) {
@@ -145,7 +180,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
             None
         }
     }
-    fn item(&mut self, shape: &Option<Silhouette>) -> Result<Item<'a>, &'static str> {
+    fn item(&mut self, shape: &Option<Silhouette>) -> anyhow::Result<Item<'a>> {
         Ok(if let Some(parent) = shape {
             if self.rng.random_ratio(1, 2) {
                 let count = self.entries(&parent.children)?;
@@ -158,71 +193,66 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
             Item::text(self.value())
         })
     }
-    fn items(&mut self, kids: &[Option<Silhouette>]) -> Result<usize, &'static str> {
+    fn items(&mut self, kids: &[Option<Silhouette>]) -> anyhow::Result<usize> {
         for kid in kids {
             let item = self.item(kid)?;
-            self.arena.builder().push_item(item)?;
+            self.arena
+                .builder()
+                .push_item(item)
+                .map_err(anyhow::Error::msg)?;
         }
         Ok(kids.len())
     }
-    fn list(&mut self, count: usize) -> Result<Item<'a>, &'static str> {
+    fn list(&mut self, count: usize) -> anyhow::Result<Item<'a>> {
         Ok(Item::List {
             prolog: self.comment(),
-            cells: self.arena.builder().finish_items(count)?,
+            cells: self
+                .arena
+                .builder()
+                .finish_items(count)
+                .map_err(anyhow::Error::msg)?,
             epilog: self.comment(),
         })
     }
-    fn entries(&mut self, kids: &[Option<Silhouette>]) -> Result<usize, &'static str> {
+    fn entries(&mut self, kids: &[Option<Silhouette>]) -> anyhow::Result<usize> {
         for kid in kids {
             let before = self.comment();
             let key = self.value().into();
             let item = self.item(kid)?;
-            self.arena.builder().push_entry(Entry {
-                gap: self.rng.random_bool(0.2),
-                before,
-                key,
-                item,
-            })?;
+            self.arena
+                .builder()
+                .push_entry(Entry {
+                    gap: self.rng.random_bool(0.2),
+                    before,
+                    key,
+                    item,
+                })
+                .map_err(anyhow::Error::msg)?;
         }
         Ok(kids.len())
     }
-    fn dict(&mut self, count: usize) -> Result<Item<'a>, &'static str> {
+    fn dict(&mut self, count: usize) -> anyhow::Result<Item<'a>> {
         Ok(Item::Dict {
             prolog: self.comment(),
-            cells: self.arena.builder().finish_entries(count)?,
+            cells: self
+                .arena
+                .builder()
+                .finish_entries(count)
+                .map_err(anyhow::Error::msg)?,
             epilog: self.comment(),
         })
     }
-    pub fn file(&mut self, grow: usize) -> Result<File<'a>, &'static str> {
-        let hashbang = self.comment();
+    pub fn file(&mut self, grow: usize) -> anyhow::Result<File<'a>> {
         let shape = Silhouette::random(grow, self.rng);
         let count = self.entries(&shape.children)?;
         Ok(File {
-            hashbang,
+            hashbang: self.comment(),
             prolog: self.comment(),
-            cells: self.arena.builder().finish_entries(count)?,
-        })
-    }
-    pub fn embedded(
-        &mut self,
-        key: Value<'a>,
-        grow: usize,
-        meta: Entry<'a>,
-    ) -> Result<File<'a>, &'static str> {
-        self.arena.builder().push_entry(meta)?;
-        let hashbang = self.comment();
-        let shape = Silhouette::random(grow, self.rng);
-        let count = self.entries(&shape.children)?;
-        let item = self.dict(count)?;
-        self.arena.builder().push_entry(Entry {
-            key,
-            item,
-            ..Default::default()
-        })?;
-        Ok(File {
-            hashbang,
-            prolog: None,
-            cells: self.arena.builder().finish_entries(2)?,
+            cells: self
+                .arena
+                .builder()
+                .finish_entries(count)
+                .map_err(anyhow::Error::msg)?,
         })
     }
 }

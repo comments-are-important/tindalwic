@@ -1,9 +1,11 @@
+lints = { workspace = true }
+
 [package]
 name = "tindalwic-cli"
 description = "do tindalwic things from the shell"
 version = { workspace = true }
 edition = { workspace = true }
-rust-version = { workspace = true }
+rust-version = "1.88"
 authors = { workspace = true }
 repository = { workspace = true }
 license = { workspace = true }
@@ -20,7 +22,3 @@ serde = { workspace = true }
 serde_json = { workspace = true, features = ["alloc"] }
 toml_edit = { workspace = true, features = ["serde"] }
 yaml_serde = { workspace = true }
-
-[[bin]]
-name = "tindalwic"
-path = "src/main.rs"

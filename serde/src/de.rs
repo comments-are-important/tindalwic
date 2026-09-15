@@ -18,6 +18,7 @@ pub fn from_tindalwic<'de, T: ::serde::Deserialize<'de>>(
     Ok(value)
 }
 
+/// [conventional](https://serde.rs/conventions.html) Deserializer type
 #[derive(Copy, Clone)]
 pub struct ItemDe<'de, 'a> {
     encoded: &'de str,
@@ -87,8 +88,10 @@ impl<'de, 'a> serde::Deserializer<'de> for ItemDe<'de, 'a> {
             }
             Item::Dict { cells, .. } => {
                 let entries = cells.iter().map(|cell| {
-                    let Entry { key, item, .. } = cell.get();
-                    (self.with_text(key), self.with_item(item))
+                    let Entry {
+                        name: key, item, ..
+                    } = cell.get();
+                    (self.with_text(key.key), self.with_item(item))
                 });
                 v.visit_map(serde::de::value::MapDeserializer::new(entries))
             }
@@ -317,10 +320,12 @@ impl<'de, 'a> serde::Deserializer<'de> for ItemDe<'de, 'a> {
                 payload: None,
             }),
             Item::Dict { cells: [entry], .. } => {
-                let Entry { key, item, .. } = entry.get();
+                let Entry {
+                    name: key, item, ..
+                } = entry.get();
                 v.visit_enum(EnumDe {
                     de: &self,
-                    name: key,
+                    name: key.key,
                     payload: Some(item),
                 })
             }

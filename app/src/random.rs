@@ -4,7 +4,7 @@ use rand::{Rng, RngExt, SeedableRng as _};
 use std::fmt::{self, Write};
 use tindalwic::bumpalo::Arena;
 use tindalwic::parse::Parse as _;
-use tindalwic::{Comment, Entry, File, Item, VERSION};
+use tindalwic::{Comment, Entry, File, Item, Name, VERSION};
 
 #[derive(clap::Args, Debug)]
 pub struct Args {
@@ -29,9 +29,10 @@ impl Args {
                 hashbang.push_str(&arg);
             }
         }
-        let mut seed = self.seed.unwrap_or_default();
+        let seed = self.seed.unwrap_or_default();
         if self.seed.is_none() {
-            seed = rand::rng().random();
+            let mut bootstrap: SmallRng = rand::make_rng();
+            let seed: u64 = bootstrap.random();
             hashbang.push_str(" --seed=");
             write!(hashbang, "{:X}", seed)?;
         }
@@ -134,11 +135,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
         if sample.contains(&'\n') {
             anyhow::bail!("can't have LF char in sample");
         }
-        Ok(Random {
-            arena,
-            rng,
-            sample,
-        })
+        Ok(Random { arena, rng, sample })
     }
     fn not_linefeed(&mut self) -> char {
         if !self.sample.is_empty() {
@@ -190,7 +187,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
                 self.list(count)?
             }
         } else {
-            Item::text(self.value())
+            Item::text(self.value().into())
         })
     }
     fn items(&mut self, kids: &[Option<Silhouette>]) -> anyhow::Result<usize> {
@@ -216,17 +213,15 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
     }
     fn entries(&mut self, kids: &[Option<Silhouette>]) -> anyhow::Result<usize> {
         for kid in kids {
-            let before = self.comment();
-            let key = self.value().into();
+            let key = Name {
+                gap: self.rng.random_bool(0.2),
+                comment: self.comment(),
+                key: self.value().into(),
+            };
             let item = self.item(kid)?;
             self.arena
                 .builder()
-                .push_entry(Entry {
-                    gap: self.rng.random_bool(0.2),
-                    before,
-                    key,
-                    item,
-                })
+                .push_entry(Entry { name: key, item })
                 .map_err(anyhow::Error::msg)?;
         }
         Ok(kids.len())

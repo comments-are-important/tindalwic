@@ -86,7 +86,9 @@ impl<'a> Arena<'a> {
     }
     /// copy the provided &str into the Bump
     pub fn intern(&mut self, value: &'_ str) -> &'a str {
-        self.builder.intern(value).expect("HeapBuilder.intern is infallible")
+        self.builder
+            .intern(value)
+            .expect("HeapBuilder.intern is infallible")
     }
     /// call the parser on the provided content, collect first `count` errors.
     pub fn collect_errors(

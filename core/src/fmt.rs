@@ -207,15 +207,15 @@ impl<'o, 'f> Output<'o, 'f> {
     }
     fn entry_in_dict<'a>(&mut self, cell: &Cell<Entry<'a>>) -> Result {
         let entry = cell.get();
-        if entry.gap {
+        if entry.name.gap {
             // TODO be strict? f.write_indent(self.indent)?;
             self.out.write_char('\n')?;
         }
-        self.comment("//", &entry.before)?;
+        self.comment("//", &entry.name.comment)?;
         match &entry.item {
             Item::Text { value, epilog } => {
                 self.indent()?;
-                if let Some(only) = entry.key.only_line() {
+                if let Some(only) = entry.name.key.only_line() {
                     if let Some(text) = Output::one_liner_in_dict(value, only) {
                         self.out.write_str(only)?;
                         self.out.write_char('=')?;
@@ -233,7 +233,7 @@ impl<'o, 'f> Output<'o, 'f> {
                 } else {
                     self.out.write_char('@')?;
                     self.indent += 1;
-                    self.string(&entry.key)?;
+                    self.string(&entry.name.key)?;
                     self.indent -= 1;
                     self.indent()?;
                     self.out.write_str("<>\n")?;
@@ -250,14 +250,14 @@ impl<'o, 'f> Output<'o, 'f> {
                 epilog,
             } => {
                 self.indent()?;
-                if let Some(only) = entry.key.only_line() {
+                if let Some(only) = entry.name.key.only_line() {
                     self.out.write_char('[')?;
                     self.out.write_str(only)?;
                     self.out.write_str("]\n")?;
                 } else {
                     self.out.write_char('@')?;
                     self.indent += 1;
-                    self.string(&entry.key)?;
+                    self.string(&entry.name.key)?;
                     self.indent -= 1;
                     self.indent()?;
                     self.out.write_str("[]\n")?;
@@ -276,14 +276,14 @@ impl<'o, 'f> Output<'o, 'f> {
                 epilog,
             } => {
                 self.indent()?;
-                if let Some(only) = entry.key.only_line() {
+                if let Some(only) = entry.name.key.only_line() {
                     self.out.write_char('{')?;
                     self.out.write_str(only)?;
                     self.out.write_str("}\n")?;
                 } else {
                     self.out.write_char('@')?;
                     self.indent += 1;
-                    self.string(&entry.key)?;
+                    self.string(&entry.name.key)?;
                     self.indent -= 1;
                     self.indent()?;
                     self.out.write_str("{}\n")?;

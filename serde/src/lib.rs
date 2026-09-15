@@ -7,7 +7,9 @@ use std::fmt::{self, Display};
 use std::result::Result as StdResult;
 use tindalwic::{Comment, Value, parse::Build};
 
+/// [conventional](https://serde.rs/conventions.html) Deserializer API module
 pub mod de;
+/// [conventional](https://serde.rs/conventions.html) Serializer API module
 pub mod ser;
 
 /// specialized to Err([Error])

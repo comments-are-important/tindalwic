@@ -10,6 +10,7 @@ use serde::de::{
 use serde::ser::{Serialize, Serializer};
 use serde::ser::{SerializeSeq as _, SerializeStruct as _};
 use std::fmt;
+use tindalwic::Name;
 use tindalwic::{
     Comment, Entries, Entry, File, Item, Items, Value,
     parse::{Build, Parse},
@@ -252,12 +253,12 @@ impl<'a> Serialize for EntrySer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let EntrySer(this) = self;
         let mut fields = s.serialize_struct("Entry", 4)?;
-        fields.serialize_field("gap", &this.gap)?;
-        fields.serialize_field("before", &CommentSer(this.before))?;
-        if let Some(verbatim) = this.key.verbatim(0) {
+        fields.serialize_field("gap", &this.name.gap)?;
+        fields.serialize_field("before", &CommentSer(this.name.comment))?;
+        if let Some(verbatim) = this.name.key.verbatim(0) {
             fields.serialize_field("key", verbatim)?;
         } else {
-            fields.serialize_field("key", &this.key.joined())?;
+            fields.serialize_field("key", &this.name.key.joined())?;
         }
         fields.serialize_field("item", &ItemSer(this.item))?;
         fields.end()
@@ -283,12 +284,14 @@ impl<'de, 'a, 'b> Visitor<'de> for EntryDe<'a, 'b> {
         let EntryDe(build) = self;
         let err = || A::Error::invalid_length(4, &EntryDe::EXPECTING);
         Ok(Entry {
-            gap: seq.next_element()?.ok_or_else(err)?,
-            before: seq.next_element_seed(CommentDe(build))?.ok_or_else(err)?,
-            key: build
-                .intern(&seq.next_element::<String>()?.ok_or_else(err)?)
-                .map_err(A::Error::custom)?
-                .into(),
+            name: Name {
+                gap: seq.next_element()?.ok_or_else(err)?,
+                comment: seq.next_element_seed(CommentDe(build))?.ok_or_else(err)?,
+                key: build
+                    .intern(&seq.next_element::<String>()?.ok_or_else(err)?)
+                    .map_err(A::Error::custom)?
+                    .into(),
+            },
             item: seq.next_element_seed(ItemDe(build))?.ok_or_else(err)?,
         })
     }
@@ -332,9 +335,11 @@ impl<'de, 'a, 'b> Visitor<'de> for EntryDe<'a, 'b> {
             }
         }
         Ok(Entry {
-            gap: gap.ok_or_else(|| A::Error::missing_field("gap"))?,
-            before: before.ok_or_else(|| A::Error::missing_field("before"))?,
-            key: key.ok_or_else(|| A::Error::missing_field("key"))?,
+            name: Name {
+                gap: gap.ok_or_else(|| A::Error::missing_field("gap"))?,
+                comment: before.ok_or_else(|| A::Error::missing_field("before"))?,
+                key: key.ok_or_else(|| A::Error::missing_field("key"))?,
+            },
             item: item.ok_or_else(|| A::Error::missing_field("item"))?,
         })
     }

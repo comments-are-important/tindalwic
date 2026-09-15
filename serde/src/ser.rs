@@ -1,7 +1,7 @@
 use super::{Error, Result};
 use serde::ser::Serialize;
 use tindalwic::parse::Build;
-use tindalwic::{Entry, File, Item, Value};
+use tindalwic::{Entries, Entry, File, Item, Items, Name, Value};
 
 /// encode a type that is compatible with dictionary into a tindalwic data file.
 pub fn to_tindalwic<'a, T: ?Sized + Serialize>(
@@ -21,6 +21,24 @@ pub fn to_tindalwic<'a, T: ?Sized + Serialize>(
 pub struct ItemSer<'b, 'a> {
     build: &'b mut dyn Build<'a>,
 }
+impl<'c, 'b, 'a> ItemSer<'b, 'a> {
+    // gather all the .map_err to one place
+    fn push_item(&mut self, item: Item<'a>) -> Result<()> {
+        self.build.push_item(item).map_err(Error::new)
+    }
+    fn finish_items(&mut self, count: usize) -> Result<Items<'a>> {
+        self.build.finish_items(count).map_err(Error::new)
+    }
+    fn push_entry(&mut self, entry: Entry<'a>) -> Result<()> {
+        self.build.push_entry(entry).map_err(Error::new)
+    }
+    fn finish_entries(&mut self, count: usize) -> Result<Entries<'a>> {
+        self.build.finish_entries(count).map_err(Error::new)
+    }
+    fn intern(&mut self, v: &str) -> Result<&'a str> {
+        self.build.intern(v).map_err(Error::new)
+    }
+}
 impl<'c, 'b, 'a> serde::Serializer for &'c mut ItemSer<'b, 'a> {
     type Ok = Item<'a>;
     type Error = Error;
@@ -33,87 +51,59 @@ impl<'c, 'b, 'a> serde::Serializer for &'c mut ItemSer<'b, 'a> {
     type SerializeStructVariant = StructVariantSer<'c, 'b, 'a>;
 
     fn serialize_bool(self, v: bool) -> Result<Item<'a>> {
-        Ok(Item::text(if v { "true" } else { "false" }))
+        self.serialize_str(if v { "true" } else { "false" })
     }
     fn serialize_i8(self, v: i8) -> Result<Item<'a>> {
-        Ok(Item::text(
-            self.build.intern(&v.to_string()).map_err(Error::new)?,
-        ))
+        self.serialize_str(&v.to_string())
     }
     fn serialize_i16(self, v: i16) -> Result<Item<'a>> {
-        Ok(Item::text(
-            self.build.intern(&v.to_string()).map_err(Error::new)?,
-        ))
+        self.serialize_str(&v.to_string())
     }
     fn serialize_i32(self, v: i32) -> Result<Item<'a>> {
-        Ok(Item::text(
-            self.build.intern(&v.to_string()).map_err(Error::new)?,
-        ))
+        self.serialize_str(&v.to_string())
     }
     fn serialize_i64(self, v: i64) -> Result<Item<'a>> {
-        Ok(Item::text(
-            self.build.intern(&v.to_string()).map_err(Error::new)?,
-        ))
+        self.serialize_str(&v.to_string())
     }
     fn serialize_i128(self, v: i128) -> Result<Item<'a>> {
-        Ok(Item::text(
-            self.build.intern(&v.to_string()).map_err(Error::new)?,
-        ))
+        self.serialize_str(&v.to_string())
     }
     fn serialize_u8(self, v: u8) -> Result<Item<'a>> {
-        Ok(Item::text(
-            self.build.intern(&v.to_string()).map_err(Error::new)?,
-        ))
+        self.serialize_str(&v.to_string())
     }
     fn serialize_u16(self, v: u16) -> Result<Item<'a>> {
-        Ok(Item::text(
-            self.build.intern(&v.to_string()).map_err(Error::new)?,
-        ))
+        self.serialize_str(&v.to_string())
     }
     fn serialize_u32(self, v: u32) -> Result<Item<'a>> {
-        Ok(Item::text(
-            self.build.intern(&v.to_string()).map_err(Error::new)?,
-        ))
+        self.serialize_str(&v.to_string())
     }
     fn serialize_u64(self, v: u64) -> Result<Item<'a>> {
-        Ok(Item::text(
-            self.build.intern(&v.to_string()).map_err(Error::new)?,
-        ))
+        self.serialize_str(&v.to_string())
     }
     fn serialize_u128(self, v: u128) -> Result<Item<'a>> {
-        Ok(Item::text(
-            self.build.intern(&v.to_string()).map_err(Error::new)?,
-        ))
+        self.serialize_str(&v.to_string())
     }
     fn serialize_f32(self, v: f32) -> Result<Item<'a>> {
-        let mut buffer = ryu::Buffer::new();
-        Ok(Item::text(
-            self.build.intern(buffer.format(v)).map_err(Error::new)?,
-        ))
+        self.serialize_str(ryu::Buffer::new().format(v))
     }
     fn serialize_f64(self, v: f64) -> Result<Item<'a>> {
-        let mut buffer = ryu::Buffer::new();
-        Ok(Item::text(
-            self.build.intern(buffer.format(v)).map_err(Error::new)?,
-        ))
+        self.serialize_str(ryu::Buffer::new().format(v))
     }
     fn serialize_char(self, v: char) -> Result<Item<'a>> {
-        Ok(Item::text(
-            self.build.intern(&v.to_string()).map_err(Error::new)?,
-        ))
+        self.serialize_str(&v.to_string())
     }
 
     fn serialize_str(self, v: &str) -> Result<Item<'a>> {
-        Ok(Item::text(self.build.intern(v).map_err(Error::new)?))
+        Ok(Item::text(self.intern(v)?.into()))
     }
     fn serialize_bytes(self, v: &[u8]) -> Result<Item<'a>> {
         if v.is_ascii() {
             // SAFETY: Verified it is ASCII.
             let value = unsafe { std::str::from_utf8_unchecked(v) };
-            Ok(Item::text(self.build.intern(value).map_err(Error::new)?))
+            self.serialize_str(value)
         } else {
             let value: String = v.iter().map(|&b| char::from(b)).collect();
-            Ok(Item::text(self.build.intern(&value).map_err(Error::new)?))
+            self.serialize_str(&value)
         }
     }
 
@@ -133,7 +123,7 @@ impl<'c, 'b, 'a> serde::Serializer for &'c mut ItemSer<'b, 'a> {
         self.serialize_none()
     }
     fn serialize_unit_struct(self, name: &'static str) -> Result<Item<'a>> {
-        Ok(Item::text(name))
+        self.serialize_str(name)
     }
     fn serialize_unit_variant(
         self,
@@ -141,7 +131,7 @@ impl<'c, 'b, 'a> serde::Serializer for &'c mut ItemSer<'b, 'a> {
         _idx: u32,
         variant: &'static str,
     ) -> Result<Item<'a>> {
-        Ok(Item::text(self.build.intern(variant).map_err(Error::new)?))
+        self.serialize_str(variant)
     }
 
     fn serialize_newtype_struct<T: ?Sized + Serialize>(
@@ -158,16 +148,10 @@ impl<'c, 'b, 'a> serde::Serializer for &'c mut ItemSer<'b, 'a> {
         variant: &'static str,
         value: &T,
     ) -> Result<Item<'a>> {
-        let inner = value.serialize(&mut *self)?;
-        let key = self.build.intern(variant).map_err(Error::new)?;
-        self.build
-            .push_entry(Entry {
-                key: key.into(),
-                item: inner,
-                ..Default::default()
-            })
-            .map_err(Error::new)?;
-        let cells = self.build.finish_entries(1).map_err(Error::new)?;
+        let item = value.serialize(&mut *self)?;
+        let key = self.intern(variant)?.into();
+        self.push_entry(Entry { name: key, item })?;
+        let cells = self.finish_entries(1)?;
         Ok(Item::dict(cells))
     }
 
@@ -200,7 +184,7 @@ impl<'c, 'b, 'a> serde::Serializer for &'c mut ItemSer<'b, 'a> {
         variant: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeTupleVariant> {
-        let variant = self.build.intern(variant).map_err(Error::new)?;
+        let variant = self.intern(variant)?;
         Ok(TupleVariantSer {
             ser: self,
             variant,
@@ -227,7 +211,7 @@ impl<'c, 'b, 'a> serde::Serializer for &'c mut ItemSer<'b, 'a> {
         variant: &'static str,
         _len: usize,
     ) -> Result<Self::SerializeStructVariant> {
-        let variant = self.build.intern(variant).map_err(Error::new)?;
+        let variant = self.intern(variant)?;
         Ok(StructVariantSer {
             ser: self,
             variant,
@@ -236,6 +220,7 @@ impl<'c, 'b, 'a> serde::Serializer for &'c mut ItemSer<'b, 'a> {
     }
 }
 
+/// helper for ItemSer
 pub struct SeqSer<'c, 'b, 'a> {
     ser: &'c mut ItemSer<'b, 'a>,
     count: usize,
@@ -243,17 +228,12 @@ pub struct SeqSer<'c, 'b, 'a> {
 impl<'c, 'b, 'a> SeqSer<'c, 'b, 'a> {
     fn push<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<()> {
         let item = value.serialize(&mut *self.ser)?;
-        self.ser.build.push_item(item).map_err(Error::new)?;
+        self.ser.push_item(item)?;
         self.count += 1;
         Ok(())
     }
     fn list(self) -> Result<Item<'a>> {
-        Ok(Item::list(
-            self.ser
-                .build
-                .finish_items(self.count)
-                .map_err(Error::new)?,
-        ))
+        Ok(Item::list(self.ser.finish_items(self.count)?))
     }
 }
 impl<'c, 'b, 'a> serde::ser::SerializeSeq for SeqSer<'c, 'b, 'a> {
@@ -287,6 +267,7 @@ impl<'c, 'b, 'a> serde::ser::SerializeTupleStruct for SeqSer<'c, 'b, 'a> {
     }
 }
 
+/// helper for ItemSer
 pub struct TupleVariantSer<'c, 'b, 'a> {
     ser: &'c mut ItemSer<'b, 'a>,
     variant: &'a str,
@@ -297,30 +278,22 @@ impl<'c, 'b, 'a> serde::ser::SerializeTupleVariant for TupleVariantSer<'c, 'b, '
     type Error = Error;
     fn serialize_field<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<()> {
         let item = value.serialize(&mut *self.ser)?;
-        self.ser.build.push_item(item).map_err(Error::new)?;
+        self.ser.push_item(item)?;
         self.count += 1;
         Ok(())
     }
     fn end(self) -> Result<Item<'a>> {
-        let list = Item::list(
-            self.ser
-                .build
-                .finish_items(self.count)
-                .map_err(Error::new)?,
-        );
-        self.ser
-            .build
-            .push_entry(Entry {
-                key: self.variant.into(),
-                item: list,
-                ..Default::default()
-            })
-            .map_err(Error::new)?;
-        let cells = self.ser.build.finish_entries(1).map_err(Error::new)?;
+        let list = Item::list(self.ser.finish_items(self.count)?);
+        self.ser.push_entry(Entry {
+            name: self.variant.into(),
+            item: list,
+        })?;
+        let cells = self.ser.finish_entries(1)?;
         Ok(Item::dict(cells))
     }
 }
 
+/// helper for ItemSer
 pub struct MapSer<'c, 'b, 'a> {
     ser: &'c mut ItemSer<'b, 'a>,
     key: Option<Value<'a>>,
@@ -340,31 +313,26 @@ impl<'c, 'b, 'a> serde::ser::SerializeMap for MapSer<'c, 'b, 'a> {
     }
     fn serialize_value<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<()> {
         let item = value.serialize(&mut *self.ser)?;
-        let key = self
+        let value = self
             .key
             .take()
             .ok_or_else(|| Error::new("value before key"))?;
-        self.ser
-            .build
-            .push_entry(Entry {
-                key,
-                item,
+        self.ser.push_entry(Entry {
+            name: Name {
+                key: value,
                 ..Default::default()
-            })
-            .map_err(Error::new)?;
+            },
+            item,
+        })?;
         self.count += 1;
         Ok(())
     }
     fn end(self) -> Result<Item<'a>> {
-        Ok(Item::dict(
-            self.ser
-                .build
-                .finish_entries(self.count)
-                .map_err(Error::new)?,
-        ))
+        Ok(Item::dict(self.ser.finish_entries(self.count)?))
     }
 }
 
+/// helper for ItemSer
 pub struct StructSer<'c, 'b, 'a> {
     ser: &'c mut ItemSer<'b, 'a>,
     count: usize,
@@ -378,28 +346,21 @@ impl<'c, 'b, 'a> serde::ser::SerializeStruct for StructSer<'c, 'b, 'a> {
         value: &T,
     ) -> Result<()> {
         let item = value.serialize(&mut *self.ser)?;
-        let key = self.ser.build.intern(key).map_err(Error::new)?;
-        self.ser
-            .build
-            .push_entry(Entry {
-                key: key.into(),
-                item,
-                ..Default::default()
-            })
-            .map_err(Error::new)?;
+        let key = self.ser.intern(key)?;
+        self.ser.push_entry(Entry {
+            name: key.into(),
+            item,
+        })?;
         self.count += 1;
         Ok(())
     }
     fn end(self) -> Result<Item<'a>> {
-        let cells = self
-            .ser
-            .build
-            .finish_entries(self.count)
-            .map_err(Error::new)?;
+        let cells = self.ser.finish_entries(self.count)?;
         Ok(Item::dict(cells))
     }
 }
 
+/// helper for ItemSer
 pub struct StructVariantSer<'c, 'b, 'a> {
     ser: &'c mut ItemSer<'b, 'a>,
     variant: &'a str,
@@ -414,34 +375,21 @@ impl<'c, 'b, 'a> serde::ser::SerializeStructVariant for StructVariantSer<'c, 'b,
         value: &T,
     ) -> Result<()> {
         let item = value.serialize(&mut *self.ser)?;
-        let key = self.ser.build.intern(key).map_err(Error::new)?;
-        self.ser
-            .build
-            .push_entry(Entry {
-                key: key.into(),
-                item,
-                ..Default::default()
-            })
-            .map_err(Error::new)?;
+        let key = self.ser.intern(key)?;
+        self.ser.push_entry(Entry {
+            name: key.into(),
+            item,
+        })?;
         self.count += 1;
         Ok(())
     }
     fn end(self) -> Result<Item<'a>> {
-        let dict = Item::dict(
-            self.ser
-                .build
-                .finish_entries(self.count)
-                .map_err(Error::new)?,
-        );
-        self.ser
-            .build
-            .push_entry(Entry {
-                key: self.variant.into(),
-                item: dict,
-                ..Default::default()
-            })
-            .map_err(Error::new)?;
-        let cells = self.ser.build.finish_entries(1).map_err(Error::new)?;
+        let dict = Item::dict(self.ser.finish_entries(self.count)?);
+        self.ser.push_entry(Entry {
+            name: self.variant.into(),
+            item: dict,
+        })?;
+        let cells = self.ser.finish_entries(1)?;
         Ok(Item::dict(cells))
     }
 }

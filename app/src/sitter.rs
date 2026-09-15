@@ -29,15 +29,15 @@ impl Sitter {
     fn entry(&mut self, mut indent: usize, entry: &Entry) -> anyhow::Result<()> {
         write!(self, "\n{:indent$}(entry", "")?;
         indent += 2;
-        if entry.gap {
+        if entry.name.gap {
             write!(self, "\n{:indent$}(gap)", "")?;
         }
-        self.comment(indent, "before", &entry.before)?;
+        self.comment(indent, "comment", &entry.name.comment)?;
         self.item(indent, &entry.item)?;
-        write!(self, ")")?;
+        self.write_str(")")?;
         Ok(())
     }
-    fn item(&mut self, indent: usize, item: &Item) -> anyhow::Result<()> {
+    fn item(&mut self, mut indent: usize, item: &Item) -> anyhow::Result<()> {
         match item {
             Item::Text { value, epilog } => {
                 self.text(indent, "text", &value)?;
@@ -45,31 +45,36 @@ impl Sitter {
             }
             Item::List {
                 prolog,
-                cells: _,
+                cells,
                 epilog,
             } => {
                 self.comment(indent, "prolog", prolog)?;
-
+                write!(self, "\n{:indent$}(list", "")?;
+                indent += 2;
+                for cell in *cells {
+                    self.item(indent, &cell.get())?;
+                }
+                self.write_str(")")?;
                 self.comment(indent, "epilog", epilog)?;
             }
             Item::Dict {
                 prolog,
-                cells: _,
+                cells,
                 epilog,
             } => {
                 self.comment(indent, "prolog", prolog)?;
-
+                write!(self, "\n{:indent$}(list", "")?;
+                indent += 2;
+                for cell in *cells {
+                    self.entry(indent, &cell.get())?;
+                }
+                self.write_str(")")?;
                 self.comment(indent, "epilog", epilog)?;
             }
         }
         Ok(())
     }
-    fn comment(
-        &mut self,
-        indent: usize,
-        tag: &str,
-        maybe: &Option<Comment>,
-    ) -> anyhow::Result<()> {
+    fn comment(&mut self, indent: usize, tag: &str, maybe: &Option<Comment>) -> anyhow::Result<()> {
         if let Some(comment) = maybe {
             self.text(indent, tag, &comment.value)?;
         };

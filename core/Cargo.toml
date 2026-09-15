@@ -1,3 +1,5 @@
+lints = { workspace = true }
+
 [package]
 name = "tindalwic"
 description = "tindalwic data format and tools"
@@ -23,6 +25,3 @@ tindalwic-macros = { path = "../macros" }
 markdown = { workspace = true }
 rand = { workspace = true }
 trybuild = { workspace = true }
-
-[lints]
-workspace = true

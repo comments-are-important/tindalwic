@@ -8,6 +8,7 @@ use serde::de::{Error as _, VariantAccess as _};
 use serde::ser::{Serialize, Serializer};
 use serde::ser::{SerializeSeq as _, SerializeStruct as _};
 use std::fmt;
+use tindalwic::Name;
 use tindalwic::{
     Comment, Entries, Entry, File, Item, Items, Value,
     parse::{Build, Parse},
@@ -243,25 +244,25 @@ struct EntrySer<'a>(Entry<'a>);
 impl<'a> Serialize for EntrySer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let EntrySer(this) = self;
-        let gap = this.gap as usize;
-        let before = this.before.is_some() as usize;
-        let key = !this.key.is_empty() as usize;
+        let gap = this.name.gap as usize;
+        let comment = this.name.comment.is_some() as usize;
+        let key = !this.name.key.is_empty() as usize;
         let item = match this.item {
             Item::Text { value, epilog } => (epilog.is_some() || !value.is_empty()) as usize,
             _ => 1usize,
         };
-        let mut fields = s.serialize_struct("Entry", gap + before + key + item)?;
+        let mut fields = s.serialize_struct("Entry", gap + comment + key + item)?;
         if gap != 0 {
-            fields.serialize_field("gap", &this.gap)?;
+            fields.serialize_field("gap", &this.name.gap)?;
         }
-        if before != 0 {
-            fields.serialize_field("before", &CommentSer(this.before))?;
+        if comment != 0 {
+            fields.serialize_field("before", &CommentSer(this.name.comment))?;
         }
         if key != 0 {
-            if let Some(verbatim) = this.key.verbatim(0) {
+            if let Some(verbatim) = this.name.key.verbatim(0) {
                 fields.serialize_field("key", verbatim)?;
             } else {
-                fields.serialize_field("key", &this.key.joined())?;
+                fields.serialize_field("key", &this.name.key.joined())?;
             }
         }
         if item != 0 {
@@ -325,9 +326,11 @@ impl<'de, 'a, 'b> Visitor<'de> for EntryDe<'a, 'b> {
             }
         }
         Ok(Entry {
-            gap: gap.unwrap_or(false),
-            before: before.unwrap_or(None),
-            key: key.unwrap_or_else(Value::default),
+            name: Name {
+                gap: gap.unwrap_or(false),
+                comment: before.unwrap_or(None),
+                key: key.unwrap_or_else(Value::default),
+            },
             item: item.unwrap_or_else(Item::default),
         })
     }

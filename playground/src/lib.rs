@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use bumpalo::Bump;
 use serde::Serialize;
 use serde::de::DeserializeSeed;

@@ -14,7 +14,7 @@ use rand::{Rng, RngExt, SeedableRng};
 use std::fmt::{self, Write};
 use tindalwic::bumpalo::Arena;
 use tindalwic::parse::{Parse, ParseError};
-use tindalwic::{Comment, Entry, File, Item};
+use tindalwic::{Comment, Entry, File, Item, Name};
 
 /// a very blurry outline of some data. created first to be able to call the
 /// Arena API in the order it requires.
@@ -135,7 +135,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
                 self.list(parent)?
             }
         } else {
-            Item::text(self.value())
+            Item::text(self.value().into())
         })
     }
     fn list(&mut self, shape: &Silhouette) -> Result<Item<'a>, ParseError> {
@@ -158,15 +158,17 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
     }
     fn dict(&mut self, shape: &Silhouette) -> Result<Item<'a>, ParseError> {
         for kid in &shape.children {
-            let before = self.comment();
-            let key = self.value().into();
+            let comment = self.comment();
+            let value = self.value().into();
             let item = self.item(kid)?;
             self.arena
                 .builder()
                 .push_entry(Entry {
-                    gap: self.rng.random_bool(0.2),
-                    before,
-                    key,
+                    name: Name {
+                        gap: self.rng.random_bool(0.2),
+                        comment,
+                        key: value,
+                    },
                     item,
                 })
                 .map_err(ParseError::Memory)?;

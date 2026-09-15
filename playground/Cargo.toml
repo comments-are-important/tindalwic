@@ -1,9 +1,11 @@
+lints = { workspace = true }
+
 [package]
 name = "tindalwic-playground"
 description = "a simple tindalwic browser app"
 version = { workspace = true }
 edition = { workspace = true }
-rust-version = "1.87"
+rust-version = "1.88"
 authors = { workspace = true }
 repository = { workspace = true }
 license = { workspace = true }
@@ -23,7 +25,3 @@ toml_edit = { workspace = true, features = ["serde"] }
 wasm-bindgen = { workspace = true }
 web-sys = { workspace = true, features = ["console"] }
 yaml_serde = { workspace = true }
-
-[lints.rust]
-# workspace settings are not right for this member
-unused = "deny"

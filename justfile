@@ -1,7 +1,8 @@
 
 set shell := ["bash", "-uc"]
 
-all: fmt (test "-q") playground coverage doc api lines msrv
+all: fmt (test "-q") playground coverage doc api lines msrv sitter
+  cargo build -p tindalwic-cli
 
 @_is_running_outside_devcontainer:
     [[ ! ( -e /tmp/.devcontainerId \
@@ -40,7 +41,7 @@ test *OPTS: _is_running_inside_devcontainer
 
 coverage: _is_running_inside_devcontainer (_install "cargo-llvm-cov")
     yes | LLVM_COV_FLAGS="--show-expansions --show-instantiations" \
-      cargo +nightly llvm-cov --html --branch -p tindalwic --test unit --all-features --show-missing-lines
+      cargo +nightly llvm-cov -q --html --branch -p tindalwic --test unit --all-features --show-missing-lines
 
 doc: _is_running_inside_devcontainer
     cargo doc --all-features --no-deps --document-private-items
@@ -52,7 +53,9 @@ msrv: _is_running_inside_devcontainer (_install "cargo-msrv")
     #!/usr/bin/env bash
     for path in $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].manifest_path')
     do
-      cargo msrv verify --path "$(dirname $path)"
+      path="${path#$PWD/}"
+      echo "===== ${path%/Cargo.toml}"
+      cargo msrv verify --manifest-path "$path"
     done
 
 playground: _is_running_inside_devcontainer (_install "wasm-opt")

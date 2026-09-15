@@ -35,82 +35,58 @@ impl<'de, 'a, 'b> Visitor<'de> for ItemDe<'a, 'b> {
         out.write_str("a neutered item (simple value, list, or dictionary)")
     }
     fn visit_bool<E: Error>(self, v: bool) -> Result<Self::Value, E> {
-        Ok(Item::text(if v { "true" } else { "false" }))
+        self.visit_str(if v { "true" } else { "false" })
     }
     fn visit_i8<E: Error>(self, v: i8) -> Result<Self::Value, E> {
-        let ItemDe(build) = self;
-        Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
+        self.visit_str(&v.to_string())
     }
     fn visit_i16<E: Error>(self, v: i16) -> Result<Self::Value, E> {
-        let ItemDe(build) = self;
-        Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
+        self.visit_str(&v.to_string())
     }
     fn visit_i32<E: Error>(self, v: i32) -> Result<Self::Value, E> {
-        let ItemDe(build) = self;
-        Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
+        self.visit_str(&v.to_string())
     }
     fn visit_i64<E: Error>(self, v: i64) -> Result<Self::Value, E> {
-        let ItemDe(build) = self;
-        Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
+        self.visit_str(&v.to_string())
     }
     fn visit_i128<E: Error>(self, v: i128) -> Result<Self::Value, E> {
-        let ItemDe(build) = self;
-        Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
+        self.visit_str(&v.to_string())
     }
     fn visit_u8<E: Error>(self, v: u8) -> Result<Self::Value, E> {
-        let ItemDe(build) = self;
-        Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
+        self.visit_str(&v.to_string())
     }
     fn visit_u16<E: Error>(self, v: u16) -> Result<Self::Value, E> {
-        let ItemDe(build) = self;
-        Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
+        self.visit_str(&v.to_string())
     }
     fn visit_u32<E: Error>(self, v: u32) -> Result<Self::Value, E> {
-        let ItemDe(build) = self;
-        Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
+        self.visit_str(&v.to_string())
     }
     fn visit_u64<E: Error>(self, v: u64) -> Result<Self::Value, E> {
-        let ItemDe(build) = self;
-        Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
+        self.visit_str(&v.to_string())
     }
     fn visit_u128<E: Error>(self, v: u128) -> Result<Self::Value, E> {
-        let ItemDe(build) = self;
-        Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
+        self.visit_str(&v.to_string())
     }
     fn visit_f32<E: Error>(self, v: f32) -> Result<Self::Value, E> {
-        let ItemDe(build) = self;
-        let mut buffer = ryu::Buffer::new();
-        Ok(Item::text(
-            build.intern(buffer.format(v)).map_err(E::custom)?,
-        ))
+        self.visit_str(ryu::Buffer::new().format(v))
     }
     fn visit_f64<E: Error>(self, v: f64) -> Result<Self::Value, E> {
-        let ItemDe(build) = self;
-        let mut buffer = ryu::Buffer::new();
-        Ok(Item::text(
-            build.intern(buffer.format(v)).map_err(E::custom)?,
-        ))
+        self.visit_str(ryu::Buffer::new().format(v))
     }
     fn visit_char<E: Error>(self, v: char) -> Result<Self::Value, E> {
-        let ItemDe(build) = self;
-        Ok(Item::text(build.intern(&v.to_string()).map_err(E::custom)?))
+        self.visit_str(&v.to_string())
     }
     fn visit_str<E: Error>(self, v: &str) -> Result<Self::Value, E> {
         let ItemDe(build) = self;
-        let value = ValueDe(build).visit_str(v)?;
-        Ok(Item::Text {
-            value,
-            epilog: None,
-        })
+        Ok(Item::text(ValueDe(build).visit_str(v)?))
     }
     fn visit_bytes<E: Error>(self, v: &[u8]) -> Result<Self::Value, E> {
-        let ItemDe(build) = self;
         if v.is_ascii() {
             let value = unsafe { std::str::from_utf8_unchecked(v) };
-            Ok(Item::text(build.intern(value).map_err(E::custom)?))
+            self.visit_str(value)
         } else {
             let value: String = v.iter().map(|&b| char::from(b)).collect();
-            Ok(Item::text(build.intern(&value).map_err(E::custom)?))
+            self.visit_str(&value)
         }
     }
     fn visit_unit<E: Error>(self) -> Result<Self::Value, E> {
@@ -166,11 +142,13 @@ impl<'a> Serialize for EntriesSer<'a> {
         let EntriesSer(this) = self;
         let mut map = s.serialize_map(Some(this.len()))?;
         for cell in this.iter() {
-            let Entry { key, item, .. } = cell.get();
-            if let Some(verbatim) = key.verbatim(0) {
+            let Entry {
+                name: key, item, ..
+            } = cell.get();
+            if let Some(verbatim) = key.key.verbatim(0) {
                 map.serialize_entry(verbatim, &ItemSer(item))?;
             } else {
-                map.serialize_entry(&key.joined(), &ItemSer(item))?;
+                map.serialize_entry(&key.key.joined(), &ItemSer(item))?;
             }
         }
         map.end()
@@ -194,14 +172,13 @@ impl<'de, 'a, 'b> Visitor<'de> for EntriesDe<'a, 'b> {
         while let Some(key) = map.next_key_seed(ValueDe(build))? {
             let item = map.next_value_seed(ItemDe(build))?;
             let entry = Entry {
-                key: if let Some(slice) = key.verbatim(0) {
+                name: if let Some(slice) = key.verbatim(0) {
                     slice
                 } else {
                     build.intern(&key.joined()).map_err(A::Error::custom)?
                 }
                 .into(),
                 item,
-                ..Default::default()
             };
             build.push_entry(entry).map_err(A::Error::custom)?;
             count += 1;

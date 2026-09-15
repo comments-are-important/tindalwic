@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 #[cfg(feature = "alloc")]
+use tindalwic::Name;
+#[cfg(feature = "alloc")]
 use tindalwic::alloc::from_literal;
 use tindalwic::parse::Parse as _;
 use tindalwic::{Comment, Entry, File, Item, Value, arena, json, path};
@@ -26,7 +28,7 @@ fn value_joined() {
 
 #[test]
 fn from_dict() {
-    assert!(File::try_from_dict_without_epilog(&Item::text("nope")).is_none());
+    assert!(File::try_from_dict_without_epilog(&Item::text("nope".into())).is_none());
     assert!(File::try_from_dict_without_epilog(&Item::list(&[])).is_none());
 }
 
@@ -51,9 +53,11 @@ fn hashbang_avoidance() {
 #[cfg(feature = "alloc")]
 fn three_blank_comments() {
     let entry = Entry {
-        before: Comment::some(""),
+        name: Name {
+            comment: Comment::some(""),
+            ..Default::default()
+        },
         item: Item::dict(&[]),
-        ..Default::default()
     };
     let entries = [core::cell::Cell::new(entry)];
     let file = File {
@@ -171,7 +175,7 @@ fn nested_dicts() {
     let mut keys = Vec::new();
     for entry in entries {
         let entry = entry.get();
-        keys.push(entry.key.lines().next().unwrap_or(""));
+        keys.push(entry.name.key.lines().next().unwrap_or(""));
     }
     assert_eq!(keys, vec!["1", "2", "a"]);
     assert_eq!(
@@ -215,7 +219,7 @@ fn change_in_dict() {
     let dict = Item::dict(entries);
     let cell = path!({"a"}[0]{"b"}Text).walk(dict).unwrap();
     let mut entry = cell.get();
-    entry.item = Item::text("c");
+    entry.item = Item::text("c".into());
     cell.set(entry);
     assert_eq!(
         File::try_from_dict_without_epilog(&dict)
@@ -237,7 +241,7 @@ fn inject_comments() {
         unreachable!("this destructuring always succeeds because path walk did");
     };
     let epilog = Comment::some("c");
-    entry.before = Comment::some("b");
+    entry.name.comment = Comment::some("b");
     entry.item = Item::Text { value, epilog };
     cell.set(entry);
     assert_eq!(
@@ -280,8 +284,10 @@ fn hash_map() {
     }
     let mut map = HashMap::new();
     for entry in entries {
-        let Entry { key, item, .. } = entry.get();
-        map.insert(key, item);
+        let Entry {
+            name: key, item, ..
+        } = entry.get();
+        map.insert(key.key, item);
     }
     assert_eq!(map.len(), entries.len());
 }
@@ -423,10 +429,11 @@ mod parse_err {
             arena.builder().push_item(Item::default()),
             Err("no room for item")
         );
-        assert_eq!(
-            arena.builder().push_entry(Entry::default()),
-            Err("no room for entry")
-        );
+        let blank = Entry {
+            name: Default::default(),
+            item: Default::default(),
+        };
+        assert_eq!(arena.builder().push_entry(blank), Err("no room for entry"));
         assert!(arena.completed().is_some());
         assert_eq!(0, arena.item_slots());
         assert_eq!(0, arena.entry_slots());
@@ -521,11 +528,11 @@ mod parse_err {
         let mut arena = StackArena::wrap(NO_ITEMS, NO_ENTRIES);
         assert_eq!(
             arena.first_error("//"),
-            Err(ParseError::at(2, "gap/before but no key"))
+            Err(ParseError::at(2, "gap/comment but no key"))
         );
         assert_eq!(
             arena.first_error("\n"),
-            Err(ParseError::at(2, "gap/before but no key"))
+            Err(ParseError::at(2, "gap/comment but no key"))
         );
     }
     #[test]

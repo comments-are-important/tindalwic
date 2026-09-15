@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use anyhow::Result;
 use serde::Serialize;
 use serde::de::DeserializeSeed;

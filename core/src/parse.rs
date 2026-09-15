@@ -1,6 +1,6 @@
 //! everything related to converting bytes into a File
 
-use crate::{Comment, Entries, Entry, File, Item, Items, Value};
+use crate::{Comment, Entries, Entry, File, Item, Items, Name, Value};
 
 // there are some lines/branches here that are impossible to get coverage for,
 // and the mechanisms for suppressing the report are inadequate ... until:
@@ -53,7 +53,7 @@ pub trait Build<'a> {
     fn finish_entries(&mut self, count: usize) -> Result<Entries<'a>, &'static str>;
     /// push an [Item::Text] (no metadata) for a future .finish_items to use.
     fn text_item(&mut self, value: &'a str) -> Result<(), &'static str> {
-        self.push_item(Item::text(value))
+        self.push_item(Item::text(value.into()))
     }
     /// push an [Item::List] (no metadata) for a future .finish_items to use.
     fn list_item(&mut self, count: usize) -> Result<(), &'static str> {
@@ -67,7 +67,7 @@ pub trait Build<'a> {
     }
     /// push a `key` -> [Item::Text] association (no metadata) for a future .finish_entries to use.
     fn text_entry(&mut self, key: &'a str, value: &'a str) -> Result<(), &'static str> {
-        self.associate(key, Item::text(value))
+        self.associate(key, Item::text(value.into()))
     }
     /// push a `key` -> [Item::List] association (no metadata) for a future .finish_entries to use.
     fn list_entry(&mut self, key: &'a str, count: usize) -> Result<(), &'static str> {
@@ -82,9 +82,8 @@ pub trait Build<'a> {
     /// push a `key` -> `item` association (no metadata) for a future .finish_entries to use
     fn associate(&mut self, key: &'a str, item: Item<'a>) -> Result<(), &'static str> {
         self.push_entry(Entry {
-            key: key.into(),
+            name: key.into(),
             item,
-            ..Default::default()
         })
     }
     /// default is an Err because intern needs alloc
@@ -460,19 +459,19 @@ impl<'a, 'r> Input<'a, 'r> {
         let bytes = self.utf8.as_bytes();
         let mut count = 0usize;
         while self.start != usize::MAX {
+            let mut key = Name::default();
             let mut item: Option<Item<'a>> = None;
-            let gap = self.tabs == indent && self.first == self.end;
-            if gap {
+            key.gap = self.tabs == indent && self.first == self.end;
+            if key.gap {
                 self.next(indent)?;
             }
-            let before = self.comment(indent, b"//")?;
+            key.comment = self.comment(indent, b"//")?;
             if self.start == usize::MAX || self.tabs != indent {
-                if gap || before.is_some() {
-                    self.report(ParseError::at(self.line, "gap/before but no key"))?;
+                if key.gap || key.comment.is_some() {
+                    self.report(ParseError::at(self.line, "gap/comment but no key"))?;
                 }
                 break;
             }
-            let mut key: Value<'a> = Value::default();
             let len = self.end - self.first;
             match bytes[self.first] {
                 b'#' => {
@@ -495,7 +494,7 @@ impl<'a, 'r> Input<'a, 'r> {
                         self.report(ParseError::at(self.line, "malformed `<key>` in dict"))?;
                         self.next(indent)?;
                     } else {
-                        key = self.utf8[self.first + 1..self.end - 1].into();
+                        key.key = self.utf8[self.first + 1..self.end - 1].into();
                         item = Some(self.text_block(indent)?);
                     }
                 }
@@ -504,13 +503,13 @@ impl<'a, 'r> Input<'a, 'r> {
                         self.report(ParseError::at(self.line, "malformed `[key]` in dict"))?;
                         self.next(indent)?;
                     } else {
-                        key = self.utf8[self.first + 1..self.end - 1].into();
+                        key.key = self.utf8[self.first + 1..self.end - 1].into();
                         self.next(indent + 1)?;
                         item = Some(self.list(indent, arena)?);
                     }
                 }
                 b'@' => {
-                    key = self.stretch(indent + 1, self.first + 1)?;
+                    key.key = self.stretch(indent + 1, self.first + 1)?;
                     let marker = if self.end > 1 && self.first == self.end - 2 {
                         (bytes[self.first], bytes[self.first + 1])
                     } else {
@@ -542,7 +541,7 @@ impl<'a, 'r> Input<'a, 'r> {
                         self.report(ParseError::at(self.line, "malformed `{key}` in dict"))?;
                         self.next(indent)?;
                     } else {
-                        key = self.utf8[self.first + 1..self.end - 1].into();
+                        key.key = self.utf8[self.first + 1..self.end - 1].into();
                         self.next(indent + 1)?;
                         item = Some(self.dict(indent, arena)?);
                     }
@@ -556,23 +555,18 @@ impl<'a, 'r> Input<'a, 'r> {
                         self.report(ParseError::at(self.line, "missing `=` in dict"))?;
                         self.next(indent)?;
                     } else {
-                        key = self.utf8[self.first..self.assign].into();
+                        key.key = self.utf8[self.first..self.assign].into();
                         item = Some(self.text(indent, self.assign + 1)?);
                     }
                 }
             }
             if let Some(item) = item {
-                if let Err(err) = arena.push_entry(Entry {
-                    gap,
-                    before,
-                    key,
-                    item,
-                }) {
+                if let Err(err) = arena.push_entry(Entry { name: key, item }) {
                     self.report(ParseError::Memory(err))?;
                 }
                 count += 1;
-            } else if gap || before.is_some() {
-                self.report(ParseError::at(self.line, "gap/before but no item"))?;
+            } else if key.gap || key.comment.is_some() {
+                self.report(ParseError::at(self.line, "gap/comment but no item"))?;
             }
         }
         if count == 0 {

@@ -41,7 +41,7 @@ mod value {
     ///
     ///  + [Comment::value](super::Comment::value)
     ///  + [Text::value](super::Item::Text::value)
-    ///  + [Entry::key](super::Entry::key)
+    ///  + [Name::key](super::Name::key)
     ///
     /// They often contain embedded indentation because the parser is zero-copy from
     /// the encoded data. The methods here will strip indentation as necessary.
@@ -175,7 +175,7 @@ impl<'a> Value<'a> {
     /// linear `O(n)` scan.
     // TODO: add link to `alloc` map view, say it "offers `O(1)`."
     pub fn find_linearly_in(self, cells: Entries<'_>) -> Option<usize> {
-        cells.iter().position(|cell| cell.get().key == self)
+        cells.iter().position(|cell| cell.get().name.key == self)
     }
 }
 impl<'a> From<&'a str> for Value<'a> {
@@ -203,7 +203,7 @@ impl<'a> core::hash::Hash for Value<'a> {
 /// A serialized [Comment] will start with one of three possible markers, depending
 /// on its position:
 ///  + `#!` for [File::hashbang],
-///  + `//` for [Entry::before].
+///  + `//` for [Name::comment].
 ///  + `#` for the various `prolog` and `epilog` fields,
 ///
 /// The content is UTF-8 Github Flavored Markdown.
@@ -243,29 +243,49 @@ impl<'a> Comment<'a> {
         })
     }
 }
+impl<'a> From<&'a str> for Comment<'a> {
+    fn from(value: &'a str) -> Self {
+        Comment {
+            value: value.into(),
+        }
+    }
+}
 
 // ------------------------------------------------------------------------------------
 
-/// an association (from key to item) and its metadata.
+/// the key in an association.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Name<'a> {
+    /// a key can have a blank line before it (above its comment)
+    pub gap: bool,
+    /// a key can have a comment before it (below its blank line).
+    pub comment: Option<Comment<'a>>,
+    /// the string value
+    pub key: Value<'a>,
+}
+impl<'a> From<&'a str> for Name<'a> {
+    fn from(value: &'a str) -> Self {
+        Name {
+            key: value.into(),
+            ..Default::default()
+        }
+    }
+}
+
+/// an association (from name to item).
 ///
 /// at the lowest level, these are stored in an array.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Entry<'a> {
-    /// a key can have a blank line before it (before its comment)
-    pub gap: bool,
-    /// a key can have a comment before it (after its blank line).
-    pub before: Option<Comment<'a>>,
-    /// the key being associated to an [Item].
-    pub key: Value<'a>,
-    /// the item associated to the [Entry::key]
+    /// the key half
+    pub name: Name<'a>,
+    /// the value half
     pub item: Item<'a>,
 }
 impl<'a> Default for Entry<'a> {
     fn default() -> Self {
         Entry {
-            gap: false,
-            before: None,
-            key: Value::default(),
+            name: Name::default(),
             item: Item::default(),
         }
     }
@@ -329,9 +349,9 @@ impl<'a> Item<'a> {
         ::core::array::from_fn::<_, N, _>(|_| Cell::default())
     }
     /// wrap a value (no epilog) into an Item::Text
-    pub fn text(value: &'a str) -> Self {
+    pub fn text(value: Value<'a>) -> Self {
         Item::Text {
-            value: value.into(),
+            value,
             epilog: None,
         }
     }

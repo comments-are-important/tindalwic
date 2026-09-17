@@ -1,4 +1,4 @@
-#![allow(missing_docs)]
+//! the clap parser definition and main function for the CLI.
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -42,6 +42,6 @@ fn main() -> Result<()> {
         Command::From { file_or_format } => Reader::parse(file_or_format)?.run(),
         Command::Random { args } => args.run(),
         #[cfg(debug_assertions)]
-        Command::Sitter => sitter::run(),
+        Command::Sitter => sitter::Corpus::edit(),
     }
 }

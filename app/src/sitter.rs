@@ -1,139 +1,162 @@
-#![allow(missing_docs)]
+//! the core crate is authoritative so the tree-sitter needs to conform.
+//! a strategy for harmonizing is to generate the expected output for tests
+//! mechanically then tweak the grammar code so it produces correct trees.
+//!
+//! this module is elided from release builds because it is a developer tool.
 
 use anyhow::{Error, Result, bail};
 use bumpalo::Bump;
-use std::fmt::Write;
-use std::fs;
 use std::path::PathBuf;
 use tindalwic::{Comment, Entry, File, Item, Value, bumpalo::Arena};
 use tree_sitter_cli::test::{TestEntry, TestExpectation, parse_tests};
 
-pub fn run() -> Result<()> {
-    let path: PathBuf = ["grammar", "test", "corpus"].iter().collect();
-    visit(parse_tests(&path)?, None)?;
-    Ok(())
+/// overwrite our tree-sitter tests
+#[derive(Default)]
+pub struct Corpus {
+    active: bool,
+    tests: Vec<TestTXT>,
 }
-struct TestTXT {
-    buf: String,
-    path: String,
-}
-fn visit(test: TestEntry, parent: Option<&mut TestTXT>) -> Result<()> {
-    match test {
-        TestEntry::Group {
-            name,
-            children,
-            file_path,
-        } => {
-            if let Some(parent) = parent {
-                bail!("found group '{name}' inside {:?}", parent.path);
-            }
-            let file_path = file_path.unwrap_or(PathBuf::new());
-            let ext = file_path.extension().unwrap_or(std::ffi::OsStr::new(""));
-            if ext != "txt" {
-                for child in children {
-                    visit(child, None)?;
-                }
-            } else {
-                let mut parent = TestTXT {
-                    buf: String::new(),
-                    path: String::from(file_path.to_string_lossy()),
-                };
-                for child in children {
-                    visit(child, Some(&mut parent))?;
-                }
-                fs::write(file_path, parent.buf)?;
-            }
-            Ok(())
+impl Corpus {
+    /// assumes PWD is root of repo
+    pub fn edit() -> Result<()> {
+        let mut corpus = Corpus::default();
+        let path: PathBuf = ["grammar", "test", "corpus"].iter().collect();
+        corpus.visit(parse_tests(&path)?)?;
+        if corpus.active {
+            bail!("impossible: active was not cleared");
         }
-        TestEntry::Example {
-            name,
-            input,
-            output,
-            attributes,
-            attributes_str,
-            header_delim_len,
-            divider_delim_len,
-            ..
-        } => {
-            let Some(parent) = parent else {
-                bail!("found entry without a TestTXT as parent");
-            };
-            let input = str::from_utf8(&input)?;
-            let output = if attributes.expectation != TestExpectation::Pass {
-                output
-            }else{
-                let bump = Bump::new();
-                let mut arena = Arena::new(&bump);
-                let file = arena
-                    .format_errors(&name, &input, usize::MAX)
-                    .map_err(Error::msg)?;
-                Sitter::to_scm(&file, true)
-            };
-            let header = "=".repeat(header_delim_len);
-            let divider = "-".repeat(divider_delim_len);
-            write!(
-                parent.buf,
-                "{}\n{}\n{}\n{}\n{}\n{}\n{}\n",
-                header, name, attributes_str, header, input, divider, output
-            )?;
-            Ok(())
+        for test in corpus.tests {
+            std::fs::write(test.path, test.content)?;
+        }
+        Ok(())
+    }
+    fn active(&mut self) -> Result<Option<&mut TestTXT>> {
+        if !self.active {
+            Ok(None)
+        } else if let Some(last) = self.tests.last_mut() {
+            Ok(Some(last))
+        } else {
+            bail!("impossible: active while empty")
+        }
+    }
+    fn visit(&mut self, test: TestEntry) -> Result<()> {
+        match test {
+            TestEntry::Group {
+                name,
+                children,
+                file_path,
+            } => {
+                if let Some(txt) = self.active()? {
+                    bail!("found group '{name}' inside {:?}", txt.path);
+                }
+                let file_path = file_path.unwrap_or(PathBuf::new());
+                let ext = file_path.extension().unwrap_or(std::ffi::OsStr::new(""));
+                if ext == "txt" {
+                    self.tests.push(TestTXT {
+                        path: file_path,
+                        content: String::new(),
+                        indent: 0,
+                    });
+                    self.active = true;
+                }
+                for child in children {
+                    self.visit(child)?;
+                }
+                self.active = false;
+                Ok(())
+            }
+            TestEntry::Example {
+                name,
+                input,
+                output,
+                attributes,
+                attributes_str,
+                ..
+            } => {
+                let Some(txt) = self.active()? else {
+                    bail!("found entry '{name}' without active TestTXT");
+                };
+                if txt.indent != 0 {
+                    bail!("impossible: indent was not cleared");
+                }
+                txt.pushln("===");
+                txt.pushln(&name);
+                // their lib can parse str->TestAttributes but can't go the other
+                // direction, easiest to remove `:cst` attr by string manipulation...
+                let attrs = (attributes_str + "\n").replace(":cst\n", "");
+                if attrs.len() > 1 {
+                    txt.push(&attrs);
+                }
+                txt.pushln("===");
+                let input = str::from_utf8(&input)?;
+                if !input.is_empty() {
+                    txt.pushln(&input);
+                }
+                txt.pushln("---");
+                if attributes.expectation != TestExpectation::Pass {
+                    txt.pushln(&output);
+                } else {
+                    let bump = Bump::new();
+                    let mut arena = Arena::new(&bump);
+                    let file = arena
+                        .format_errors(&name, &input, usize::MAX)
+                        .map_err(Error::msg)?;
+                    txt.file(&file);
+                }
+                Ok(())
+            }
         }
     }
 }
 
-pub struct Sitter {
-    buf: String,
-    short: bool,
+struct TestTXT {
+    path: PathBuf,
+    content: String,
     indent: usize,
 }
-impl Sitter {
+impl TestTXT {
+    fn push(&mut self, s: &str) {
+        self.content.push_str(s);
+    }
+    fn pushln(&mut self, s: &str) {
+        self.push(s);
+        self.newline();
+    }
     fn more(&mut self) {
-        self.indent += 2;
+        self.indent += 1;
     }
     fn less(&mut self) {
-        self.indent -= 2;
+        self.indent -= 1;
     }
     fn newline(&mut self) {
-        if self.short {
-            self.buf.push(' ');
-        } else {
-            self.buf.push('\n');
-            for _ in 0..self.indent {
-                self.buf.push(' ');
-            }
+        self.content.push('\n');
+        for _ in 0..self.indent {
+            self.content.push('\t');
         }
     }
-    pub fn to_scm(file: &File, short: bool) -> String {
-        let mut sitter = Sitter {
-            buf: String::new(),
-            short,
-            indent: 0,
-        };
-        sitter.file(file);
-        sitter.buf
-    }
     fn file(&mut self, file: &File) {
-        self.buf.push_str("(file");
+        self.push("(file");
         self.more();
         self.comment("shebang", &file.hashbang);
         self.comment("prolog", &file.prolog);
         for cell in file.cells {
             self.entry(&cell.get());
         }
-        self.buf.push(')');
         self.less();
+        self.pushln(")");
+        self.newline();
     }
     fn entry(&mut self, entry: &Entry) {
         self.newline();
-        self.buf.push_str("(entry");
+        self.push("(entry");
         self.more();
         if entry.name.gap {
             self.newline();
-            self.buf.push_str("(gap)");
+            self.push("(gap)");
         }
         self.comment("comment", &entry.name.comment);
         self.item(&entry.item);
-        self.buf.push(')');
+        self.push(")");
         self.less();
     }
     fn item(&mut self, item: &Item) {
@@ -149,12 +172,12 @@ impl Sitter {
             } => {
                 self.comment("prolog", prolog);
                 self.newline();
-                self.buf.push_str("(list");
+                self.push("(list");
                 self.more();
                 for cell in *cells {
                     self.item(&cell.get());
                 }
-                self.buf.push(')');
+                self.push(")");
                 self.less();
                 self.comment("epilog", epilog);
             }
@@ -165,12 +188,12 @@ impl Sitter {
             } => {
                 self.comment("prolog", prolog);
                 self.newline();
-                self.buf.push_str("(list");
+                self.push("(list");
                 self.more();
                 for cell in *cells {
                     self.entry(&cell.get());
                 }
-                self.buf.push(')');
+                self.push(")");
                 self.less();
                 self.comment("epilog", epilog);
             }
@@ -183,14 +206,14 @@ impl Sitter {
     }
     fn text(&mut self, tag: &str, value: &Value) {
         self.newline();
-        self.buf.push('(');
-        self.buf.push_str(tag);
+        self.push("(");
+        self.push(tag);
         self.more();
         for _ in value.lines() {
             self.newline();
-            self.buf.push_str("(line)");
+            self.push("(line)");
         }
-        self.buf.push(')');
+        self.push(")");
         self.less();
     }
 }

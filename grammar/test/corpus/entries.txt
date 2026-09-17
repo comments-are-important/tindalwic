@@ -4,7 +4,11 @@ first has gap
 
 key=value
 ---
-(file (entry (gap) (key) (text (line))))
+(file
+	(entry
+		(gap)
+		(text
+			(line))))
 
 ===
 first has key comment 1 line
@@ -12,7 +16,12 @@ first has key comment 1 line
 // a short paragraph about the key that follows
 key=value
 ---
-(file (entry (comment (line)) (key) (text (line))))
+(file
+	(entry
+		(comment
+			(line))
+		(text
+			(line))))
 
 ===
 first has key comment 3 lines
@@ -22,7 +31,14 @@ first has key comment 3 lines
 	and another short paragraph
 key=value
 ---
-(file (entry (comment (line) (line) (line)) (key) (text (line))))
+(file
+	(entry
+		(comment
+			(line)
+			(line)
+			(line))
+		(text
+			(line))))
 
 ===
 first has gap and key comment
@@ -32,7 +48,14 @@ first has gap and key comment
 	about the key that follows
 key=value
 ---
-(file (entry (gap) (comment (line) (line)) (key) (text (line))))
+(file
+	(entry
+		(gap)
+		(comment
+			(line)
+			(line))
+		(text
+			(line))))
 
 ===
 angle brackets open a text block
@@ -41,21 +64,29 @@ angle brackets open a text block
 	start of text block, just one LF char here:
 	the last line of text block has no LF at end
 ---
-(file (entry (key) (text (line) (line))))
+(file
+	(entry
+		(text
+			(line)
+			(line))))
 
 ===
 square brackets open a list context
 ===
 [any <chars> # [except] @ {LF} allowed]
 ---
-(file (entry (key) (list)))
+(file
+	(entry
+		(list)))
 
 ===
 curly brackets open a dictionary context
 ===
 {any <chars> # [except] @ {LF} allowed}
 ---
-(file (entry (key) (dict)))
+(file
+	(entry
+		(list)))
 
 ===
 keys can contain LF chars
@@ -66,4 +97,8 @@ keys can contain LF chars
 <>
 	angle for text, square for list, curly for dict
 ---
-(file (entry (key (line) (line)) (text (line))))
+(file
+	(entry
+		(text
+			(line))))
+

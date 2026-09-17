@@ -12,3 +12,7 @@ trim_trailing_whitespace = true
 indent_style = tab
 insert_final_newline = false
 trim_trailing_whitespace = false
+
+[/grammar/test/corpus/*.txt]
+indent_style = tab
+trim_trailing_whitespace = false

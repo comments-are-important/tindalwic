@@ -4,7 +4,11 @@ one empty text item
 []
 	<>
 ---
-(file (entry (key) (list (item (text)))))
+(file
+	(entry
+		(list
+			(text
+				(line)))))
 
 ===
 one item of short text
@@ -14,10 +18,13 @@ one item of short text
 	<>
 		#EXCEPT for 1st char
 ---
-(file (entry (key) (list
-  (item (text (line)))
-  (item (text (line)))
-)))
+(file
+	(entry
+		(list
+			(text
+				(line))
+			(text
+				(line)))))
 
 ===
 items can be dicts/lists
@@ -30,16 +37,21 @@ items can be dicts/lists
 		one=1
 		two=2
 ---
-(file (entry (key) (list
-  (item (dict
-    (entry (key) (text (line)))
-    (entry (key) (text (line)))
-  ))
-  (item (list
-    (item (text (line)))
-    (item (text (line)))
-  ))
-)))
+(file
+	(entry
+		(list
+			(list
+				(entry
+					(text
+						(line)))
+				(entry
+					(text
+						(line))))
+			(list
+				(text
+					(line))
+				(text
+					(line))))))
 
 ===
 but items don't have keys - dict
@@ -58,3 +70,4 @@ but items don't have keys - list
 	[error]
 		line
 ---
+

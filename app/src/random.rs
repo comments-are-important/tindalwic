@@ -1,7 +1,11 @@
+#![allow(missing_docs)]
+
+use bumpalo::Bump;
 use rand::prelude::IndexedRandom;
 use rand::rngs::SmallRng;
 use rand::{Rng, RngExt, SeedableRng as _};
 use std::fmt::{self, Write};
+use std::io::Write as _;
 use tindalwic::bumpalo::Arena;
 use tindalwic::parse::Parse as _;
 use tindalwic::{Comment, Entry, File, Item, Name, VERSION};
@@ -19,6 +23,13 @@ pub struct Args {
     seed: Option<u64>,
 }
 impl Args {
+    pub fn run(&self) -> anyhow::Result<()> {
+        let bump = Bump::new();
+        let mut arena = Arena::new(&bump);
+        let file = self.file(&mut arena)?;
+        std::io::stdout().write(file.to_string().as_bytes())?;
+        Ok(())
+    }
     pub fn file<'a>(&self, arena: &mut Arena<'a>) -> anyhow::Result<File<'a>> {
         let mut hashbang = String::new();
         for arg in std::env::args() {
@@ -29,13 +40,12 @@ impl Args {
                 hashbang.push_str(&arg);
             }
         }
-        let seed = self.seed.unwrap_or_default();
-        if self.seed.is_none() {
-            let mut bootstrap: SmallRng = rand::make_rng();
-            let seed: u64 = bootstrap.random();
-            hashbang.push_str(" --seed=");
-            write!(hashbang, "{:X}", seed)?;
-        }
+        let seed = match self.seed {
+            Some(value) => value,
+            None => rand::make_rng::<SmallRng>().random(),
+        };
+        hashbang.push_str(" --seed=");
+        write!(hashbang, "{:X}", seed)?;
         hashbang.push_str("\nat ");
         hashbang.push_str(&super::now());
         hashbang.push_str(" by version ");

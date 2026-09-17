@@ -92,12 +92,13 @@ lines: _is_running_inside_devcontainer (_install "cargo-llvm-lines")
 
 # -----------------------------------------------------------------------------
 
-sitter:
+sitter: _is_running_inside_devcontainer
   #!/usr/bin/env bash
   set -xe
   cd grammar
   npx tree-sitter --version || npm ci
   npx tree-sitter generate
+  npx tree-sitter test
   npx tree-sitter build -o ../target/tree-sitter-tindalwic.so
   npx tree-sitter build --wasm -o ../target/tree-sitter-tindalwic.wasm
 

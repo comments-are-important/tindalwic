@@ -2,7 +2,6 @@
 set shell := ["bash", "-uc"]
 
 all: fmt (test "-q") playground coverage doc api lines msrv sitter
-  cargo build -p tindalwic-cli
 
 @_is_running_outside_devcontainer:
     [[ ! ( -e /tmp/.devcontainerId \
@@ -33,13 +32,12 @@ test *OPTS: _is_running_inside_devcontainer
     cargo test -p tindalwic --test unit --features alloc {{OPTS}}
     cargo test -p tindalwic --test unit --features bumpalo {{OPTS}}
     cargo test -p tindalwic --test unit --all-features {{OPTS}}
-    cargo test -p tindalwic --test rand --all-features {{OPTS}}
     cargo test -p tindalwic --doc --all-features {{OPTS}}
     cargo test -p tindalwic --test trybuild --all-features {{OPTS}} \
       {{ if OPTS =~ quiet { '2> >(grep --line-buffered -P "^'+color+'test '+color+'tests/trybuild/.*[^o][^k]$")' } else {''} }}
     cargo test -p tindalwic-serde --test serde {{OPTS}}
 
-coverage: _is_running_inside_devcontainer (_install "cargo-llvm-cov")
+coverage: (_install "cargo-llvm-cov") _is_running_inside_devcontainer
     yes | LLVM_COV_FLAGS="--show-expansions --show-instantiations" \
       cargo +nightly llvm-cov -q --html --branch -p tindalwic --test unit --all-features --show-missing-lines
 
@@ -49,7 +47,7 @@ doc: _is_running_inside_devcontainer
 fmt: _is_running_inside_devcontainer
     cargo +nightly fmt
 
-msrv: _is_running_inside_devcontainer (_install "cargo-msrv")
+msrv: (_install "cargo-msrv") _is_running_inside_devcontainer
     #!/usr/bin/env bash
     for path in $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].manifest_path')
     do
@@ -58,7 +56,7 @@ msrv: _is_running_inside_devcontainer (_install "cargo-msrv")
       cargo msrv verify --manifest-path "$path"
     done
 
-playground: _is_running_inside_devcontainer (_install "wasm-opt")
+playground: (_install "wasm-opt") _is_running_inside_devcontainer
     cargo build -p tindalwic-playground --target wasm32-unknown-unknown --profile dev
     cargo build -p tindalwic-playground --target wasm32-unknown-unknown --profile release-small
     just _install_version wasm-bindgen-cli "$(cargo pkgid -p wasm-bindgen | sed -E -e 's=^[^@]+@([0-9.]+).*$=\1=')"
@@ -74,7 +72,7 @@ playground: _is_running_inside_devcontainer (_install "wasm-opt")
     cd target/playground-release ; wasm-opt -Oz --enable-bulk-memory \
       -o tindalwic_playground_bg.wasm tindalwic_playground_bg.wasm
 
-api: _is_running_inside_devcontainer (_install "cargo-public-api")
+api: (_install "cargo-public-api") _is_running_inside_devcontainer
     mkdir -p target/public-api/{all,default}
     cargo public-api -p tindalwic --target-dir target/public-api/default \
       >target/public-api/tindalwic-default.api
@@ -87,14 +85,17 @@ api: _is_running_inside_devcontainer (_install "cargo-public-api")
       | sed -E -e 's=^pub (.*)=|\1|property|=' \
       | LC_ALL=C sort -u >target/public-api/tindalwic-all.org
 
-lines: _is_running_inside_devcontainer (_install "cargo-llvm-lines")
+lines: (_install "cargo-llvm-lines") _is_running_inside_devcontainer
     cargo llvm-lines -p tindalwic --all-features >target/llvm-lines.out
 
-# -----------------------------------------------------------------------------
+cli: fmt _is_running_inside_devcontainer
+  cargo build -p tindalwic-cli
+  target/debug/tindalwic-cli random --check=1000
 
-sitter: _is_running_inside_devcontainer
+sitter: cli _is_running_inside_devcontainer
   #!/usr/bin/env bash
   set -xe
+  target/debug/tindalwic-cli sitter
   cd grammar
   npx tree-sitter --version || npm ci
   npx tree-sitter generate

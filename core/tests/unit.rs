@@ -33,23 +33,6 @@ fn from_dict() {
 }
 
 #[test]
-fn hashbang_avoidance() {
-    let mut file = File::default();
-    file.prolog = Comment::some("!suspect");
-    let encoded = file.to_string();
-    assert_eq!(encoded, "#\n\t!suspect\n");
-    arena! {
-        let mut arena = <1dict>;
-    }
-    let parsed = arena.panic_first_error(&encoded);
-    assert!(parsed.hashbang.is_none());
-    assert_eq!(
-        Vec::from_iter(parsed.prolog.unwrap().value.lines()),
-        vec!["!suspect"]
-    );
-}
-
-#[test]
 #[cfg(feature = "alloc")]
 fn three_blank_comments() {
     let entry = Entry {
@@ -83,7 +66,7 @@ fn text_stretch_bug() {
         #E
     ";
     let content = from_literal(spaces);
-    assert_eq!("[K]\n\tV\n#E\n", content);
+    assert_eq!("[K]\n\tV\n#E", content);
     arena! {
         let mut arena = <1dict,1list>;
     }
@@ -96,11 +79,16 @@ fn two_lines() {
     json! {
         let entries = {"key":"one\ntwo"}.unwrap();
     }
+    let expected = "
+        <key>
+            one
+            two
+    ";
     assert_eq!(
         File::try_from_dict_without_epilog(&Item::dict(entries))
             .unwrap()
             .to_string(),
-        "<key>\n\tone\n\ttwo\n"
+        from_literal(expected)
     );
 }
 
@@ -109,7 +97,7 @@ fn multi_line_key() {
     arena! {
         let mut arena = <4dict,1list>;
     }
-    let data = "@one\n\ttwo\n<>\n\tv\n@l\n\t\n[]\n@d\n\t\n{}\n";
+    let data = "@\n\tone\n\ttwo\n<>\n\tv\n@\n\tl\n\t\n[]\n@\n\td\n\t\n{}";
     let file = arena.panic_first_error(data);
     assert_eq!(file.to_string(), data);
     let report = &mut |err| {
@@ -118,10 +106,11 @@ fn multi_line_key() {
     };
     assert!(arena.report_errors("@", report).is_none());
     assert!(arena.report_errors("@k", report).is_none());
-    assert!(arena.report_errors("@k\n", report).is_none());
-    assert!(arena.report_errors("@k\n<", report).is_none());
-    assert!(arena.report_errors("@k\n<>", report).is_some());
-    assert!(arena.report_errors("@k\n<x>", report).is_none());
+    assert!(arena.report_errors("@\n\tk", report).is_none());
+    assert!(arena.report_errors("@\n\tk\n", report).is_none());
+    assert!(arena.report_errors("@\n\tk\n<", report).is_none());
+    assert!(arena.report_errors("@\n\tk\n<>", report).is_some());
+    assert!(arena.report_errors("@\n\tk\n<x>", report).is_none());
 }
 
 #[test]
@@ -155,7 +144,7 @@ fn nested_lists() {
     };
     assert_eq!(
         file.to_string(),
-        "[]\n\t[]\n\t\t[]\n\t\t\t[]\n\t\t\t\tvalue\n"
+        "[]\n\t[]\n\t\t[]\n\t\t\t[]\n\t\t\t\tvalue"
     );
     let cell = path!({""}[0][0][0][0]Text)
         .walk(file.embed_without_hashbang())
@@ -182,7 +171,7 @@ fn nested_dicts() {
         File::try_from_dict_without_epilog(&dict)
             .unwrap()
             .to_string(),
-        "1=one\n[2]\n\ttwo\n{a}\n\t{b}\n\t\t{c}\n\t\t\t{d}\n\t\t\t\tk=v\n"
+        "1=one\n[2]\n\ttwo\n{a}\n\t{b}\n\t\t{c}\n\t\t\t{d}\n\t\t\t\tk=v"
     );
     let cell = path!({"a"}{"b"}{"c"}{"d"}{"k"}Text).walk(dict).unwrap();
     let Item::Text { value, .. } = cell.get().item else {
@@ -207,7 +196,7 @@ fn change_in_list() {
         File::try_from_dict_without_epilog(&dict)
             .unwrap()
             .to_string(),
-        "{a}\n\t[b]\n\t\tv\n\t\t#c\n"
+        "{a}\n\t[b]\n\t\tv\n\t\t#c"
     );
 }
 
@@ -225,7 +214,7 @@ fn change_in_dict() {
         File::try_from_dict_without_epilog(&dict)
             .unwrap()
             .to_string(),
-        "[a]\n\t{}\n\t\tb=c\n"
+        "[a]\n\t{}\n\t\tb=c"
     );
 }
 
@@ -248,7 +237,7 @@ fn inject_comments() {
         File::try_from_dict_without_epilog(&dict)
             .unwrap()
             .to_string(),
-        "//b\nk=v\n#c\n"
+        "//b\nk=v\n#c"
     );
 }
 
@@ -273,7 +262,7 @@ fn change_structure() {
         File::try_from_dict_without_epilog(&dict)
             .unwrap()
             .to_string(),
-        "[k]\n\t{}\n\t\tp=v\n\t\t#b\n"
+        "[k]\n\t{}\n\t\tp=v\n\t\t#b"
     )
 }
 
@@ -298,7 +287,7 @@ fn parse_alloc() {
     let bump = bumpalo::Bump::new();
     let mut arena = tindalwic::bumpalo::Arena::new(&bump);
     let file = arena.panic_first_error("k=v\n");
-    assert_eq!(file.to_string(), "k=v\n");
+    assert_eq!(file.to_string(), "k=v");
 }
 #[test]
 #[cfg(feature = "bumpalo")]
@@ -528,10 +517,6 @@ mod parse_err {
         let mut arena = StackArena::wrap(NO_ITEMS, NO_ENTRIES);
         assert_eq!(
             arena.first_error("//"),
-            Err(ParseError::at(2, "gap/comment but no key"))
-        );
-        assert_eq!(
-            arena.first_error("\n"),
             Err(ParseError::at(2, "gap/comment but no key"))
         );
     }

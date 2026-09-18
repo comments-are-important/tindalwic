@@ -1619,9 +1619,11 @@ dependencies = [
 name = "tindalwic"
 version = "0.6.0-alpha"
 dependencies = [
+ "anyhow",
  "bumpalo",
  "markdown",
  "rand",
+ "tindalwic-cli",
  "tindalwic-macros",
  "trybuild",
 ]

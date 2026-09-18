@@ -1,11 +1,11 @@
 ===
-empty file
+1= empty file
 ===
 ---
 (file)
 
 ===
-shebang alone interpreter only
+2= shebang alone interpreter only
 ===
 #!/usr/bin/env tindalwic
 ---
@@ -14,7 +14,7 @@ shebang alone interpreter only
 		(line)))
 
 ===
-shebang alone plus 1 line
+3= shebang alone plus 1 line
 ===
 #!/usr/bin/env -S tindalwic --to-json
 	that's a fake app
@@ -25,7 +25,7 @@ shebang alone plus 1 line
 		(line)))
 
 ===
-shebang alone plus 2 lines
+4= shebang alone plus 2 lines
 ===
 #!/usr/bin/env -S tindalwic --to-json
 	that's a fake app
@@ -38,7 +38,7 @@ shebang alone plus 2 lines
 		(line)))
 
 ===
-prolog alone empty
+5= prolog alone empty
 ===
 #
 ---
@@ -47,7 +47,7 @@ prolog alone empty
 		(line)))
 
 ===
-prolog alone 1 line
+6= prolog alone 1 line
 ===
 # this is a short paragraph
 ---
@@ -56,7 +56,7 @@ prolog alone 1 line
 		(line)))
 
 ===
-prolog alone 3 lines
+7= prolog alone 3 lines
 ===
 #
 	# this is a markdown H1 (follows a blank line)
@@ -65,10 +65,11 @@ prolog alone 3 lines
 (file
 	(prolog
 		(line)
+		(line)
 		(line)))
 
 ===
-shebang, prolog
+8= shebang, prolog
 ===
 #!/usr/bin/env -S tindalwic --to-json
 	that's a fake app
@@ -84,10 +85,11 @@ shebang, prolog
 		(line))
 	(prolog
 		(line)
+		(line)
 		(line)))
 
 ===
-shebang, prolog that looks like shebang
+9= shebang, prolog that looks like shebang
 ===
 #!shebang
 #!prolog
@@ -99,25 +101,28 @@ shebang, prolog that looks like shebang
 		(line)))
 
 ===
-prolog + shebang/comment
+10= prolog + shebang/comment
 :error
 ===
 #comment
 #!shebang
 ---
+:2: error: stray `#` comment
 
 ===
-short key alone
+11= short key alone
 ===
 key=value
 ---
 (file
 	(entry
+		(key
+			(line))
 		(text
 			(line))))
 
 ===
-shebang, prolog, short key
+12= shebang, prolog, short key
 ===
 #!shebang
 #prolog
@@ -129,11 +134,13 @@ key=value
 	(prolog
 		(line))
 	(entry
+		(key
+			(line))
 		(text
 			(line))))
 
 ===
-dedent works everywhere
+13= dedent works everywhere
 ===
 []
 	[]
@@ -143,10 +150,14 @@ dedent works everywhere
 ---
 (file
 	(entry
+		(key
+			(line))
 		(list
 			(list)
 			(list
 				(list))))
 	(entry
+		(key
+			(line))
 		(list)))
 

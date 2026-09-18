@@ -1,5 +1,5 @@
 ===
-first has gap
+14= first has gap
 ===
 
 key=value
@@ -7,11 +7,13 @@ key=value
 (file
 	(entry
 		(gap)
+		(key
+			(line))
 		(text
 			(line))))
 
 ===
-first has key comment 1 line
+15= first has key comment 1 line
 ===
 // a short paragraph about the key that follows
 key=value
@@ -20,11 +22,13 @@ key=value
 	(entry
 		(comment
 			(line))
+		(key
+			(line))
 		(text
 			(line))))
 
 ===
-first has key comment 3 lines
+16= first has key comment 3 lines
 ===
 // a short paragraph about the key that follows
 	# this is a markdown H1
@@ -37,11 +41,13 @@ key=value
 			(line)
 			(line)
 			(line))
+		(key
+			(line))
 		(text
 			(line))))
 
 ===
-first has gap and key comment
+17= first has gap and key comment
 ===
 
 // a longer paragraph
@@ -54,11 +60,13 @@ key=value
 		(comment
 			(line)
 			(line))
+		(key
+			(line))
 		(text
 			(line))))
 
 ===
-angle brackets open a text block
+18= angle brackets open a text block
 ===
 <any <chars> # [except] @ {LF} allowed>
 	start of text block, just one LF char here:
@@ -66,30 +74,36 @@ angle brackets open a text block
 ---
 (file
 	(entry
+		(key
+			(line))
 		(text
 			(line)
 			(line))))
 
 ===
-square brackets open a list context
+19= square brackets open a list context
 ===
 [any <chars> # [except] @ {LF} allowed]
 ---
 (file
 	(entry
+		(key
+			(line))
 		(list)))
 
 ===
-curly brackets open a dictionary context
+20= curly brackets open a dictionary context
 ===
 {any <chars> # [except] @ {LF} allowed}
 ---
 (file
 	(entry
-		(list)))
+		(key
+			(line))
+		(dict)))
 
 ===
-keys can contain LF chars
+21= keys can contain LF chars
 ===
 @
 	this key has 2 lines
@@ -99,6 +113,9 @@ keys can contain LF chars
 ---
 (file
 	(entry
+		(key
+			(line)
+			(line))
 		(text
 			(line))))
 

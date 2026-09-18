@@ -1,17 +1,19 @@
 ===
-one empty text item
+22= one empty text item
 ===
 []
-	<>
+	
 ---
 (file
 	(entry
+		(key
+			(line))
 		(list
 			(text
 				(line)))))
 
 ===
-one item of short text
+23= one item of short text
 ===
 []
 	reserved chars #/@=<>[]{} TABs are fine in one-liner short text...
@@ -20,6 +22,8 @@ one item of short text
 ---
 (file
 	(entry
+		(key
+			(line))
 		(list
 			(text
 				(line))
@@ -27,7 +31,7 @@ one item of short text
 				(line)))))
 
 ===
-items can be dicts/lists
+24= items can be dicts/lists
 ===
 []
 	{}
@@ -39,12 +43,18 @@ items can be dicts/lists
 ---
 (file
 	(entry
+		(key
+			(line))
 		(list
-			(list
+			(dict
 				(entry
+					(key
+						(line))
 					(text
 						(line)))
 				(entry
+					(key
+						(line))
 					(text
 						(line))))
 			(list
@@ -54,20 +64,24 @@ items can be dicts/lists
 					(line))))))
 
 ===
-but items don't have keys - dict
+25= but items don't have keys - dict
 :error
 ===
 []
 	{error}
 		key=value
 ---
+:2: error: malformed `{}` in list
+:3: error: excess indentation
 
 ===
-but items don't have keys - list
+26= but items don't have keys - list
 :error
 ===
 []
 	[error]
 		line
 ---
+:2: error: malformed `[]` in list
+:3: error: excess indentation
 

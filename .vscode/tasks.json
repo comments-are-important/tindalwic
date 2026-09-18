@@ -8,6 +8,12 @@
             "group": "build",
             "type": "shell",
             "command": "clear ; just all"
+        },
+        {
+            "label": "just: cli",
+            "group": "build",
+            "type": "shell",
+            "command": "clear ; just cli"
         }
     ]
 }

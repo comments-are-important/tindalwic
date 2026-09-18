@@ -5,7 +5,7 @@ name = "tindalwic-cli"
 description = "do tindalwic things from the shell"
 version = { workspace = true }
 edition = { workspace = true }
-rust-version = "1.88"
+rust-version = "1.90"
 authors = { workspace = true }
 repository = { workspace = true }
 license = { workspace = true }

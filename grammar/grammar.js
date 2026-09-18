@@ -10,26 +10,33 @@ export default grammar({
     //     the Rust file is 600 lines, and the format syntax is somewhat obscured by
     //     concerns (like zero-copy). this file is 100 lines and works at a higher level
     //     of abstraction (the tricky details are out of the way in the scanner code).
-    // biggest difference from the Rust is the shape of the tree. in Rust the `epilog`
-    // sits right next to the `prolog`, but here they are in parent/child nodes. a minor
+    // biggest difference from the Rust is the shape of the tree, particularly how
+    // $.entry flattens the epilog and the Name fields into a single node. it's a minor
     // annoyance that is acceptable given the intended purposes of this grammar.
 
     rules: {
 
-        // outermost context is a dictionary after an optional `#!`:
+        // outermost context is a dictionary after an optional `#!` but without an epilog:
         file: $ => seq(optional($.shebang), optional($.prolog), repeat($.entry)),
 
-        // all values have one of these three types (there's only one primitive type):
-        text: $ => seq($._INDENT, optional($._text_block), $._DEDENT),
-        dict: $ => seq($._INDENT, optional($.prolog), repeat($.entry), $._DEDENT),
-        list: $ => seq($._INDENT, optional($.prolog), repeat($.item), $._DEDENT),
+        // the three data types (one text primitive and two nested array contexts):
+        text: $ => seq($._INDENT, optional($._text_block), $._DEDENT, optional($.epilog)),
+        dict: $ => seq($._INDENT, optional($.prolog), repeat($.entry), $._DEDENT, optional($.epilog)),
+        list: $ => seq($._INDENT, optional($.prolog), repeat($._item), $._DEDENT, optional($.epilog)),
+
+        // comments are text except 1st line is before the block, flowing into it:
+        _text_flow: $ => seq($.line, $._INDENT, repeat($._another_line), $._DEDENT),
+
+        // the three data types have distinctive (hopefully familiar) markers
+        _value: $ => choice(
+            seq($._left_margin, '<>', $.text),
+            seq($._left_margin, '{}', $.dict),
+            seq($._left_margin, '[]', $.list),
+        ),
 
         // text is a contiguous block of equally indented lines:
         line: $ => /[^\n]*/,
         _text_block: $ => seq($._first_line, repeat($._another_line)),
-
-        // comments are text except 1st line is before the block, flowing into it:
-        _text_flow: $ => seq($.line, $._INDENT, repeat($._another_line), $._DEDENT),
 
         // comments are fully nodes in the parse and each has a topic it is about:
         shebang: $ => seq($._left_margin, '#!', $._text_flow), // file
@@ -37,26 +44,27 @@ export default grammar({
         epilog: $ => seq($._left_margin, '#', $._text_flow),   // value
         comment: $ => seq($._left_margin, '//', $._text_flow), // key
 
-        // compound types are arrays, each element has at least a value, possibly more:
-        entry: $ => seq(optional($.gap), optional($.comment), $._key_value, optional($.epilog)),
-        item: $ => seq(choice($._value, $._short_value), optional($.epilog)),
-        _value: $ => choice(
-            seq($._left_margin, '<>', $.text),
-            seq($._left_margin, '{}', $.dict),
-            seq($._left_margin, '[]', $.list),
+        // lists hold a linear array of data values:
+        _item: $ => choice(
+            $._value, // the three distinctive markers indicate the value type
+            // in a list context a single line text value can skip the marker...
+            seq($._left_margin, alias($.short_text, $.text))
         ),
-        key: $ => $.text, // each dictionary entry requires a key (rule is only aliased)
+        short_text: $ => alias($._SHORT_STR, $.line),
+
+        // dicts hold an associative array of key+value pairs:
+        entry: $ => seq(optional($.gap), optional($.comment), $._key_value),
+        key: $ => alias($._SHORT_KEY, $.line),
         _key_value: $ => choice(
             seq($._left_margin, '@', alias($.text, $.key), $._value),
-            seq($._left_margin, '<', alias($._TEXT_KEY, $.key), '>', $.text),
-            seq($._left_margin, '{', alias($._DICT_KEY, $.key), '}', $.dict),
-            seq($._left_margin, '[', alias($._LIST_KEY, $.key), ']', $.list),
-            seq($._left_margin, alias($._SHORT_KEY, $.key), '=', alias($.short_line, $.text)),
+            seq($._left_margin, '<', alias($.text_key, $.key), '>', $.text),
+            seq($._left_margin, '{', alias($.dict_key, $.key), '}', $.dict),
+            seq($._left_margin, '[', alias($.list_key, $.key), ']', $.list),
+            seq($._left_margin, $.key, '=', alias($.short_line, $.text)),
         ),
-
-        // there are shortcut one-line flavors for text values in both compound types:
-        _short_value: $ => seq($._left_margin, alias($.short_text, $.text)),
-        short_text: $ => alias($._SHORT_STR, $.line),
+        text_key: $ => alias($._TEXT_KEY, $.line),
+        dict_key: $ => alias($._DICT_KEY, $.line),
+        list_key: $ => alias($._LIST_KEY, $.line),
         short_line: $ => $.line,
 
         // some rules need to peek ahead a few chars
@@ -85,7 +93,7 @@ export default grammar({
         $._PEEK_MARGIN, // if peek(NEW_LINE, margin TABS)
     ],
 
-    conflicts: $ => [[$.item], [$.entry]],
+    conflicts: $ => [[$.text], [$.dict], [$.list]],
 
     extras: $ => [
         // empty to disable the builtin ignore whitespace stuff.

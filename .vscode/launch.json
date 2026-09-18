@@ -5,19 +5,13 @@
     "version": "0.2.0",
     "configurations": [
         {
-            // this won't be helpful without this stanza in Cargo.toml:
-            //     [profile.bench]
-            //     debug = true
-            //     opt-level = 1
-            // but don't leave it there for actual timing runs
             "type": "lldb",
             "request": "launch",
-            "name": "rust 'rand' bench",
-            "cargo": {
-                "args": ["bench", "--no-run", "--manifest-path", "rust/Cargo.toml", "--bench", "rand", "--features", "alloc"],
-                "filter": { "name": "rand", "kind": "bench" }
-            },
-            "cwd": "${workspaceFolder}/rust"
+            "name": "CLI sitter",
+            "program": "${workspaceFolder}/target/debug/tindalwic-cli",
+            "args": ["sitter"],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "just: cli",
         }
     ]
 }

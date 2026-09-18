@@ -3,15 +3,26 @@
  + This is meant to be an informal description of the format.
  + See the [README](README.md) for links to other documentation.
 
-The code in [main/src/parse.rs](main/src/parse.rs) is authoritative: the format is
-officially just whatever that code accepts.
-There is a [tree-sitter grammar](grammar/grammar.js) if you prefer to learn about the
-format from a BNF.
+There is no single authoritative formal specification for the tindalwic format. There
+are several that work together to cover different aspects:
+
+ + The API in [core/src/lib.rs](core/src/lib.rs) pins down the data model - primitive
+   values, the shape of the trees, and where comments are attached.
+ + The serialization in [core/src/fmt.rs](core/src/fmt.rs) defines how computers must
+   write tindalwic data. There is no wiggle room in this spec.
+ + The more lenient [core/src/parse.rs](core/src/parse.rs) algorithm must be used to
+   read, to allow a little grace for any human editors.
+ + A [tree-sitter grammar](grammar/grammar.js) is used for syntax highlighting. It
+   deviates from the data model slightly to better fit the GLR engine, but the trees
+   are fine for the purposes of highlighting.
+
+The rest of this document maps out the concepts behind the format.
+
 
 ## Line Oriented Pattern Matching
 
  + Based on these marker characters:
-   + TAB **`#`** **`//`** **`<>`** **`[]`** **`{}`** **`=`**
+   + TAB **`#`** **`//`** **`<>`** **`[]`** **`{}`** **`@`** **`=`**
 
 Tindalwic reads data one line at a time, examining typically only a few bytes of it to
 decide what to do next. Those decisions are final - they cannot be altered by any
@@ -53,7 +64,7 @@ Every context is closed by EOF or by the next line with insufficient indentation
  + This is the only primitive data type, there isn't even a null.
  + Any bytes following indentation are taken verbatim.
    + No nested context can be opened from within these contexts.
- + Used for both comments and string values.
+ + Used for comments, keys and string values.
    + Media type for comments: `text/markdown; charset=UTF-8; variant=GFM`
 
 Tindalwic might be considered a lexer because it refrains from making the semantic
@@ -138,7 +149,7 @@ as needed in the application code.
 
  + A line that starts (after indentation) with an opening bracket marker:
    + Must end with the corresponding closing bracket, enclosing a key.
- + Keys are decoded to strings, and duplicates are illegal.
+ + Keys are decoded to strings, duplicates are allowed.
    + Each key can have an optional **`//`** comment that immediately precedes it...
    + And/or one optional blank line (preceding the comment, if present).
  + A line that does not start with a bracket marker must contain an **`=`** marker.
@@ -149,8 +160,13 @@ If a key starts with any of the pattern matching marker chars, or if **`=`** app
 anywhere in the key, or if the string value is more than one line, then the special
 short syntax may not be used.
 
-There is no way to embed a newline into a key. The workaround is to mimic `JQ`'s
-[entries](https://jqlang.org/manual/#to_entries-from_entries-with_entries) operators.
+#### Multi-line Keys: **`@`**
+
+ + The **`@`** must be alone on the line (after indentation).
+   + Opens a nested UTF-8 context (zero or more lines).
+     + Empty and single-line keys leniently decoded but encode differently.
+ + The next line must be an empty bracket pair: **`<>`** _or_ **`[]`** _or_ **`{}`**
+   + This form is exactly the same as that of an item in a list.
 
 
 ## Outermost Context is _almost_ an Implicit Associative Array

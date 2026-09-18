@@ -21,16 +21,55 @@ pub struct Args {
     /// specify the random seed
     #[arg(long, value_parser = |s:&str|u64::from_str_radix(s, 16))]
     seed: Option<u64>,
+    /// repeat: write, parse, error if different
+    #[cfg(debug_assertions)]
+    #[arg(long)]
+    check: Option<usize>,
 }
 impl Args {
+    const fn sample(unicode: bool) -> &'static str {
+        if unicode {
+            ""
+        } else {
+            "abcdefghijklmnopqrstuvwxyz"
+        }
+    }
     pub fn run(&self) -> anyhow::Result<()> {
+        let seed = match self.seed {
+            Some(value) => value,
+            None => rand::make_rng::<SmallRng>().random(),
+        };
+        #[cfg(debug_assertions)]
+        if let Some(check) = self.check {
+            let mut rng = SmallRng::seed_from_u64(seed);
+            for count in 0..check {
+                let bump = Bump::new();
+                let mut arena = Arena::new(&bump);
+                let sample = Args::sample(self.unicode);
+                let mut random = Random::new(&mut arena, &mut rng, sample)?;
+                let original = random.file(self.items)?;
+                let encoded = original.to_string();
+                match arena.format_errors("", &encoded, usize::MAX) {
+                    Err(message) => {
+                        anyhow::bail!("parse error after {count} successes\n{message}\n{encoded}\n")
+                    }
+                    Ok(parsed) if parsed != original => {
+                        anyhow::bail!(
+                            "difference after {count} successes\n{original:?}\n{parsed:?}"
+                        )
+                    }
+                    _ => {}
+                };
+            }
+            return Ok(());
+        }
         let bump = Bump::new();
         let mut arena = Arena::new(&bump);
-        let file = self.file(&mut arena)?;
+        let file = self.file(seed, &mut arena)?;
         std::io::stdout().write(file.to_string().as_bytes())?;
         Ok(())
     }
-    pub fn file<'a>(&self, arena: &mut Arena<'a>) -> anyhow::Result<File<'a>> {
+    fn file<'a>(&self, seed: u64, arena: &mut Arena<'a>) -> anyhow::Result<File<'a>> {
         let mut hashbang = String::new();
         for arg in std::env::args() {
             if hashbang.is_empty() {
@@ -40,10 +79,6 @@ impl Args {
                 hashbang.push_str(&arg);
             }
         }
-        let seed = match self.seed {
-            Some(value) => value,
-            None => rand::make_rng::<SmallRng>().random(),
-        };
         hashbang.push_str(" --seed=");
         write!(hashbang, "{:X}", seed)?;
         hashbang.push_str("\nat ");
@@ -51,12 +86,9 @@ impl Args {
         hashbang.push_str(" by version ");
         hashbang.push_str(VERSION);
         let mut rng = SmallRng::seed_from_u64(seed);
-        let sample = if self.unicode {
-            ""
-        } else {
-            "abcdefghijklmnopqrstuvwxyz"
-        };
-        let mut file = Random::new(arena, &mut rng, sample)?.file(self.items)?;
+        let sample = Args::sample(self.unicode);
+        let mut random = Random::new(arena, &mut rng, sample)?;
+        let mut file = random.file(self.items)?;
         file.hashbang = Comment::some(arena.intern(&hashbang));
         Ok(file)
     }

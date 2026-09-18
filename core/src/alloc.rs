@@ -54,6 +54,5 @@ pub fn from_literal(literal: &'static str) -> String {
         assert!(lines.next().is_none(), "line {num} isn't indented");
         assert!(line.trim().is_empty(), "last line isn't blank");
     }
-    result.push('\n');
     result
 }

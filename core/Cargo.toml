@@ -22,6 +22,8 @@ bumpalo = { workspace = true, optional = true }
 tindalwic-macros = { path = "../macros" }
 
 [dev-dependencies]
+anyhow = { workspace = true }
 markdown = { workspace = true }
 rand = { workspace = true }
+tindalwic-cli = { path = "../app" }
 trybuild = { workspace = true }

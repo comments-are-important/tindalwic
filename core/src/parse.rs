@@ -158,7 +158,7 @@ impl<'a, 'r> Input<'a, 'r> {
         mut report: impl FnMut(ParseError) -> Reported + 'r,
     ) -> Option<File<'a>> {
         let mut input = Input {
-            utf8,
+            utf8: utf8.trim_end_matches('\n'),
             line: 0,
             start: 0,
             first: 0,
@@ -327,14 +327,11 @@ impl<'a, 'r> Input<'a, 'r> {
         }
         let bytes = self.utf8.as_bytes();
         let limit = bytes.len();
-        let mut from = self.first + prefix.len();
+        let from = self.first + prefix.len();
         if from > limit || &bytes[self.first..from] != prefix {
             return Some(None);
         }
         let more = indent + 1;
-        if prefix == [b'#'] && from == self.end && self.stretch_once(more) {
-            from += more + 1;
-        }
         let value = self.stretch(more, from)?;
         Some(Some(Comment { value }))
     }
@@ -509,7 +506,20 @@ impl<'a, 'r> Input<'a, 'r> {
                     }
                 }
                 b'@' => {
-                    key.key = self.stretch(indent + 1, self.first + 1)?;
+                    key.key = if len != 1 {
+                        self.report(ParseError::at(self.line, "`@` has trailing char"))?;
+                        self.stretch(indent + 1, self.first + 1)?;
+                        Value::default()
+                    } else {
+                        let end = self.end;
+                        if !self.stretch_once(indent + 1) {
+                            // zero lines in this block
+                            Value::default()
+                        } else {
+                            // first line of stretched key can have excess indent
+                            self.stretch(indent + 1, end + indent + 2)?
+                        }
+                    };
                     let marker = if self.end > 1 && self.first == self.end - 2 {
                         (bytes[self.first], bytes[self.first + 1])
                     } else {

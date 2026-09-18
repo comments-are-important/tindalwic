@@ -67,16 +67,27 @@ impl<'a> Display for Value<'a> {
 
 impl<'a> Display for File<'a> {
     fn fmt(&self, out: &mut Formatter<'_>) -> Result {
-        Output { out, indent: 0 }.file(self)
+        Output {
+            out,
+            indent: 0,
+            empty: true,
+        }
+        .file(self)
     }
 }
 
 struct Output<'o, 'f> {
     out: &'o mut Formatter<'f>,
     indent: usize,
+    empty: bool,
 }
 impl<'o, 'f> Output<'o, 'f> {
     fn indent(&mut self) -> Result {
+        if self.empty {
+            self.empty = false;
+        } else {
+            self.out.write_char('\n')?;
+        }
         for _ in 0..self.indent {
             self.out.write_char('\t')?;
         }
@@ -91,19 +102,14 @@ impl<'o, 'f> Output<'o, 'f> {
     fn string<'a>(&mut self, value: &Value<'a>) -> Result {
         if let Some(slice) = value.verbatim(self.indent) {
             self.out.write_str(slice)?;
-            self.out.write_char('\n')?;
         } else {
             let mut lines = value.lines();
             if let Some(first) = lines.next() {
                 self.out.write_str(first)?;
-                self.out.write_char('\n')?;
                 for line in lines {
                     self.indent()?;
                     self.out.write_str(line)?;
-                    self.out.write_char('\n')?;
                 }
-            } else {
-                self.out.write_char('\n')?;
             }
         }
         Ok(())
@@ -111,15 +117,8 @@ impl<'o, 'f> Output<'o, 'f> {
     fn some_comment<'a>(&mut self, marker: &'a str, comment: &Comment<'a>) -> Result {
         self.indent()?;
         self.out.write_str(marker)?;
-        if comment.value.is_empty() {
-            self.out.write_char('\n')?;
-        } else {
+        if !comment.value.is_empty() {
             self.indent += 1;
-            if marker == "#" && (comment.value.starts_with('!') || comment.value.starts_with('\n'))
-            {
-                self.out.write_char('\n')?;
-                self.indent()?;
-            }
             self.string(&comment.value)?;
             self.indent -= 1;
         }
@@ -163,9 +162,8 @@ impl<'o, 'f> Output<'o, 'f> {
                 self.indent()?;
                 if let Some(slice) = Output::one_liner_in_list(value) {
                     self.out.write_str(slice)?;
-                    self.out.write_char('\n')?;
                 } else {
-                    self.out.write_str("<>\n")?;
+                    self.out.write_str("<>")?;
                     self.indent += 1;
                     self.indent()?;
                     self.string(value)?;
@@ -179,7 +177,7 @@ impl<'o, 'f> Output<'o, 'f> {
                 epilog,
             } => {
                 self.indent()?;
-                self.out.write_str("[]\n")?;
+                self.out.write_str("[]")?;
                 self.indent += 1;
                 self.comment("#", prolog)?;
                 for cell in *cells {
@@ -194,7 +192,7 @@ impl<'o, 'f> Output<'o, 'f> {
                 epilog,
             } => {
                 self.indent()?;
-                self.out.write_str("{}\n")?;
+                self.out.write_str("{}")?;
                 self.indent += 1;
                 self.comment("#", prolog)?;
                 for cell in *cells {
@@ -208,8 +206,7 @@ impl<'o, 'f> Output<'o, 'f> {
     fn entry_in_dict<'a>(&mut self, cell: &Cell<Entry<'a>>) -> Result {
         let entry = cell.get();
         if entry.name.gap {
-            // TODO be strict? f.write_indent(self.indent)?;
-            self.out.write_char('\n')?;
+            self.indent()?;
         }
         self.comment("//", &entry.name.comment)?;
         match &entry.item {
@@ -220,11 +217,10 @@ impl<'o, 'f> Output<'o, 'f> {
                         self.out.write_str(only)?;
                         self.out.write_char('=')?;
                         self.out.write_str(text)?;
-                        self.out.write_char('\n')?;
                     } else {
                         self.out.write_char('<')?;
                         self.out.write_str(only)?;
-                        self.out.write_str(">\n")?;
+                        self.out.write_str(">")?;
                         self.indent += 1;
                         self.indent()?;
                         self.string(value)?;
@@ -233,10 +229,12 @@ impl<'o, 'f> Output<'o, 'f> {
                 } else {
                     self.out.write_char('@')?;
                     self.indent += 1;
+                    self.empty = false;
+                    self.indent()?;
                     self.string(&entry.name.key)?;
                     self.indent -= 1;
                     self.indent()?;
-                    self.out.write_str("<>\n")?;
+                    self.out.write_str("<>")?;
                     self.indent += 1;
                     self.indent()?;
                     self.string(value)?;
@@ -253,14 +251,16 @@ impl<'o, 'f> Output<'o, 'f> {
                 if let Some(only) = entry.name.key.only_line() {
                     self.out.write_char('[')?;
                     self.out.write_str(only)?;
-                    self.out.write_str("]\n")?;
+                    self.out.write_str("]")?;
                 } else {
                     self.out.write_char('@')?;
                     self.indent += 1;
+                    self.empty = false;
+                    self.indent()?;
                     self.string(&entry.name.key)?;
                     self.indent -= 1;
                     self.indent()?;
-                    self.out.write_str("[]\n")?;
+                    self.out.write_str("[]")?;
                 }
                 self.indent += 1;
                 self.comment("#", prolog)?;
@@ -279,14 +279,16 @@ impl<'o, 'f> Output<'o, 'f> {
                 if let Some(only) = entry.name.key.only_line() {
                     self.out.write_char('{')?;
                     self.out.write_str(only)?;
-                    self.out.write_str("}\n")?;
+                    self.out.write_str("}")?;
                 } else {
                     self.out.write_char('@')?;
                     self.indent += 1;
+                    self.empty = false;
+                    self.indent()?;
                     self.string(&entry.name.key)?;
                     self.indent -= 1;
                     self.indent()?;
-                    self.out.write_str("{}\n")?;
+                    self.out.write_str("{}")?;
                 }
                 self.indent += 1;
                 self.comment("#", prolog)?;

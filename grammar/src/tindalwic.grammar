@@ -1,0 +1,57 @@
+@context state from "./support.ts"
+    // depth = nesting level (0 at File)
+    // tabs = number of TAB chars ahead, peeking halts at depth+1
+    // epilog = true iff tabs == depth-1 and peeking stopped by "#"
+    // surfeit() -> true iff tabs > depth
+    // deficit() -> true iff tabs < depth && !epilog
+    // exact() -> true iff tabs == depth
+
+@external tokens chars from "./support.ts" {
+    start, // epsilon, triggers peeking
+    eol, // epsilon at EOF or a LF char, triggers peeking
+    line, // zero or more (greedy) non-LF chars + `eol`
+    indent, // epsilon iff state.surfeit(), triggers ++depth
+    dedent, // epsilon iff state.deficit(), triggers --depth
+    margin, // the TAB chars iff state.exact(), triggers tabs=0
+    epitabs // the TAB chars iff state.epilog, triggers tabs=0; epilog=false
+}
+
+text { margin line }
+flow { line indent text* dedent }
+
+@top File { start Shebang? Prolog? Entry* "\n"? }
+
+Shebang { "#!" flow }        // File
+Prolog { margin "#" flow }   // File Dict List
+Epilog { epitabs "#" flow }  // value
+Comment { margin "//" flow } // key
+
+Text { indent Prolog? text*  Epilog? dedent }
+Dict { indent Prolog? Entry* Epilog? dedent }
+List { indent Prolog? value* Epilog? dedent }
+
+value { margin ( "<>" eol Text | "{}" eol Dict | "[]" eol List ) }
+Entry { Key value }
+Key { Comment? margin "@" eol margin flow }
+
+
+/*
+// lists hold a linear array of data values:
+_item: choice(
+    value // the three distinctive markers indicate the value type
+    // in a list context a single line text value can skip the marker...
+    seq(left_margin alias(short_text text))
+)
+short_text: alias(SHORT_STR line)
+
+// dicts hold an associative array of key+value pairs:
+entry: seq(gap? comment? key_value)
+key: alias(SHORT_KEY line)
+_key_value: choice(
+    seq(left_margin '@' alias(text key) value)
+    seq(left_margin '<' alias(text_key key) '>' text)
+    seq(left_margin '{' alias(dict_key key) '}' dict)
+    seq(left_margin '[' alias(list_key key) ']' list)
+    seq(left_margin key '=' alias(short_line text))
+)
+*/

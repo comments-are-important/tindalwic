@@ -1,0 +1,9 @@
+{
+    "compilerOptions": {
+        "allowImportingTsExtensions": true,
+        "rewriteRelativeImportExtensions": true,
+        "types": [
+            "node"
+        ]
+    }
+}

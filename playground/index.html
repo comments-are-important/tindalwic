@@ -114,25 +114,31 @@
     <span id="version"></span>
 
     <script type="module">
-        import init, { from_tindalwic, into_tindalwic, version } from './tindalwic_webapp.js';
+        import init, { from_tindalwic, into_tindalwic, version } from './tindalwic_playground.js';
         await init();
         document.getElementById("version").innerText = version();
         import { basicSetup } from "codemirror";
         import { EditorView, keymap } from "@codemirror/view";
         import { EditorState, Compartment } from "@codemirror/state";
         import { indentWithTab } from "@codemirror/commands";
-        import { indentUnit, StreamLanguage } from "@codemirror/language";
+        import { indentUnit, StreamLanguage, LRLanguage, LanguageSupport } from "@codemirror/language";
         import { StateEffect } from "@codemirror/state";
         import { json } from "@codemirror/lang-json";
         import { yaml } from "@codemirror/lang-yaml";
         import { toml } from "@codemirror/legacy-modes/mode/toml";
+        import { parser } from './tindalwic_lezer.js';
         const ourDiv = document.getElementById('ours');
+        const ourLanguage = LRLanguage.define({
+            name: "Tindalwic",
+            parser: parser
+        });
         const ourView = new EditorView({
             parent: ourDiv,
             extensions: [
                 basicSetup,
                 indentUnit.of("\t"),
-                keymap.of([indentWithTab])
+                keymap.of([indentWithTab]),
+                new LanguageSupport(ourLanguage)
             ]
         });
         const theirDiv = document.getElementById('theirs');

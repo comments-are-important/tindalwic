@@ -1,0 +1,56 @@
+text {( indentT Line* dedent )?}
+
+// in Nested
+
+Dict {( indentD Prolog? Entry* dedent )?}
+List {( indentL Prolog? Item* dedent )?}
+
+// with Important
+
+Comment { Slashes Line text } // keys
+Prolog { Hash Line text }     // File Dict List
+Epilog { Hash Line text }     // Text Dict List
+Shebang { "#!" Line text }    // File
+
+// that attach to their subject nodes/values/keys
+
+@top File { Shebang? Prolog? Entry* eof } // Dict-ish
+Item { ( value | Line ) Epilog? }
+Entry { Comment? keyValue Epilog? }
+
+// brackets surround keys but indicate value type
+// keys can be empty, and in a List they all must be
+
+value {
+    "<>" eol Text
+  | "{}" eol Dict
+  | "[]" eol List
+}
+keyValue {
+    "<" KeyText ">" eol Text
+  | "{" KeyDict "}" eol Dict
+  | "[" KeyList "]" eol List
+
+// keys can span multiple lines
+  | "@" eol KeyLong { text } value
+
+// and there are two shortcuts when a Text is just one Line
+  | KeyEquals Line // the other shortcut is in the Item rule
+}
+
+// the remainder is nitty-gritty lezer details
+Text { text } // capitalization conventions affect the tree building
+@external tokens terms from "./lexical.ts" {
+    dedent indentT indentD indentL margin eol eof
+    // RESERVED  # / @ { } [ ] < >
+    Line // { ![\n]* eol } except in ListContext 1st char can't be RESERVED
+    KeyEquals // { ![=\n]* "=" } except 1st char can't be RESERVED
+    KeyText // { ![\n]* } but don't grab the angle ket at the end
+    KeyDict // { ![\n]* } but don't grab the curly ket at the end
+    KeyList // { ![\n]* } but don't grab the square ket at the end
+    Hash // zero or more completely empty lines and an indented "#"
+    Slashes // zero or more completely empty lines and an indented "//"
+}
+@skip { margin }
+@context margin from "./context.ts"
+@external propSource highlight from "./properties.ts"

@@ -66,9 +66,10 @@ playground: (_install "wasm-opt") _is_running_inside_devcontainer
     wasm-bindgen --target web --no-typescript --remove-name-section --remove-producers-section \
       --out-dir target/playground-release \
       target/wasm32-unknown-unknown/release-small/tindalwic_playground.wasm
+    ( cd grammar && npx rollup -c )
     cp playground/favicon.ico target/
-    cp playground/{index.html,favicon.ico} target/playground-dev/
-    cp playground/{index.html,favicon.ico} target/playground-release/
+    cp playground/{index.html,favicon.ico} target/tindalwic_lezer.js target/playground-dev/
+    cp playground/{index.html,favicon.ico} target/tindalwic_lezer.js target/playground-release/
     cd target/playground-release ; wasm-opt -Oz --enable-bulk-memory \
       -o tindalwic_playground_bg.wasm tindalwic_playground_bg.wasm
 

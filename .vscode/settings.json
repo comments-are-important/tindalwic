@@ -7,6 +7,7 @@
         "demarks",
         "importmap",
         "keymap",
+        "lezer",
         "msrv",
         "newtype",
         "pkgid",

@@ -5,11 +5,21 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "lezer main",
+            "request": "launch",
+            "type": "node",
+            "program": "${workspaceFolder}/grammar/src/main.ts",
+            "args": ["#!p"],
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+        },
+        {
             "type": "lldb",
             "request": "launch",
-            "name": "CLI sitter",
+            "name": "CLI random",
             "program": "${workspaceFolder}/target/debug/tindalwic-cli",
-            "args": ["sitter"],
+            "args": ["random"],
             "cwd": "${workspaceFolder}",
             "preLaunchTask": "just: cli",
         }

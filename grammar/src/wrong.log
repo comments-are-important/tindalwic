@@ -1,0 +1,69 @@
+input.length=11
+#!she
+	bang
+=======
+edge? pos=0 state=PeekTabs{depth=0,tabs=0,exact} canShift=+no_epi
+edge: accept +no_epi pos=0 len=0
+shift? no_epi pos=0 state=PeekTabs{depth=0,tabs=0,exact}
+peek=> outermost not TAB PeekTabs{depth=0,tabs=0,exact}
+♔[0]@0 -> ♔[0,1]@0 (via shift for no_epi @ 0)
+edge? pos=0 state=PeekTabs{depth=0,tabs=0,exact} canShift=!margin
+edge: nothing accepted
+shift? "#!" pos=0 state=PeekTabs{depth=0,tabs=0,exact}
+shift: no action
+♔[0,1]@0 -> ♔[0,1,2]@2 (via shift for "#!" @ 0)
+shift? line pos=2 state=PeekTabs{depth=0,tabs=0,exact}
+shift: no action
+♔[0,1,2]@2 -> ♔[0,1,2,11]@6 (via shift for line @ 2)
+edge? pos=6 state=PeekTabs{depth=0,tabs=0,exact} canShift=+no_epi
+edge: accept +no_epi pos=6 len=0
+shift? no_epi pos=6 state=PeekTabs{depth=0,tabs=0,exact}
+peek=> outermost TAB PeekTabs{depth=0,tabs=1,surfeit}
+♔[0,1,2,11]@6 -> ♔[0,1,2,11,21]@6 (via shift for no_epi @ 6)
+edge? pos=6 state=PeekTabs{depth=0,tabs=1,surfeit} canShift=+indent,+margin
+edge: accept +indent pos=6 len=0
+shift? indent pos=6 state=PeekTabs{depth=0,tabs=1,surfeit}
+indent=> PeekTabs{depth=1,tabs=1,exact}
+♔[0,1,2,11,21]@6 -> ♔[0,1,2,11,21,29]@6 (via shift for indent @ 6)
+edge? pos=6 state=PeekTabs{depth=1,tabs=1,exact} canShift=!dedent,+margin
+edge: accept +margin pos=6 len=1
+shift? margin pos=6 state=PeekTabs{depth=1,tabs=1,exact}
+margin=> PeekTabs{depth=1,tabs=0,deficit}
+♔[0,1,2,11,21,29]@6 -> ♔[0,1,2,11,21,29,36]@7 (via shift for margin @ 6)
+shift? line pos=7 state=PeekTabs{depth=1,tabs=0,deficit}
+shift: no action
+♔[0,1,2,11,21,29,36]@7 -> ♔[0,1,2,11,21,29,36,44]@11 (via shift for line @ 7)
+edge? pos=11 state=PeekTabs{depth=1,tabs=0,deficit} canShift=+no_epi
+edge: accept +no_epi pos=11 len=0
+shift? no_epi pos=11 state=PeekTabs{depth=1,tabs=0,deficit}
+peek=> at EOF, no change
+♔[0,1,2,11,21,29,36,44]@11 -> ♔[0,1,2,11,21,29,36,44,53]@11 (via shift for no_epi @ 11)
+♔[0,1,2,11,21,29,36,44,53]@11 -> ♔[0,1,2,11,21,29,37]@11 (via always-reduce (margin line no_epi)+)
+♔[0,1,2,11,21,29,37]@11 -> ♕[0,1,2,12]@11!-100 (via force-reduce)
+♕[0,1,2,12]@11!-100 -> ♕[0,1,10]@11!-100 (via always-reduce Shebang)
+edge? pos=11 state=PeekTabs{depth=1,tabs=0,deficit} canShift=!margin
+edge: nothing accepted
+shift? dedent pos=11 state=PeekTabs{depth=1,tabs=0,deficit}
+dedent=> PeekTabs{depth=0,tabs=0,exact}
+shift? margin pos=11 state=PeekTabs{depth=1,tabs=0,deficit}
+Assertion failed: margin: ERROR: deficit or epilog
+margin=> PeekTabs{depth=1,tabs=0,deficit}
+♔[0,1,2,11,21,29,37]@11 -> ♖[0,1,2,11,21,29,37,46]@11!-200 (via recover-insert)
+♖[0,1,2,11,21,29,37,46]@11!-200 -> ♖[0,1,2,12]@11!-200 (via always-reduce flow)
+♖[0,1,2,12]@11!-200 -> ♖[0,1,10]@11!-200 (via always-reduce Shebang)
+edge? pos=11 state=PeekTabs{depth=0,tabs=0,exact} canShift=!margin
+edge: nothing accepted
+♔[0,1,2,11,21,29,37]@11 -> ♗[0,1,2,11,21,29,37,36]@11!-200 (via recover-insert)
+shift? line pos=11 state=PeekTabs{depth=1,tabs=0,deficit}
+shift: no action
+♗[0,1,2,11,21,29,37,36]@11!-200 -> ♗[0,1,2,11,21,29,37,36,44]@11!-200 (via shift for line @ 11)
+edge? pos=11 state=PeekTabs{depth=1,tabs=0,deficit} canShift=+no_epi
+edge: accept +no_epi pos=11 len=0
+shift? no_epi pos=11 state=PeekTabs{depth=1,tabs=0,deficit}
+peek=> at EOF, no change
+♗[0,1,2,11,21,29,37,36,44]@11!-200 -> ♗[0,1,2,11,21,29,37,36,44,53]@11!-200 (via shift for no_epi @ 11)
+♗[0,1,2,11,21,29,37,36,44,53]@11!-200 -> ♗[0,1,2,11,21,29,37,45]@11!-200 (via always-reduce (margin line no_epi)+)
+♗[0,1,2,11,21,29,37,45]@11!-200 -> ♗[0,1,2,11,21,29,37]@11!-200 (via always-reduce (margin line no_epi)+)
+Force-finish ♕[0,1,10]@11!-100
+=======
+File(Shebang(⚠))

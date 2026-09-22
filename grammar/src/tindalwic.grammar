@@ -1,57 +1,35 @@
-@context state from "./support.ts"
+@context peekTabs from "./context.ts"
     // depth = nesting level (0 at File)
     // tabs = number of TAB chars ahead, peeking halts at depth+1
     // epilog = true iff tabs == depth-1 and peeking stopped by "#"
-    // surfeit() -> true iff tabs > depth
-    // deficit() -> true iff tabs < depth && !epilog
-    // exact() -> true iff tabs == depth
+    // surfeit() -> true iff indent possible because tabs > depth
+    // deficit() -> true iff dedent needed because tabs < depth && !epilog
 
-@external tokens chars from "./support.ts" {
-    start, // epsilon, triggers peeking
-    eol, // epsilon at EOF or a LF char, triggers peeking
-    line, // zero or more (greedy) non-LF chars + `eol`
-    indent, // epsilon iff state.surfeit(), triggers ++depth
-    dedent, // epsilon iff state.deficit(), triggers --depth
-    margin, // the TAB chars iff state.exact(), triggers tabs=0
-    epitabs // the TAB chars iff state.epilog, triggers tabs=0; epilog=false
+@external tokens leftEdge from "./external.ts" {
+    peek,   // epsilon, triggers peeking
+    no_epi, // epsilon, triggers peeking but forces !epilog
+    indent, // epsilon iff surfeit(), triggers ++depth
+    dedent, // epsilon iff deficit(), triggers --depth
+    margin, // the TAB chars iff !(epilog||deficit()), triggers tabs=0
+    epi_mar // the TAB chars iff epilog, triggers tabs=0; epilog=false
+}
+@tokens {
+    eol { "\n" | @eof }
+    line { ![\n]* ( "\n" | @eof ) }
 }
 
-text { margin line }
-flow { line indent text* dedent }
+@top File { no_epi Shebang? Prolog? Entry* "\n"? }
 
-@top File { start Shebang? Prolog? Entry* "\n"? }
-
+flow { line no_epi (indent (margin line no_epi)* dedent)? }
 Shebang { "#!" flow }        // File
 Prolog { margin "#" flow }   // File Dict List
-Epilog { epitabs "#" flow }  // value
+Epilog { epi_mar "#" flow }  // value
 Comment { margin "//" flow } // key
+Key { Comment? margin "@" eol no_epi margin flow }
 
-Text { indent Prolog? text*  Epilog? dedent }
+Text { indent Prolog? (margin line peek)* Epilog? dedent }
 Dict { indent Prolog? Entry* Epilog? dedent }
 List { indent Prolog? value* Epilog? dedent }
 
-value { margin ( "<>" eol Text | "{}" eol Dict | "[]" eol List ) }
+value { margin ( "<>" eol peek Text | "{}" eol peek Dict | "[]" eol peek List ) }
 Entry { Key value }
-Key { Comment? margin "@" eol margin flow }
-
-
-/*
-// lists hold a linear array of data values:
-_item: choice(
-    value // the three distinctive markers indicate the value type
-    // in a list context a single line text value can skip the marker...
-    seq(left_margin alias(short_text text))
-)
-short_text: alias(SHORT_STR line)
-
-// dicts hold an associative array of key+value pairs:
-entry: seq(gap? comment? key_value)
-key: alias(SHORT_KEY line)
-_key_value: choice(
-    seq(left_margin '@' alias(text key) value)
-    seq(left_margin '<' alias(text_key key) '>' text)
-    seq(left_margin '{' alias(dict_key key) '}' dict)
-    seq(left_margin '[' alias(list_key key) ']' list)
-    seq(left_margin key '=' alias(short_line text))
-)
-*/

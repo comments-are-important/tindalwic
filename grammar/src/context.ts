@@ -1,12 +1,12 @@
 import * as terms from "./generated.terms.ts"
 import { parser } from "./generated.ts"
 import { ContextTracker, InputStream } from "@lezer/lr"
-import { displayChar, reserved, EOF, TAB, LF, HASH } from "./ascii.ts"
+import { EOF, TAB, LF, HASH, show, reserved } from "./ascii.ts"
 
 let output: Console | null = null
 export function debugContext(console: Console | null) { output = console }
 
-export class PeekTabs {
+export class Margin {
     readonly depth: number
     readonly tabs: number
     readonly next: number
@@ -16,7 +16,7 @@ export class PeekTabs {
         this.next = next
     }
     toString(): string {
-        return `PeekTabs%${this.depth}:${this.tabs}*TAB+${displayChar(this.next)}`
+        return `Margin%${this.depth}:${this.tabs}*TAB+${show(this.next)}`
     }
     surfeit(): boolean {
         return this.tabs > this.depth
@@ -38,7 +38,7 @@ export class PeekTabs {
                 return !this.notEpilog()
             case terms.margin:
                 return !this.deficit()
-            case terms.short_text:
+            case terms.weird:
                 return this.tabs == this.depth && !reserved(this.next)
         }
         return false;
@@ -50,56 +50,56 @@ export class PeekTabs {
         hash = (31 * hash + this.next) | 0
         return hash
     }
-    peek(input: InputStream): PeekTabs {
+    peek(input: InputStream): Margin {
         if (input.next == EOF) {
             let result = (this.tabs === 0 && this.next === EOF) ? this
-                : new PeekTabs(this.depth, 0, EOF)
+                : new Margin(this.depth, 0, EOF)
             output?.debug(`peek=> EOF ${(this === result) ? "keep" : "new"} ${result}`)
             return result
         }
         let prev = input.peek(-1)
         if (prev != LF && prev != EOF)
-            output?.warn(`peek: not at column 0? prev=${displayChar(prev)}`)
+            output?.warn(`peek: not at column 0? prev=${show(prev)}`)
         let tabs = 0
         for (; input.next == TAB; input.advance())
             ++tabs
         let next = input.next
         if (tabs) input.advance(-tabs)
         let result = (this.tabs === tabs && this.next === next) ? this
-            : new PeekTabs(this.depth, tabs, next)
+            : new Margin(this.depth, tabs, next)
         output?.debug(`peek=> ${(this === result) ? "keep" : "new"} ${result}`)
         return result
     }
-    indent(): PeekTabs {
-        let result = new PeekTabs(this.depth + 1, this.tabs, this.next)
+    indent(): Margin {
+        let result = new Margin(this.depth + 1, this.tabs, this.next)
         output?.debug(`indent=> ${this.surfeit() ? "actual" : "virtual"} ${result}`)
         return result
     }
-    dedent(): PeekTabs {
+    dedent(): Margin {
         if (this.depth > 0) {
-            let result = new PeekTabs(this.depth - 1, this.tabs, this.next)
+            let result = new Margin(this.depth - 1, this.tabs, this.next)
             output?.debug(`dedent=> ${result}`)
             return result
         }
         output?.error(`dedent=> UNDERFLOW prevented ${this}`)
         return this
     }
-    consume(tabs: number): PeekTabs {
+    consume(tabs: number): Margin {
         if (tabs < this.tabs)
-            return new PeekTabs(this.depth, this.tabs - tabs, TAB)
+            return new Margin(this.depth, this.tabs - tabs, TAB)
         if (tabs == this.tabs)
-            return new PeekTabs(this.depth, 0, this.next)
+            return new Margin(this.depth, 0, this.next)
         output?.error(`consume tabs UNDERFLOW prevented`)
-        return new PeekTabs(this.depth, 0, EOF)
+        return new Margin(this.depth, 0, EOF)
     }
-    epilog(): PeekTabs {
+    epilog(): Margin {
         output?.assert(!this.notEpilog(),
             `epilog: ERROR wrong ${(this.next != HASH) ? "next" : "tabs"}`)
         let result = this.consume(this.depth - 1)
         output?.debug(`epilog=> ${result}`)
         return result
     }
-    margin(): PeekTabs {
+    margin(): Margin {
         output?.assert(!this.deficit(),
             `margin: ERROR: deficit`)
         let result = this.consume(this.depth)
@@ -108,10 +108,10 @@ export class PeekTabs {
     }
 }
 
-export const peekTabs = new ContextTracker({
-    start: new PeekTabs(0, 0, EOF),
+export const margin = new ContextTracker({
+    start: new Margin(0, 0, EOF),
     strict: true,
-    hash: (state: PeekTabs) => state.hash(),
+    hash: (state: Margin) => state.hash(),
     shift(state, term, _stack, input) {
         output?.debug(`shift? ${parser.getName(term)} pos=${input.pos} state=${state}`)
         switch (term) {
@@ -124,7 +124,7 @@ export const peekTabs = new ContextTracker({
             case terms.epilog:
                 return state.epilog()
             case terms.margin:
-            case terms.short_text:
+            case terms.weird:
                 return state.margin()
         }
         output?.debug(`shift: no action`)

@@ -1,16 +1,22 @@
-@context peekTabs from "./context.ts"
+@context margin from "./context.ts"
     // depth = nesting level (0 at File)
     // tabs = number of lookahead TAB chars
     // next = the char just after the TABs
     // exact() => tabs === depth
 
-@external tokens leftEdge from "./external.ts" {
+@external tokens edge from "./external.ts" {
     peek,   // unconditional epsilon, triggers peeking
     indent, // unconditional epsilon, triggers peeking then ++depth
     dedent, // epsilon iff tabs < depth, triggers --depth
     epilog, // the TAB chars iff epilog, triggers tabs=0 and epilog=false
     margin, // the TAB chars iff tabs >= depth (&& !epilog), triggers tabs=0
-    short_text // the TAB chars iff exact && !reserved(next)
+    weird // the TAB chars iff exact && !reserved(next)
+}
+@external tokens str from "./external.ts" {
+    angleKey  // any chars in current line before a closing angle bracket at eol
+    squareKey // any chars in current line before a closing square bracket at eol
+    curlyKey  // any chars in current line before a closing curly bracket at eol
+    equalsKey // any chars in current line before first equals char
 }
 @tokens {
     eol { "\n" | @eof }
@@ -18,17 +24,25 @@
 }
 
 @top File { peek Shebang? Prolog? Entry* "\n"? }
-Text { indent Prolog? (margin line peek)* Epilog? dedent }
+Text { indent Prolog? Line* Epilog? dedent }
 Dict { indent Prolog? Entry* Epilog? dedent }
 List { indent Prolog? (value | ShortText)* Epilog? dedent }
-Key { Comment? margin "@" eol indent (margin line peek)* dedent }
-flow { line indent (margin line peek)* dedent }
+flow { line indent Line* dedent }
+LongKey { margin "@" eol indent Line* dedent }
+
+Line { margin line peek }
+ShortText { weird line peek }
+EqualsKey { weird equalsKey "=" }
+AngleKey { margin "<" angleKey ">" eol }
+SquareKey { margin "[" squareKey "]" eol }
+CurlyKey { margin "{" curlyKey "}" eol }
 
 Shebang { "#!" flow }        // File
 Prolog { margin "#" flow }   // File Dict List
 Epilog { epilog "#" flow }   // value
 Comment { margin "//" flow } // key
-value { margin ( "<>" eol Text | "{}" eol Dict | "[]" eol List ) }
-Entry { Key value }
 
-ShortText { short_text line peek }
+Entry { Comment? keyValue }
+value { margin ( "<>" eol Text | "{}" eol Dict | "[]" eol List ) }
+keyValue { LongKey value | EqualsKey line peek
+    | AngleKey Text | SquareKey List | CurlyKey Dict }

@@ -5,20 +5,21 @@ import { ExternalTokenizer } from "@lezer/lr"
 import { EOF, LF, BANG, HASH } from "./ascii.ts"
 
 let output: Console | null = null
+function unexpectedTermName(term: number, expected: string): boolean {
+    let got = parser.getName(term)
+    output?.assert(expected == got, `mismatch: our ${expected} != parser ${got}`)
+    return expected != got
+}
 export function debugExternal(console: Console | null) {
     output = console
-    if (output == null) return
-    function failedCheckTermName(term: number, expected: string): boolean {
-        let got = parser.getName(term)
-        output?.assert(expected == got, `mismatch: our ${expected} != parser ${got}`)
-        return expected != got
-    }
-    if (failedCheckTermName(terms.peek, "peek")
-        || failedCheckTermName(terms.indent, "indent")
-        || failedCheckTermName(terms.dedent, "dedent")
-        || failedCheckTermName(terms.epilog, "epilog")
-        || failedCheckTermName(terms.margin, "margin"))
-        output.error(`probably need to regenerate`)
+    if (output != null)
+        if (unexpectedTermName(terms.peek, "peek")
+            || unexpectedTermName(terms.indent, "indent")
+            || unexpectedTermName(terms.dedent, "dedent")
+            || unexpectedTermName(terms.epilog, "epilog")
+            || unexpectedTermName(terms.margin, "margin")
+            || unexpectedTermName(terms.short_text, "short_text"))
+            output.error(`probably need to regenerate`)
 }
 
 export const leftEdge = new ExternalTokenizer((input, stack) => {
@@ -34,6 +35,7 @@ export const leftEdge = new ExternalTokenizer((input, stack) => {
                     case terms.dedent:
                     case terms.epilog:
                     case terms.margin:
+                    case terms.short_text:
                         prefix = state.canShift(term) ? "+" : "!"
                 }
                 can.push(`${prefix}${parser.getName(term) || term}`)
@@ -64,6 +66,11 @@ export const leftEdge = new ExternalTokenizer((input, stack) => {
             output?.debug(`edge: accept epilog len=${offset}`)
             input.acceptToken(terms.epilog, offset)
         }
+        return
+    }
+    if (stack.canShift(terms.short_text) && state.canShift(terms.short_text)) {
+        output?.debug(`edge: accept short_text len=${state.depth}`)
+        input.acceptToken(terms.short_text, state.depth)
         return
     }
     if (stack.canShift(terms.margin) && state.canShift(terms.margin)) {

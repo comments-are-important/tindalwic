@@ -2,13 +2,15 @@
     // depth = nesting level (0 at File)
     // tabs = number of lookahead TAB chars
     // next = the char just after the TABs
+    // exact() => tabs === depth
 
 @external tokens leftEdge from "./external.ts" {
     peek,   // unconditional epsilon, triggers peeking
     indent, // unconditional epsilon, triggers peeking then ++depth
     dedent, // epsilon iff tabs < depth, triggers --depth
     epilog, // the TAB chars iff epilog, triggers tabs=0 and epilog=false
-    margin  // the TAB chars iff tabs >= depth (&& !epilog), triggers tabs=0
+    margin, // the TAB chars iff tabs >= depth (&& !epilog), triggers tabs=0
+    short_text // the TAB chars iff exact && !reserved(next)
 }
 @tokens {
     eol { "\n" | @eof }
@@ -16,17 +18,17 @@
 }
 
 @top File { peek Shebang? Prolog? Entry* "\n"? }
+Text { indent Prolog? (margin line peek)* Epilog? dedent }
+Dict { indent Prolog? Entry* Epilog? dedent }
+List { indent Prolog? (value | ShortText)* Epilog? dedent }
+Key { Comment? margin "@" eol indent (margin line peek)* dedent }
+flow { line indent (margin line peek)* dedent }
 
 Shebang { "#!" flow }        // File
 Prolog { margin "#" flow }   // File Dict List
 Epilog { epilog "#" flow }   // value
 Comment { margin "//" flow } // key
-
-flow { line indent (margin line peek)* dedent }
-Text { indent Prolog? (margin line peek)* Epilog? dedent }
-Dict { indent Prolog? Entry* Epilog? dedent }
-List { indent Prolog? value* Epilog? dedent }
-
 value { margin ( "<>" eol Text | "{}" eol Dict | "[]" eol List ) }
 Entry { Key value }
-Key { Comment? margin "@" eol indent (margin line peek)* dedent }
+
+ShortText { short_text line peek }

@@ -1,7 +1,7 @@
 import * as terms from "./generated.terms.ts"
 import { parser } from "./generated.ts"
 import { ContextTracker, InputStream } from "@lezer/lr"
-import { displayChar, EOF, TAB, LF, HASH } from "./ascii.ts"
+import { displayChar, reserved, EOF, TAB, LF, HASH } from "./ascii.ts"
 
 let output: Console | null = null
 export function debugContext(console: Console | null) { output = console }
@@ -38,6 +38,8 @@ export class PeekTabs {
                 return !this.notEpilog()
             case terms.margin:
                 return !this.deficit()
+            case terms.short_text:
+                return this.tabs == this.depth && !reserved(this.next)
         }
         return false;
     }
@@ -122,6 +124,7 @@ export const peekTabs = new ContextTracker({
             case terms.epilog:
                 return state.epilog()
             case terms.margin:
+            case terms.short_text:
                 return state.margin()
         }
         output?.debug(`shift: no action`)

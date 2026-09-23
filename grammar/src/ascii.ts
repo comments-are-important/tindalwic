@@ -1,6 +1,26 @@
 // well, mostly ASCII. neither BANG nor HASH are proper
 
-export const EOF=-1, TAB = 9, LF = 10, BANG = 33, HASH = 35
+export const EOF = -1, TAB = 9, LF = 10, BANG = 33, HASH = 35
+
+export function reserved(char: number): boolean {
+    switch (char) {
+        case EOF:
+        case TAB:
+        case LF:
+        case HASH:
+        case 47: // /
+        case 60: // <
+        case 61: // =
+        case 62: // >
+        case 64: // @
+        case 91: // [
+        case 93: // ]
+        case 123: // {
+        case 125: // }
+            return true
+    }
+    return false
+}
 
 export function displayChar(char: number): string {
     switch (char) {

@@ -40,6 +40,8 @@ export class Margin {
                 return !this.deficit()
             case terms.weird:
                 return this.tabs == this.depth && !reserved(this.next)
+            case terms.Gap:
+                return this.tabs === 0 && this.next === LF
         }
         return false;
     }

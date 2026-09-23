@@ -101,6 +101,7 @@ export const edge = new ExternalTokenizer((input, stack) => {
                     case terms.epilog:
                     case terms.margin:
                     case terms.weird:
+                    case terms.Gap:
                         prefix = state.canShift(term) ? "+" : "!"
                 }
                 can.push(`${prefix}${parser.getName(term) || term}`)
@@ -115,6 +116,11 @@ export const edge = new ExternalTokenizer((input, stack) => {
     if (stack.canShift(terms.indent) && state.canShift(terms.indent)) {
         output?.debug(`edge: accept indent epsilon`)
         input.acceptToken(terms.indent, 0)
+        return
+    }
+    if (state.canShift(terms.Gap) && state.canShift(terms.Gap)) {
+        output?.debug(`edge: accept Gap`)
+        input.acceptToken(terms.Gap, 1)
         return
     }
     if (stack.canShift(terms.dedent) && state.canShift(terms.dedent)) {

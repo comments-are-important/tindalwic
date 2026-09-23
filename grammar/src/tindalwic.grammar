@@ -10,7 +10,8 @@
     dedent, // epsilon iff tabs < depth, triggers --depth
     epilog, // the TAB chars iff epilog, triggers tabs=0 and epilog=false
     margin, // the TAB chars iff tabs >= depth (&& !epilog), triggers tabs=0
-    weird // the TAB chars iff exact && !reserved(next)
+    weird,  // the TAB chars iff exact && !reserved(next)
+    Gap     // the LF iff tabs==0 and next==LF, triggers peeking
 }
 @external tokens str from "./external.ts" {
     angleKey  // any chars in current line before a closing angle bracket at eol
@@ -42,7 +43,7 @@ Prolog { margin "#" flow }   // File Dict List
 Epilog { epilog "#" flow }   // value
 Comment { margin "//" flow } // key
 
-Entry { Comment? keyValue }
+Entry { (Gap peek)? Comment? keyValue }
 value { margin ( "<>" eol Text | "{}" eol Dict | "[]" eol List ) }
 keyValue { LongKey value | EqualsKey line peek
     | AngleKey Text | SquareKey List | CurlyKey Dict }

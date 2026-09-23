@@ -1,6 +1,7 @@
 import * as terms from "./generated.terms.ts"
 import { parser } from "./generated.ts"
 import { ContextTracker, InputStream } from "@lezer/lr"
+import { displayChar, EOF, TAB, LF, HASH } from "./ascii.ts"
 
 let output: Console | null = null
 export function debugContext(console: Console | null) { output = console }
@@ -8,139 +9,120 @@ export function debugContext(console: Console | null) { output = console }
 export class PeekTabs {
     readonly depth: number
     readonly tabs: number
-    readonly epilog: boolean
-    constructor(depth: number, tabs: number, epilog: boolean) {
+    readonly next: number
+    constructor(depth: number, tabs: number, next: number) {
         this.depth = depth
         this.tabs = tabs
-        this.epilog = epilog
+        this.next = next
+    }
+    toString(): string {
+        return `PeekTabs%${this.depth}:${this.tabs}*TAB+${displayChar(this.next)}`
     }
     surfeit(): boolean {
         return this.tabs > this.depth
     }
     deficit(): boolean {
-        return this.tabs < this.depth && !this.epilog
+        return this.tabs < this.depth
     }
-    toString(): string {
-        let epilog = (!this.epilog) ? ""
-            : (this.tabs + 1 == this.depth) ? ",epilog" : ",ERROR"
-        let status = (this.tabs == this.depth) ? "exact"
-            : this.surfeit() ? "surfeit" : "deficit"
-        return `PeekTabs{depth=${this.depth},tabs=${this.tabs}${epilog},${status}}`
+    notEpilog(): boolean {
+        return this.next != HASH || this.tabs != this.depth - 1
+    }
+    canShift(term: number): boolean {
+        switch (term) {
+            case terms.peek:
+            case terms.indent:
+                return true
+            case terms.dedent:
+                return this.deficit()
+            case terms.epilog:
+                return !this.notEpilog()
+            case terms.margin:
+                return !this.deficit()
+        }
+        return false;
     }
     hash(): number {
         let hash = 17 // emulate java.util.Objects.hash()
         hash = (31 * hash + this.depth) | 0
         hash = (31 * hash + this.tabs) | 0
-        hash = (31 * hash + (this.epilog ? 1231 : 1237)) | 0
+        hash = (31 * hash + this.next) | 0
         return hash
     }
-    peek(term:number, input: InputStream): PeekTabs {
-        const LF = 10, TAB = 9, HASH = 35
-        if (input.next == -1) {
-            let result = this
-            output?.debug(`peek=> at EOF, no change`)
+    peek(input: InputStream): PeekTabs {
+        if (input.next == EOF) {
+            let result = (this.tabs === 0 && this.next === EOF) ? this
+                : new PeekTabs(this.depth, 0, EOF)
+            output?.debug(`peek=> EOF ${(this === result) ? "keep" : "new"} ${result}`)
             return result
         }
         let prev = input.peek(-1)
-        if (prev != LF && prev != -1) {
-            let result = zero_zero_false
-            output?.debug(`peek=> ERROR prev=${prev} ${result}`)
-            return result
-        }
-        if (this.depth < 1) {
-            if (input.next == TAB) {
-                let result = zero_one_false
-                output?.debug(`peek=> outermost TAB ${result}`)
-                return result
-            }
-            let result = zero_zero_false
-            output?.debug(`peek=> outermost not TAB ${result}`)
-            return result
-        }
-        let column = 0
-        for (; column + 1 < this.depth; input.advance(), ++column)
-            if (input.next != TAB) {
-                if (column) input.advance(-column)
-                let result = new PeekTabs(this.depth, column, false)
-                output?.debug(`peek=> larger deficit ${result}`)
-                return result
-            }
-        if (input.next == HASH) {
-            if (column) input.advance(-column)
-            let suppressed = term == terms.no_epi
-            let result = new PeekTabs(this.depth, column, !suppressed)
-            output?.debug(`peek=> ${suppressed?"suppressed ":""}epilog ${result}`)
-            return result
-        }
-        if (input.next != TAB) {
-            if (column) input.advance(-column)
-            let result = new PeekTabs(this.depth, column, false)
-            output?.debug(`peek=> minimal deficit ${result}`)
-            return result
-        }
-        if (input.peek(1) == TAB) {
-            if (column) input.advance(-column)
-            // halting here makes it impossible to do .indent().indent()
-            let result = new PeekTabs(this.depth, column + 1, false)
-            output?.debug(`peek=> surfeit ${result}`)
-            return result
-        }
-        if (column) input.advance(-column)
-        let result = new PeekTabs(this.depth, column, false)
-        output?.debug(`peek=> exact ${result}`)
+        if (prev != LF && prev != EOF)
+            output?.warn(`peek: not at column 0? prev=${displayChar(prev)}`)
+        let tabs = 0
+        for (; input.next == TAB; input.advance())
+            ++tabs
+        let next = input.next
+        if (tabs) input.advance(-tabs)
+        let result = (this.tabs === tabs && this.next === next) ? this
+            : new PeekTabs(this.depth, tabs, next)
+        output?.debug(`peek=> ${(this === result) ? "keep" : "new"} ${result}`)
         return result
     }
     indent(): PeekTabs {
-        output?.assert(this.surfeit(),
-            `indent: ERROR: !surfeit`)
-        let result = new PeekTabs(this.depth + 1, this.tabs, false)
-        output?.debug(`indent=> ${result}`)
+        let result = new PeekTabs(this.depth + 1, this.tabs, this.next)
+        output?.debug(`indent=> ${this.surfeit() ? "actual" : "virtual"} ${result}`)
         return result
     }
     dedent(): PeekTabs {
-        output?.assert(this.deficit(),
-            `dedent: ERROR: ${(this.depth < 1) ? "outermost" : "!deficit"}`)
-        let result = new PeekTabs(this.depth ? this.depth - 1 : 0, this.tabs, false)
-        output?.debug(`dedent=> ${result}`)
+        if (this.depth > 0) {
+            let result = new PeekTabs(this.depth - 1, this.tabs, this.next)
+            output?.debug(`dedent=> ${result}`)
+            return result
+        }
+        output?.error(`dedent=> UNDERFLOW prevented ${this}`)
+        return this
+    }
+    consume(tabs: number): PeekTabs {
+        if (tabs < this.tabs)
+            return new PeekTabs(this.depth, this.tabs - tabs, TAB)
+        if (tabs == this.tabs)
+            return new PeekTabs(this.depth, 0, this.next)
+        output?.error(`consume tabs UNDERFLOW prevented`)
+        return new PeekTabs(this.depth, 0, EOF)
+    }
+    epilog(): PeekTabs {
+        output?.assert(!this.notEpilog(),
+            `epilog: ERROR wrong ${(this.next != HASH) ? "next" : "tabs"}`)
+        let result = this.consume(this.depth - 1)
+        output?.debug(`epilog=> ${result}`)
         return result
     }
     margin(): PeekTabs {
-        output?.assert(this.tabs >= this.depth,
-            `margin: ERROR: deficit or epilog`)
-        let result = new PeekTabs(this.depth, 0, false)
+        output?.assert(!this.deficit(),
+            `margin: ERROR: deficit`)
+        let result = this.consume(this.depth)
         output?.debug(`margin=> ${result}`)
-        return result
-    }
-    epi_mar(): PeekTabs {
-        output?.assert(this.tabs + 1 == this.depth && this.epilog,
-            `epi_mar: ERROR:${(this.tabs + 1 == this.depth) ? "" : " tabs"}${this.epilog ? "" : " !epilog"}`)
-        let result = new PeekTabs(this.depth, 0, false)
-        output?.debug(`epi_mar=> ${result}`)
         return result
     }
 }
 
-const zero_zero_false = new PeekTabs(0, 0, false)
-const zero_one_false = new PeekTabs(0, 1, false)
-
 export const peekTabs = new ContextTracker({
-    start: zero_zero_false,
+    start: new PeekTabs(0, 0, EOF),
     strict: true,
     hash: (state: PeekTabs) => state.hash(),
-    shift(state, term, stack, input) {
+    shift(state, term, _stack, input) {
         output?.debug(`shift? ${parser.getName(term)} pos=${input.pos} state=${state}`)
         switch (term) {
             case terms.peek:
-            case terms.no_epi:
-                return state.peek(term, input)
+                return state.peek(input)
             case terms.indent:
-                return state.indent()
+                return state.peek(input).indent()
             case terms.dedent:
                 return state.dedent()
+            case terms.epilog:
+                return state.epilog()
             case terms.margin:
                 return state.margin()
-            case terms.epi_mar:
-                return state.epi_mar()
         }
         output?.debug(`shift: no action`)
         return state

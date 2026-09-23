@@ -1,101 +1,81 @@
 import * as terms from "./generated.terms.ts"
 import { parser } from "./generated.ts"
 import { PeekTabs } from "./context.ts"
-import { ExternalTokenizer, InputStream, Stack } from "@lezer/lr"
+import { ExternalTokenizer } from "@lezer/lr"
+import { EOF, LF, BANG, HASH } from "./ascii.ts"
 
 let output: Console | null = null
-export function debugExternal(console: Console | null) { output = console }
-
-class LeftEdge {
-    static TERMS = [
-        terms.peek, terms.no_epi, terms.indent, terms.dedent, terms.epi_mar, terms.margin
-    ]
-    readonly name: string | number
-    readonly len: number
-    readonly canShift: boolean
-    readonly allowed: boolean
-    constructor(term: number, input: InputStream, stack: Stack, noisy?: boolean) {
-        this.name = parser.getName(term) || term
-        this.len = 0
-        this.canShift = stack.canShift(term)
-        this.allowed = false
-        let state: PeekTabs = stack.context
-        switch (term) {
-            case terms.peek:
-            case terms.no_epi:
-                this.allowed = true
-                break
-            case terms.indent:
-                if (!state.surfeit()) {
-                    if (output && noisy)
-                        output.debug(`edge: no surfeit so deny indent ${state}`)
-                    break
-                }
-                this.allowed = true
-                break
-            case terms.dedent:
-                if (!state.deficit()) {
-                    if (output && noisy)
-                        output.debug(`edge: no deficit so deny dedent ${state}`)
-                    break
-                }
-                this.allowed = true
-                break
-            case terms.epi_mar:
-                if (!state.epilog) {
-                    if (output && noisy)
-                        output.debug(`edge: !epilog so deny epi_mar ${state}`)
-                    break
-                }
-                this.allowed = true
-                this.len = state.tabs
-                break
-            case terms.margin:
-                if (state.deficit()) {
-                    if (output && noisy)
-                        output.debug(`edge: deficit so deny margin ${state}`)
-                    break
-                }
-                if (input.pos < 1 && input.next == 35 && input.peek(1) == 33) {
-                    if (output && noisy)
-                        output.debug(`edge: at shebang so deny margin ${state}`)
-                    break
-                }
-                if (state.depth < 1 && (input.next == 10 || input.next == -1)) {
-                    if (output && noisy)
-                        output.debug(`edge: outermost EOL so deny margin ${state}`)
-                    break
-                }
-                this.allowed = true
-                this.len = state.tabs
-                break
-        }
+export function debugExternal(console: Console | null) {
+    output = console
+    if (output == null) return
+    function failedCheckTermName(term: number, expected: string): boolean {
+        let got = parser.getName(term)
+        output?.assert(expected == got, `mismatch: our ${expected} != parser ${got}`)
+        return expected != got
     }
-    debug(): string {
-        return `${this.allowed ? "+" : "!"}${this.name}`
-    }
-}
-function canShiftReport(input: InputStream, stack: Stack): string {
-    let canShift = []
-    for (const term of Object.values(terms)) {
-        if (stack.canShift(term))
-            if (LeftEdge.TERMS.includes(term))
-                canShift.push(new LeftEdge(term, input, stack).debug())
-            else
-                canShift.push(parser.getName(term) || term)
-    }
-    return `pos=${input.pos} state=${stack.context} canShift=${canShift}`
+    if (failedCheckTermName(terms.peek, "peek")
+        || failedCheckTermName(terms.indent, "indent")
+        || failedCheckTermName(terms.dedent, "dedent")
+        || failedCheckTermName(terms.epilog, "epilog")
+        || failedCheckTermName(terms.margin, "margin"))
+        output.error(`probably need to regenerate`)
 }
 
 export const leftEdge = new ExternalTokenizer((input, stack) => {
-    output?.debug(`edge? ${canShiftReport(input, stack)}`)
-    for (const term of LeftEdge.TERMS) {
-        if (!stack.canShift(term)) continue
-        let check = new LeftEdge(term, input, stack)
-        if (!check.allowed) continue
-        output?.debug(`edge: accept ${check.debug()} pos=${input.pos} len=${check.len}`)
-        input.acceptToken(term, check.len)
+    let state: PeekTabs = stack.context
+    if (output) {
+        let can = []
+        for (const term of Object.values(terms))
+            if (stack.canShift(term)) {
+                let prefix = ""
+                switch (term) {
+                    case terms.peek:
+                    case terms.indent:
+                    case terms.dedent:
+                    case terms.epilog:
+                    case terms.margin:
+                        prefix = state.canShift(term) ? "+" : "!"
+                }
+                can.push(`${prefix}${parser.getName(term) || term}`)
+            }
+        output.debug(`edge? pos=${input.pos} state=${stack.context} canShift=${can}`)
+    }
+    if (stack.canShift(terms.peek) && state.canShift(terms.peek)) {
+        output?.debug(`edge: accept peek epsilon`)
+        input.acceptToken(terms.peek, 0)
         return
+    }
+    if (stack.canShift(terms.indent) && state.canShift(terms.indent)) {
+        output?.debug(`edge: accept indent epsilon`)
+        input.acceptToken(terms.indent, 0)
+        return
+    }
+    if (stack.canShift(terms.dedent) && state.canShift(terms.dedent)) {
+        output?.debug(`edge: accept dedent epsilon`)
+        input.acceptToken(terms.dedent, 0)
+        return
+    }
+    if (stack.canShift(terms.epilog) && state.canShift(terms.epilog)) {
+        let offset = state.depth - 1
+        if (offset < 0) {
+            output?.debug(`edge: accept epilog preventing UNDERFLOW`)
+            input.acceptToken(terms.epilog)
+        } else {
+            output?.debug(`edge: accept epilog len=${offset}`)
+            input.acceptToken(terms.epilog, offset)
+        }
+        return
+    }
+    if (stack.canShift(terms.margin) && state.canShift(terms.margin)) {
+        if (input.pos < 1 && input.next == HASH && input.peek(1) == BANG) {
+            output?.debug(`edge: at shebang so deny margin ${state}`)
+        } else if (state.depth < 1 && (input.next == LF || input.next == EOF)) {
+            output?.debug(`edge: outermost EOL so deny margin ${state}`)
+        } else {
+            output?.debug(`edge: accept margin len=${state.depth}`)
+            input.acceptToken(terms.margin, state.depth)
+            return
+        }
     }
     output?.debug(`edge: nothing accepted`)
 })

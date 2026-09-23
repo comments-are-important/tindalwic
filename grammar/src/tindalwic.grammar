@@ -1,35 +1,32 @@
 @context peekTabs from "./context.ts"
     // depth = nesting level (0 at File)
-    // tabs = number of TAB chars ahead, peeking halts at depth+1
-    // epilog = true iff tabs == depth-1 and peeking stopped by "#"
-    // surfeit() -> true iff indent possible because tabs > depth
-    // deficit() -> true iff dedent needed because tabs < depth && !epilog
+    // tabs = number of lookahead TAB chars
+    // next = the char just after the TABs
 
 @external tokens leftEdge from "./external.ts" {
-    peek,   // epsilon, triggers peeking
-    no_epi, // epsilon, triggers peeking but forces !epilog
-    indent, // epsilon iff surfeit(), triggers ++depth
-    dedent, // epsilon iff deficit(), triggers --depth
-    margin, // the TAB chars iff !(epilog||deficit()), triggers tabs=0
-    epi_mar // the TAB chars iff epilog, triggers tabs=0; epilog=false
+    peek,   // unconditional epsilon, triggers peeking
+    indent, // unconditional epsilon, triggers peeking then ++depth
+    dedent, // epsilon iff tabs < depth, triggers --depth
+    epilog, // the TAB chars iff epilog, triggers tabs=0 and epilog=false
+    margin  // the TAB chars iff tabs >= depth (&& !epilog), triggers tabs=0
 }
 @tokens {
     eol { "\n" | @eof }
     line { ![\n]* ( "\n" | @eof ) }
 }
 
-@top File { no_epi Shebang? Prolog? Entry* "\n"? }
+@top File { peek Shebang? Prolog? Entry* "\n"? }
 
-flow { line no_epi (indent (margin line no_epi)* dedent)? }
 Shebang { "#!" flow }        // File
 Prolog { margin "#" flow }   // File Dict List
-Epilog { epi_mar "#" flow }  // value
+Epilog { epilog "#" flow }   // value
 Comment { margin "//" flow } // key
-Key { Comment? margin "@" eol no_epi margin flow }
 
+flow { line indent (margin line peek)* dedent }
 Text { indent Prolog? (margin line peek)* Epilog? dedent }
 Dict { indent Prolog? Entry* Epilog? dedent }
 List { indent Prolog? value* Epilog? dedent }
 
-value { margin ( "<>" eol peek Text | "{}" eol peek Dict | "[]" eol peek List ) }
+value { margin ( "<>" eol Text | "{}" eol Dict | "[]" eol List ) }
 Entry { Key value }
+Key { Comment? margin "@" eol indent (margin line peek)* dedent }

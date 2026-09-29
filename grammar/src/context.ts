@@ -11,8 +11,18 @@ export const margin = new ContextTracker({
     shift(context, term, stack, input) {
         let move = undefined
 
-        if (term === terms.dedent)
-            move = context.parent ?? context
+        if (term === terms.dedent) {
+            const parent = context.parent
+            if (parent === null)
+                output?.debug("refusing dedent underflow")
+            else if (context.sealed && !parent.sealed)
+                move = parent.seal()
+            else
+                move = parent
+        }
+
+        else if (context.sealed)
+            output?.debug("refusing to indent from sealed")
 
         else if (term === terms.indentT)
             move = new level.Text(context)

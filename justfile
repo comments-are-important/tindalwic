@@ -1,7 +1,7 @@
 
 set shell := ["bash", "-uc"]
 
-all: fmt (test "-q") playground coverage doc api lines msrv sitter
+all: fmt (test "-q") playground coverage doc api lines msrv
 
 @_is_running_outside_devcontainer:
     [[ ! ( -e /tmp/.devcontainerId \
@@ -92,17 +92,6 @@ lines: (_install "cargo-llvm-lines") _is_running_inside_devcontainer
 cli: fmt _is_running_inside_devcontainer
   cargo build -p tindalwic-cli
   target/debug/tindalwic-cli random --check=1000
-
-sitter: cli _is_running_inside_devcontainer
-  #!/usr/bin/env bash
-  set -xe
-  target/debug/tindalwic-cli sitter
-  cd grammar
-  npx tree-sitter --version || npm ci
-  npx tree-sitter generate
-  npx tree-sitter test
-  npx tree-sitter build -o ../target/tree-sitter-tindalwic.so
-  npx tree-sitter build --wasm -o ../target/tree-sitter-tindalwic.wasm
 
 # -----------------------------------------------------------------------------
 

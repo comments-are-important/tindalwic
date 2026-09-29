@@ -12,7 +12,7 @@ are several that work together to cover different aspects:
    write tindalwic data. There is no wiggle room in this spec.
  + The more lenient [core/src/parse.rs](core/src/parse.rs) algorithm must be used to
    read, to allow a little grace for any human editors.
- + A [tree-sitter grammar](grammar/grammar.js) is used for syntax highlighting. It
+ + A [lezer grammar](grammar/src/tindalwic.grammar) is used for syntax highlighting. It
    deviates from the data model slightly to better fit the GLR engine, but the trees
    are fine for the purposes of highlighting.
 
@@ -36,7 +36,6 @@ subsequent line.
 charset = utf-8
 end_of_line = lf
 indent_style = tab
-insert_final_newline = false
 max_line_length = off
 trim_trailing_whitespace = false
 ```

@@ -16,7 +16,7 @@ use tindalwic_serde::Neutered;
 
 pub mod random;
 #[cfg(debug_assertions)]
-pub mod sitter;
+pub mod lezer;
 
 const ISO8601_SHORT: Iso8601<
     {

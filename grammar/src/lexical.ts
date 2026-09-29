@@ -13,10 +13,19 @@ const tokenizer = new ExternalTokenizer((input, stack) => {
     const previous = input.peek(-1)
     const edge = previous === LF || previous === EOF
     scan: {
-        // some `break scan` are intentional dead code acting as documentation
-        // doing way more than most tokenizers, but I guess the grammar is atypical
-        // could push some of this up into the grammar, and arguably should,
-        // but doing so makes it harder to read and thus much less pedagogical
+        // some `break scan` are intentional dead code acting as documentation.
+        // the grammar is atypical, so this code does more than most tokenizers.
+        // could (arguably should) push some of this up into the grammar, but
+        // that would make it harder to read and thus much less pedagogical.
+
+        if (edge && input.next === LF) {
+            input.advance()
+            while (input.next === LF)
+                input.advance()
+            output?.assert(stack.canShift(terms.margin), "margin ⚠ @skip && !canShift")
+            input.acceptToken(terms.margin)
+            break scan
+        }
 
         if (edge && depth !== 0 && input.next !== TAB) {
             if (stack.canShift(terms.dedent))
@@ -31,8 +40,8 @@ const tokenizer = new ExternalTokenizer((input, stack) => {
                         input.acceptTokenTo(terms.dedent, stack.pos) // zero-width
                     break scan
                 }
-            if (stack.canShift(terms.margin))
-                input.acceptToken(terms.margin)
+            output?.assert(stack.canShift(terms.margin), "margin ⚠ @skip && !canShift")
+            input.acceptToken(terms.margin)
             // next call can indent if TAB follows margin
             break scan
         }
@@ -54,10 +63,11 @@ const tokenizer = new ExternalTokenizer((input, stack) => {
         }
 
         if (!edge && !context.sealed && stack.canShift(terms.Line)) {
+            // TODO perhaps completely empty lines can be ListLines instead of margin?
             // TODO consider allowing SLASH as long as it isn't SLASH SLASH
-            // makes a lot of sense here, less sense in KeyEquals but maybe there too
+            // makes a lot of sense here, less sense in KeyShort but maybe there too
             if (context instanceof level.List && RESERVED.includes(input.next)) {
-                output?.debug(`reject: List Line[0] ${String.fromCharCode(input.next)}`)
+                output?.debug(`reject ⚠ ListLine[0] ${String.fromCharCode(input.next)}`)
                 break scan
             }
             for (; ; input.advance())
@@ -74,41 +84,6 @@ const tokenizer = new ExternalTokenizer((input, stack) => {
         if ((edge && depth !== 0 || input.next === EOF) && stack.canShift(terms.dedent)) {
             input.acceptToken(terms.dedent)
             break scan
-        }
-
-        if (input.next === HASH && stack.canShift(terms.Hash)) {
-            input.acceptToken(terms.Hash, 1)
-            break scan
-        }
-        if (input.next === SLASH && stack.canShift(terms.Slashes)
-            && input.peek(1) === SLASH) {
-            input.acceptToken(terms.Slashes, 2)
-            break scan
-        }
-        if (edge && (stack.canShift(terms.Hash) || stack.canShift(terms.Slashes))) {
-            while (input.next === LF)
-                input.advance()
-            if (input.next === EOF) {
-                if (stack.canShift(terms.eof))
-                    input.acceptToken(terms.eof)
-                break scan
-            }
-            let need = depth
-            for (; need !== 0; --need, input.advance())
-                if (input.next !== TAB) break
-            if (need === 0) {
-                if (input.next === HASH && stack.canShift(terms.Hash)) {
-                    input.acceptToken(terms.Hash, 1)
-                    break scan
-                }
-                if (input.next === SLASH && stack.canShift(terms.Slashes)
-                    && input.peek(1) === SLASH) {
-                    input.acceptToken(terms.Slashes, 2)
-                    break scan
-                }
-            }
-            input.advance(stack.pos - input.pos)
-            output?.debug(`failed gap+comment rewinding ${stack.pos - input.pos}`)
         }
 
         if (stack.canShift(terms.KeyText)) {
@@ -144,28 +119,17 @@ const tokenizer = new ExternalTokenizer((input, stack) => {
             else if (input.next === EOF)
                 // grammar wants an eol before the eof
                 input.acceptToken(terms.eol)
-            // could also be eof...
+            // keep going
         }
 
-        if (stack.canShift(terms.eof)) {
-            while (input.next === LF)
-                input.advance()
-            if (input.next === EOF) {
-                input.acceptToken(terms.eof)
-                break scan
-            }
-            input.advance(stack.pos - input.pos)
-            output?.debug(`failed eof rewinding ${stack.pos - input.pos}`)
-        }
-
-        if (stack.canShift(terms.KeyEquals)) {
+        if (stack.canShift(terms.KeyShort)) {
             if (input.next !== EQ && RESERVED.includes(input.next)) {
-                output?.debug(`reject: KeyEquals[0] ${String.fromCharCode(input.next)}`)
+                output?.debug(`reject: KeyShort[0] ${String.fromCharCode(input.next)}`)
                 break scan
             }
             for (; input.next !== EOF; input.advance())
                 if (input.next === EQ) {
-                    input.acceptToken(terms.KeyEquals, 1)
+                    input.acceptToken(terms.KeyShort)
                     break scan
                 }
             break scan

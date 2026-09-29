@@ -30,9 +30,9 @@ enum Command {
         #[command(flatten)]
         args: random::Args,
     },
-    /// Edit expected results in Tree-sitter test corpus
+    /// Write expected Lezer tree
     #[cfg(debug_assertions)]
-    Sitter,
+    Lezer,
 }
 
 fn main() -> Result<()> {
@@ -42,6 +42,6 @@ fn main() -> Result<()> {
         Command::From { file_or_format } => Reader::parse(file_or_format)?.run(),
         Command::Random { args } => args.run(),
         #[cfg(debug_assertions)]
-        Command::Sitter => sitter::Corpus::edit(),
+        Command::Lezer => lezer::Lezer::run(),
     }
 }

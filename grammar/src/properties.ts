@@ -8,5 +8,5 @@ export const highlight = styleTags({
     "Shebang!": tags.documentMeta,
     "Prolog! Epilog! Comment!": tags.blockComment, // lineComment if only one Line?
     "Line": tags.string,
-    "KeyText KeyDict KeyList KeyLong KeyEquals": tags.namespace,
+    "KeyText! KeyDict! KeyList! KeyLong! KeyEquals!": tags.namespace,
 })

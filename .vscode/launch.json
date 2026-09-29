@@ -8,8 +8,8 @@
             "name": "lezer main",
             "request": "launch",
             "type": "node",
-            "program": "${workspaceFolder}/grammar/src/main.ts",
-            "args": ["=v"],
+            "program": "${workspaceFolder}/grammar/main.ts",
+            "args": ["#F\n{ONE}\n\t#1\n{TWO}\n\t#T\n"],
             "env": {"LOG":"parse"},
             "skipFiles": [
                 //"<node_internals>/**"

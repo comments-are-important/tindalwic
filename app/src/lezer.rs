@@ -3,132 +3,112 @@
 use anyhow::{Error, Result};
 use bumpalo::Bump;
 use std::io::{self, Read};
-use tindalwic::{Comment, Entry, File, Item, Value, bumpalo::Arena};
+use tindalwic::{Comment, Entries, Entry, File, Item, Items, Value, bumpalo::Arena};
 
+/// read tindalwic from stdin, print expected lezer tree to stdout
 /// the core crate is authoritative so the lezer needs to conform.
 /// a strategy for harmonizing is to generate the expected output for tests
 /// mechanically then tweak the grammar code so it produces correct trees.
-#[derive(Default)]
-pub struct Lezer {
-    content: String,
-    indent: usize,
+pub fn run() -> Result<()> {
+    let mut input = String::new();
+    io::stdin().read_to_string(&mut input)?;
+    let bump = Bump::new();
+    let mut arena = Arena::new(&bump);
+    let parsed = arena.format_errors("<stdin>", &input, usize::MAX);
+    println!("{}", file(&parsed.map_err(Error::msg)?));
+    Ok(())
 }
-impl Lezer {
-    /// read tindalwic from stdin, write expected lezer tree
-    pub fn run() -> Result<()> {
-        let mut input = String::new();
-        io::stdin().read_to_string(&mut input)?;
-        let bump = Bump::new();
-        let mut arena = Arena::new(&bump);
-        let parsed = arena.format_errors("<stdin>", &input, usize::MAX);
-        let file = parsed.map_err(Error::msg)?;
-        let mut corpus = Lezer {
-            content: String::new(),
-            indent: 0,
-        };
-        corpus.file(&file);
-        print!("{}", corpus.content);
-        Ok(())
+
+fn file(file: &File) -> String {
+    let mut kids = Vec::new();
+    kids.extend(comment("Shebang", &file.hashbang));
+    kids.extend(comment("Prolog", &file.prolog));
+    for kid in file.cells {
+        kids.push(entry(&kid.get()))
     }
-    fn push(&mut self, s: &str) {
-        self.content.push_str(s);
+    if kids.is_empty() {
+        format!("File")
+    } else {
+        format!("File({})", kids.join(","))
     }
-    fn pushln(&mut self, s: &str) {
-        self.push(s);
-        self.newline();
-    }
-    fn more(&mut self) {
-        self.indent += 1;
-    }
-    fn less(&mut self) {
-        self.indent -= 1;
-    }
-    fn newline(&mut self) {
-        self.content.push('\n');
-        for _ in 0..self.indent {
-            self.content.push('\t');
+}
+
+fn entry(entry: &Entry) -> String {
+    let mut parts = Vec::new();
+    parts.extend(comment("Comment", &entry.name.comment));
+    parts.push(
+        match entry.item {
+            Item::Text { .. } => "KeyText",
+            Item::List { .. } => "KeyList",
+            Item::Dict { .. } => "KeyDict",
         }
+        .to_string(),
+    );
+    parts.push(item(&entry.item));
+    parts.extend(epilog(&entry.item));
+    format!("Entry({})", parts.join(","))
+}
+
+fn item(item: &Item) -> String {
+    match item {
+        Item::Text { value, .. } => text("Text", &value),
+        Item::List { prolog, cells, .. } => list(prolog, cells),
+        Item::Dict { prolog, cells, .. } => dict(prolog, cells),
     }
-    fn file(&mut self, file: &File) {
-        self.push("(File");
-        self.more();
-        self.comment("Shebang", &file.hashbang);
-        self.comment("Prolog", &file.prolog);
-        for cell in file.cells {
-            self.entry(&cell.get());
-        }
-        self.less();
-        self.pushln(")");
+}
+
+fn dict(prolog: &Option<Comment>, entries: Entries) -> String {
+    let mut kids = Vec::new();
+    kids.extend(comment("Prolog", prolog));
+    for kid in entries {
+        kids.push(entry(&kid.get()))
     }
-    fn entry(&mut self, entry: &Entry) {
-        self.newline();
-        self.push("(Entry");
-        self.more();
-        if entry.name.gap {
-            self.newline();
-            self.push("(Gap)");
-        }
-        self.comment("Comment", &entry.name.comment);
-        self.text("key", &entry.name.key);
-        self.item(&entry.item);
-        self.push(")");
-        self.less();
+    if kids.is_empty() {
+        format!("Dict")
+    } else {
+        format!("Dict({})", kids.join(","))
     }
-    fn item(&mut self, item: &Item) {
+}
+
+fn list(prolog: &Option<Comment>, items: Items) -> String {
+    let mut kids = Vec::new();
+    kids.extend(comment("Prolog", prolog));
+    for kid in items {
+        let item = kid.get();
+        let mut parts = Vec::new();
+        parts.push(match item {
+            Item::Text { value, .. } => text("Text", &value),
+            Item::List { prolog, cells, .. } => list(&prolog, cells),
+            Item::Dict { prolog, cells, .. } => dict(&prolog, cells),
+        });
+        parts.extend(epilog(&item));
+        kids.push(format!("Item({})", parts.join(",")));
+    }
+    if kids.is_empty() {
+        format!("List")
+    } else {
+        format!("List({})", kids.join(","))
+    }
+}
+
+fn epilog(item: &Item) -> Option<String> {
+    comment(
+        "Epilog",
         match item {
-            Item::Text { value, epilog } => {
-                self.text("Text", &value);
-                self.comment("Epilog", epilog);
-            }
-            Item::List {
-                prolog,
-                cells,
-                epilog,
-            } => {
-                self.comment("Prolog", prolog);
-                self.newline();
-                self.push("(List");
-                self.more();
-                for cell in *cells {
-                    self.item(&cell.get());
-                }
-                self.push(")");
-                self.less();
-                self.comment("Epilog", epilog);
-            }
-            Item::Dict {
-                prolog,
-                cells,
-                epilog,
-            } => {
-                self.comment("Prolog", prolog);
-                self.newline();
-                self.push("(Dict");
-                self.more();
-                for cell in *cells {
-                    self.entry(&cell.get());
-                }
-                self.push(")");
-                self.less();
-                self.comment("Epilog", epilog);
-            }
-        }
-    }
-    fn comment(&mut self, tag: &str, maybe: &Option<Comment>) {
-        if let Some(comment) = maybe {
-            self.text(tag, &comment.value);
-        }
-    }
-    fn text(&mut self, tag: &str, value: &Value) {
-        self.newline();
-        self.push("(");
-        self.push(tag);
-        self.more();
-        for _ in value.lines() {
-            self.newline();
-            self.push("(Line)");
-        }
-        self.push(")");
-        self.less();
+            Item::Text { epilog, .. } => epilog,
+            Item::List { epilog, .. } => epilog,
+            Item::Dict { epilog, .. } => epilog,
+        },
+    )
+}
+
+fn comment(tag: &str, maybe: &Option<Comment>) -> Option<String> {
+    maybe.map(|it| text(tag, &it.value))
+}
+
+fn text(tag: &str, value: &Value) -> String {
+    match value.lines().count() {
+        0 => format!("{tag}"),
+        n => format!("{tag}(Line{})", ",Line".repeat(n - 1)),
     }
 }

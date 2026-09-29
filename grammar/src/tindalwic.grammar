@@ -41,14 +41,15 @@ keyValue {
   | "@" eol KeyLong { text } value
 
 // There are shortcuts available when a Text value only has one Line:
-  | KeyShort? "=" Line // The other shortcut is above, in the List Item rule.
+  | KeyShort eq Line // The other shortcut is above, in the List Item rule.
 }
 
 // Most of the tokens are irregular or difficult to express here:
 @external tokens terms from "./lexical.ts" {
     // RESERVED  # / @ { } [ ] < >
     Line // { ![\n]* eol } except in ListContext 1st char can't be RESERVED
-    KeyShort // { ![=\n]* "=" } except 1st char can't be RESERVED
+    eq // { "=" } - has to be here because of lezer token precedence
+    KeyShort // { ![=\n]* } except 1st char can't be RESERVED
     KeyText // { ![\n]* } but don't grab the angle ket at the end
     KeyDict // { ![\n]* } but don't grab the curly ket at the end
     KeyList // { ![\n]* } but don't grab the square ket at the end
@@ -56,7 +57,8 @@ keyValue {
     // these help lezer keep track of the indentation
     dedent indentT indentD indentL margin
 }
+@tokens {}
 Text { text } // capitalization affects tree building in lezer
-@skip { margin } // the Rust parser tracks gaps but lezer doesn't
+@skip { margin } // note that the Rust parser tracks gaps but lezer doesn't
 @context margin from "./context.ts"
 @external propSource highlight from "./properties.ts"

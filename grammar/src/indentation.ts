@@ -9,7 +9,7 @@ export interface Indentation {
     seal(): Indentation
 }
 
-const prototypes: Array<object> = []
+export const prototypes: Array<object> = []
 
 function hashAfterInstallingPrototype(context: Indentation): number {
     const parent = context.parent
@@ -17,15 +17,13 @@ function hashAfterInstallingPrototype(context: Indentation): number {
     if (parent.depth === Number.MAX_SAFE_INTEGER)
         // very unlikely to get here because memory would have been filled up
         throw new RangeError("can't go deeper than MAX_SAFE_INTEGER")
-    const depth = parent.depth + 1
-    const length = 3 * depth
-    if (prototypes.length !== length) {
+    const length = 3 * (parent.depth + 1)
+    while (prototypes.length < length) {
+        const depth = (1 + Math.floor(prototypes.length / 3)) | 0
         const meta = { depth, sealed: false }
         prototypes.push(Object.setPrototypeOf({ ...meta }, Text.prototype))
         prototypes.push(Object.setPrototypeOf({ ...meta }, Dict.prototype))
         prototypes.push(Object.setPrototypeOf(meta, List.prototype))
-        if (prototypes.length !== length)
-            throw new RangeError("array length isn't as expected")
     }
     switch (Object.getPrototypeOf(context)) {
         case Text.prototype:
@@ -40,7 +38,7 @@ function hashAfterInstallingPrototype(context: Indentation): number {
     }
     let hash = 17 // emulates java.util.Objects.hash()
     hash = (31 * hash + parent.hash) | 0
-    hash = (31 * hash + depth) | 0
+    hash = (31 * hash + context.depth) | 0
     return hash
 }
 

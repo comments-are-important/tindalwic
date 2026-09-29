@@ -14,9 +14,9 @@ use tindalwic::File;
 use tindalwic::bumpalo::Arena;
 use tindalwic_serde::Neutered;
 
-pub mod random;
 #[cfg(debug_assertions)]
 pub mod lezer;
+pub mod random;
 
 const ISO8601_SHORT: Iso8601<
     {
@@ -33,6 +33,28 @@ pub fn now() -> String {
     UtcDateTime::now()
         .format(&ISO8601_SHORT)
         .expect("trimming fractions should work")
+}
+
+/// verify a round trip does not change anything
+pub fn idempotent() -> Result<()> {
+    let mut input = String::new();
+    io::stdin().read_to_string(&mut input)?;
+    let bump = Bump::new();
+    let mut arena = Arena::new(&bump);
+    let parsed = arena.format_errors("<stdin>", &input, usize::MAX);
+    let file = parsed.map_err(Error::msg)?;
+    let encoded = file.to_string();
+    if input != encoded {
+        for diff in diff::lines(&input, &encoded) {
+            match diff {
+                diff::Result::Left(l) => eprintln!(" - {}", l),
+                diff::Result::Both(l, _) => eprintln!("   {}", l),
+                diff::Result::Right(r) => eprintln!(" + {}", r),
+            }
+        }
+        bail!("different")
+    }
+    Ok(())
 }
 
 /// a few widely used data formats that can convert via serde to/from tindalwic.

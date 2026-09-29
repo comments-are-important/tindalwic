@@ -25,7 +25,10 @@ enum Command {
         /// path with extension, or name of format to use stdin
         file_or_format: PathBuf,
     },
+    /// Parse, encode, then fail if changed
+    Same,
     /// Generate a file with random structure and values
+    #[command(alias = "rand")]
     Random {
         #[command(flatten)]
         args: random::Args,
@@ -40,8 +43,9 @@ fn main() -> Result<()> {
     match &cli.command {
         Command::To { file_or_format } => Writer::parse(file_or_format)?.run(),
         Command::From { file_or_format } => Reader::parse(file_or_format)?.run(),
+        Command::Same => idempotent(),
         Command::Random { args } => args.run(),
         #[cfg(debug_assertions)]
-        Command::Lezer => lezer::Lezer::run(),
+        Command::Lezer => lezer::run(),
     }
 }

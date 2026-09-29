@@ -38,7 +38,7 @@ keyValue {
   | "[" KeyList "]" eol List
 
 // Keys can span multiple lines.
-  | "@" eol KeyLong { text } value
+  | "@" eol Key { text } value
 
 // There are shortcuts available when a Text value only has one Line:
   | KeyShort eq Line // The other shortcut is above, in the List Item rule.
@@ -49,10 +49,10 @@ keyValue {
     // RESERVED  # / @ { } [ ] < >
     Line // { ![\n]* eol } except in ListContext 1st char can't be RESERVED
     eq // { "=" } - has to be here because of lezer token precedence
-    KeyShort // { ![=\n]* } except 1st char can't be RESERVED
-    KeyText // { ![\n]* } but don't grab the angle ket at the end
-    KeyDict // { ![\n]* } but don't grab the curly ket at the end
-    KeyList // { ![\n]* } but don't grab the square ket at the end
+    KeyShort[@name=Key] // { ![=\n]* } except 1st char can't be RESERVED
+    KeyText[@name=Key] // { ![\n]* } but don't grab the angle ket at the end
+    KeyDict[@name=Key] // { ![\n]* } but don't grab the curly ket at the end
+    KeyList[@name=Key] // { ![\n]* } but don't grab the square ket at the end
     eol // { "\n" | @eof } must have lower precedence than Line
     // these help lezer keep track of the indentation
     dedent indentT indentD indentL margin

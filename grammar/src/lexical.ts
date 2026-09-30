@@ -84,28 +84,28 @@ const tokenizer = new ExternalTokenizer((input, stack) => {
             break scan
         }
 
-        if (stack.canShift(terms.KeyText)) {
+        if (stack.canShift(terms.keyText)) {
             for (let prev = false; ; input.advance())
                 if (input.next === LF || input.next === EOF) {
-                    input.acceptToken(terms.KeyText, prev ? -1 : 0)
+                    input.acceptToken(terms.keyText, prev ? -1 : 0)
                     break scan
                 } else prev = (input.next === A_KET)
             break scan
         }
 
-        if (stack.canShift(terms.KeyDict)) {
+        if (stack.canShift(terms.keyDict)) {
             for (let prev = false; ; input.advance())
                 if (input.next === LF || input.next === EOF) {
-                    input.acceptToken(terms.KeyDict, prev ? -1 : 0)
+                    input.acceptToken(terms.keyDict, prev ? -1 : 0)
                     break scan
                 } else prev = (input.next === C_KET)
             break scan
         }
 
-        if (stack.canShift(terms.KeyList)) {
+        if (stack.canShift(terms.keyList)) {
             for (let prev = false; ; input.advance())
                 if (input.next === LF || input.next === EOF) {
-                    input.acceptToken(terms.KeyList, prev ? -1 : 0)
+                    input.acceptToken(terms.keyList, prev ? -1 : 0)
                     break scan
                 } else prev = (input.next === S_KET)
             break scan
@@ -125,13 +125,13 @@ const tokenizer = new ExternalTokenizer((input, stack) => {
             break scan
         }
 
-        if (stack.canShift(terms.KeyShort)) {
+        if (stack.canShift(terms.keyShort)) {
             if (input.next !== EQ && RESERVED.includes(input.next))
                 output?.debug(`reject KeyShort[0] ${String.fromCharCode(input.next)}`)
             else
                 for (; input.next !== EOF; input.advance())
                     if (input.next === EQ) {
-                        input.acceptToken(terms.KeyShort)
+                        input.acceptToken(terms.keyShort)
                         break scan
                     }
         }

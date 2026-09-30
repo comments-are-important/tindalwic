@@ -22,7 +22,7 @@ Shebang { "#!" Line text } // File
 @top File { Shebang? Prolog? Entry* }
 
 // The aggregate contexts are arrays, so keys can repeated.
-Item { ( value | Line ) Epilog? }
+Item { ( value | OneLine ) Epilog? }
 Entry { Comment? keyValue Epilog? }
 
 // Brackets surround keys but indicate value type.
@@ -41,24 +41,30 @@ keyValue {
   | "@" eol Key { text } value
 
 // There are shortcuts available when a Text value only has one Line:
-  | KeyShort eq Line // The other shortcut is above, in the List Item rule.
+  | KeyShort eq OneLine // The other shortcut is above, in the List Item rule.
 }
 
+// The next few rules are about tweaking the way lezer builds the trees
+Text { text } // lowercase rules get collapsed, capitalized rules make nodes
+OneLine[@name=Text] { Line }
+KeyShort[@name=Key] { keyShort }
+KeyText[@name=Key] { keyText }
+KeyDict[@name=Key] { keyDict }
+KeyList[@name=Key] { keyList }
 // Most of the tokens are irregular or difficult to express here:
 @external tokens terms from "./lexical.ts" {
     // RESERVED  # / @ { } [ ] < >
     Line // { ![\n]* eol } except in ListContext 1st char can't be RESERVED
-    eq // { "=" } - has to be here because of lezer token precedence
-    KeyShort[@name=Key] // { ![=\n]* } except 1st char can't be RESERVED
-    KeyText[@name=Key] // { ![\n]* } but don't grab the angle ket at the end
-    KeyDict[@name=Key] // { ![\n]* } but don't grab the curly ket at the end
-    KeyList[@name=Key] // { ![\n]* } but don't grab the square ket at the end
+    keyShort[@name=Line] // { ![=\n]* } except 1st char can't be RESERVED
+    keyText[@name=Line] // { ![\n]* } but don't grab the angle ket at the end
+    keyDict[@name=Line] // { ![\n]* } but don't grab the curly ket at the end
+    keyList[@name=Line] // { ![\n]* } but don't grab the square ket at the end
     eol // { "\n" | @eof } must have lower precedence than Line
+    eq // { "=" } - has to be here because of lezer token precedence
     // these help lezer keep track of the indentation
     dedent indentT indentD indentL margin
 }
-@tokens {}
-Text { text } // capitalization affects tree building in lezer
+@tokens {} // all the "" tokens live here, and they need to be lowest precedence
 @skip { margin } // note that the Rust parser tracks gaps but lezer doesn't
 @context margin from "./context.ts"
 @external propSource highlight from "./properties.ts"

@@ -1,12 +1,12 @@
 import { styleTags, tags } from "@lezer/highlight"
 
 export const highlight = styleTags({
-    '"#!" @': tags.keyword,
+    '# "#!" "//" @': tags.keyword,
     "< <> >": tags.angleBracket,
     "{ {} }": tags.brace,
     "[ [] ]": tags.squareBracket,
-    "Shebang!": tags.documentMeta,
-    "Prolog! Epilog! Comment!": tags.blockComment, // lineComment if only one Line?
-    "Line": tags.string,
-    "Key!": tags.namespace,
+    "Shebang/Line": tags.documentMeta,
+    "Prolog/Line Epilog/Line Comment/Line": tags.comment,
+    "Text/Line": tags.string,
+    "Key/Line": tags.namespace,
 })

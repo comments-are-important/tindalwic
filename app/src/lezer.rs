@@ -36,7 +36,7 @@ fn file(file: &File) -> String {
 fn entry(entry: &Entry) -> String {
     let mut parts = Vec::new();
     parts.extend(comment("Comment", &entry.name.comment));
-    parts.push("Key".to_owned());
+    parts.push(text("Key", &entry.name.key));
     parts.push(item(&entry.item));
     parts.extend(epilog(&entry.item));
     format!("Entry({})", parts.join(","))

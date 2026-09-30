@@ -1,13 +1,12 @@
 #
-	# Examples of Tindalwic Data
-	These are all lumped together into a single file, but each example would also
-	work if extracted to its own file and stripped of one level of indentation.
-	The `try_from_dict_without_epilog` API does exactly that.
+	# Introduction to `Tindalwic`
+	
+	In fourteen examples...
 
 {comment block}
 	#
 		This example has only a prolog comment block.
-		All comments are assumed to be Github Flavored Markdown
+		Comments are [Github Flavored Markdown](https://github.github.com/gfm/)
 
 {comment shortcut}
 	# you can skip the block if there's just one line
@@ -15,7 +14,9 @@
 {comment flow}
 	# if you really want to you can flow from the first line into a block...
 		but that can obscure the GFM: this whole block looks like it is a code block
-		    this is actually a code block because those need additional indentation
+		
+		    this is actually a code block because it has four spaces more than the text
+		
 		tindalwic consumes the margin before sending the content on to GFM
 
 {warning about shortcut comments}
@@ -102,7 +103,9 @@
 	# they can't use # or they would be ambiguous with prolog comments like this, so
 
 	// key comments precede the entry and use the double-slash syntax
-		they flow, and they can follow a blank line
+		they flow, and they can follow a blank line. WARNING: completely blank lines in
+		other places confuse the parser. the 3rd line of this file, for example, looks blank,
+		but it needs to have the indentation or it confuses the parsers. I'll fix that ASAP.
 	key1=value1
 
 	key2=value2

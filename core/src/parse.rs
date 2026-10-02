@@ -145,8 +145,9 @@ enum CommentMark {
     TripleSlash,
 }
 
-struct Input<'a, 'r> {
+struct Input<'a, 'b, 'r> {
     utf8: &'a str, // entire tindalwic encoded content
+    arena: &'b mut dyn Build<'a>,
     line: usize,   // the number of the current line
     start: usize,  // start of current line, `MAX` means finished
     first: usize,  // first non-tab byte of current line
@@ -156,15 +157,16 @@ struct Input<'a, 'r> {
     report: &'r mut dyn FnMut(ParseError) -> Reported,
     good: bool,
 }
-impl<'a, 'r> Input<'a, 'r> {
+impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
     /// None means the arena is too small (or the UTF-8 is way too big).
     pub fn parse(
-        arena: &mut dyn Build<'a>,
+        arena: &'b mut dyn Build<'a>,
         utf8: &'a str,
         mut report: impl FnMut(ParseError) -> Reported + 'r,
     ) -> Option<File<'a>> {
-        let mut input = Input {
+        Input {
             utf8: utf8.trim_end_matches('\n'),
+            arena,
             line: 0,
             start: 0,
             first: 0,
@@ -173,29 +175,34 @@ impl<'a, 'r> Input<'a, 'r> {
             tabs: 0,
             report: &mut report,
             good: true,
-        };
-        if utf8.len() >= usize::MAX {
+        }
+        .file()
+        .map_or_else(|_| None, |f| Some(f))
+    }
+    fn file(&mut self) -> Result<File<'a>, ()> {
+        if self.utf8.len() >= usize::MAX {
             // not covered (impossible to get, can't suppress completely).
             // MAX is a sentinel (in Value::indent), so it can't also be a length.
             // paranoid: no str can be this big (assuming usize correctly implemented),
             // but it is simple and cheap to be explicit about the contract.
-            input.report(ParseError::Memory("way too big"))?;
-            return None;
+            self.report(ParseError::Memory("way too big"))?;
+            return Err(());
         }
-        input.next(0)?;
-        let hashbang = input.comment(0, CommentMark::Shebang)?;
-        let prolog = input.comment(0, CommentMark::DoubleSlash)?;
-        let cells = input.entries(0, arena)?;
-        if input.start != usize::MAX {
+        self.next(0)?;
+        let hashbang = self.comment(0, CommentMark::Shebang)?;
+        let prolog = self.comment(0, CommentMark::DoubleSlash)?;
+        let cells = self.entries(0)?;
+        if self.start != usize::MAX {
             // not covered (impossible to get, can't suppress completely).
             // current code will always report an error in `.entries()` call above,
             // but this safety net is simple and cheap.
-            input.report(ParseError::at(input.line, "unexpected leftovers"))?;
+            self.report(ParseError::at(self.line, "unexpected leftovers"))?;
+            return Err(());
         }
-        if !input.good {
-            None
+        if !self.good {
+            Err(())
         } else {
-            Some(File {
+            Ok(File {
                 hashbang,
                 prolog,
                 cells,
@@ -203,15 +210,17 @@ impl<'a, 'r> Input<'a, 'r> {
         }
     }
 
-    fn report(&mut self, err: ParseError) -> Option<()> {
+    /// actual ParseError is consumed by the reporting.
+    /// returns an Err(()) to unwind the call stack.
+    fn report(&mut self, err: ParseError) -> Result<(), ()> {
         self.good = false;
         match (self.report)(err) {
-            Reported::Abort => None,
+            Reported::Abort => Err(()),
             Reported::Continue => {
                 if let ParseError::Memory(_) = err {
-                    None
+                    Err(())
                 } else {
-                    Some(())
+                    Ok(())
                 }
             }
         }
@@ -220,18 +229,17 @@ impl<'a, 'r> Input<'a, 'r> {
     /// done with current line, so advance, skipping excessively indented lines.
     /// usize::MAX prevents skipping. return false if finished with entire UTF-8.
     /// use `stretch` instead for Comment and Text (where no line is excessive).
-    /// return None if the report signals abort.
-    fn next(&mut self, indent: usize) -> Option<bool> {
+    fn next(&mut self, indent: usize) -> Result<bool, ()> {
         if self.start == usize::MAX {
-            return Some(false);
+            return Ok(false);
         }
         self.line += 1;
         self.start = self.end.wrapping_add(1);
         if !self.scan()? {
-            return Some(false);
+            return Ok(false);
         }
         if self.tabs <= indent {
-            return Some(true);
+            return Ok(true);
         }
         let begin = self.line;
         self.line += 1;
@@ -241,13 +249,12 @@ impl<'a, 'r> Input<'a, 'r> {
             self.start = self.end + 1;
         }
         self.report(ParseError::new(begin, self.line, "excess indentation"))?;
-        return Some(self.start != usize::MAX);
+        return Ok(self.start != usize::MAX);
     }
 
     /// helper for `next` to update state by examining a line of UTF-8.
     /// assumes caller has correctly set `self.start` (out-of-bounds is fine).
-    /// return None if the report signals abort.
-    fn scan(&mut self) -> Option<bool> {
+    fn scan(&mut self) -> Result<bool, ()> {
         let bytes = self.utf8.as_bytes();
         let limit = bytes.len();
         let mut offset = self.start;
@@ -256,7 +263,7 @@ impl<'a, 'r> Input<'a, 'r> {
             self.first = usize::MAX;
             self.assign = usize::MAX;
             self.tabs = 0;
-            return Some(false);
+            return Ok(false);
         }
         offset += indentation(bytes, offset, limit);
         self.first = offset;
@@ -274,7 +281,7 @@ impl<'a, 'r> Input<'a, 'r> {
         self.end = offset; // never MAX because `parse` checked length
         if self.start != self.end {
             self.tabs = self.first - self.start;
-            return Some(true);
+            return Ok(true);
         }
         // found a gap, peek ahead to figure out its virtual indentation
         offset += 1;
@@ -293,17 +300,17 @@ impl<'a, 'r> Input<'a, 'r> {
         }
         offset += indentation(bytes, offset, limit);
         self.tabs = offset - 1 - self.end;
-        return Some(true);
+        return Ok(true);
     }
 
     /// current line has been recognized as beginning of a Comment or Text that might
     /// continue, so stretch it out to include the whole thing by changing `end`.
     /// return None if the report signals abort.
-    fn stretch(&mut self, indent: usize, from: usize) -> Option<Value<'a>> {
+    fn stretch(&mut self, indent: usize, from: usize) -> Result<Value<'a>, ()> {
         let value = Value::slice_prefix(indent, &self.utf8[from..]);
         self.end = from + value.byte_count();
         self.next(usize::MAX)?; // stretch means excess is impossible
-        Some(value)
+        Ok(value)
     }
     fn stretch_once(&mut self, indent: usize) -> bool {
         let bytes = self.utf8.as_bytes();
@@ -336,11 +343,11 @@ impl<'a, 'r> Input<'a, 'r> {
             .count()
     }
 
-    /// use this whenever a comment is allowed. returns None if stretch fails (so caller
-    /// can ?), Some(None) if current line has wrong indent/mark, or Some(Some(Comment)).
-    fn comment(&mut self, indent: usize, mark: CommentMark) -> Option<Option<Comment<'a>>> {
+    /// use this whenever a comment is allowed. returns None if current line has
+    /// wrong indent/mark, or Some(Comment).
+    fn comment(&mut self, indent: usize, mark: CommentMark) -> Result<Option<Comment<'a>>, ()> {
         if self.start == usize::MAX || self.tabs != indent {
-            return Some(None);
+            return Ok(None);
         }
         let same = self.looking_at(if matches!(mark, CommentMark::Shebang) {
             b"#!"
@@ -351,22 +358,22 @@ impl<'a, 'r> Input<'a, 'r> {
             CommentMark::Shebang if same == 2 => 2,
             CommentMark::DoubleSlash if same == 2 => 2,
             CommentMark::TripleSlash if same == 3 => 3,
-            _ => return Some(None),
+            _ => return Ok(None),
         };
         let value = self.stretch(indent + 1, self.first + from)?;
-        Some(Some(Comment { value }))
+        Ok(Some(Comment { value }))
     }
 
     /// current line has been recognized as beginning a Text, from a `<>` context on
     /// the previous line, or from shortcut syntax. `from` says where text begins.
     /// lenient - one-liners can stretch.
-    fn text(&mut self, indent: usize, from: usize) -> Option<Item<'a>> {
+    fn text(&mut self, indent: usize, from: usize) -> Result<Item<'a>, ()> {
         let value = self.stretch(indent + 1, from)?;
         let epilog = self.comment(indent, CommentMark::DoubleSlash)?;
-        Some(Item::Text { value, epilog })
+        Ok(Item::Text { value, epilog })
     }
     /// text block follows current line. block might have zero lines.
-    fn text_block(&mut self, indent: usize) -> Option<Item<'a>> {
+    fn text_block(&mut self, indent: usize) -> Result<Item<'a>, ()> {
         let end = self.end;
         if !self.stretch_once(indent + 1) {
             // zero lines in this block, take empty slice from this line
@@ -378,14 +385,14 @@ impl<'a, 'r> Input<'a, 'r> {
     }
 
     /// previous line opened a list context, so parse all the lines in it.
-    fn list(&mut self, indent: usize, arena: &mut dyn Build<'a>) -> Option<Item<'a>> {
-        Some(Item::List {
+    fn list(&mut self, indent: usize) -> Result<Item<'a>, ()> {
+        Ok(Item::List {
             prolog: self.comment(indent + 1, CommentMark::DoubleSlash)?,
-            cells: self.items(indent + 1, arena)?,
+            cells: self.items(indent + 1)?,
             epilog: self.comment(indent, CommentMark::DoubleSlash)?,
         })
     }
-    fn items(&mut self, indent: usize, arena: &mut dyn Build<'a>) -> Option<Items<'a>> {
+    fn items(&mut self, indent: usize) -> Result<Items<'a>, ()> {
         let bytes = self.utf8.as_bytes();
         let mut count = 0usize;
         while self.start != usize::MAX {
@@ -413,7 +420,7 @@ impl<'a, 'r> Input<'a, 'r> {
                             self.next(indent)?;
                         } else {
                             self.next(indent + 1)?;
-                            item = Some(self.list(indent, arena)?);
+                            item = Some(self.list(indent)?);
                         }
                     }
                     b'{' => {
@@ -422,7 +429,7 @@ impl<'a, 'r> Input<'a, 'r> {
                             self.next(indent)?;
                         } else {
                             self.next(indent + 1)?;
-                            item = Some(self.dict(indent, arena)?);
+                            item = Some(self.dict(indent)?);
                         }
                     }
                     b'/' if len > 1 && bytes[self.first + 1] == b'/' => {
@@ -442,34 +449,34 @@ impl<'a, 'r> Input<'a, 'r> {
                 }
             }
             if let Some(item) = item {
-                if let Err(err) = arena.push_item(item) {
+                if let Err(err) = self.arena.push_item(item) {
                     self.report(ParseError::Memory(err))?;
                 }
                 count += 1;
             }
         }
         if count == 0 {
-            Some(&[])
+            Ok(&[])
         } else {
-            match arena.finish_items(count) {
-                Ok(cells) => Some(cells),
+            match self.arena.finish_items(count) {
+                Ok(cells) => Ok(cells),
                 Err(err) => {
                     self.report(ParseError::Memory(err))?;
-                    None
+                    Err(())
                 }
             }
         }
     }
 
     /// previous line opened a dict context, so parse all the lines in it.
-    fn dict(&mut self, indent: usize, arena: &mut dyn Build<'a>) -> Option<Item<'a>> {
-        Some(Item::Dict {
+    fn dict(&mut self, indent: usize) -> Result<Item<'a>, ()> {
+        Ok(Item::Dict {
             prolog: self.comment(indent + 1, CommentMark::DoubleSlash)?,
-            cells: self.entries(indent + 1, arena)?,
+            cells: self.entries(indent + 1)?,
             epilog: self.comment(indent, CommentMark::DoubleSlash)?,
         })
     }
-    fn entries(&mut self, indent: usize, arena: &mut dyn Build<'a>) -> Option<Entries<'a>> {
+    fn entries(&mut self, indent: usize) -> Result<Entries<'a>, ()> {
         let bytes = self.utf8.as_bytes();
         let mut count = 0usize;
         while self.start != usize::MAX {
@@ -504,7 +511,7 @@ impl<'a, 'r> Input<'a, 'r> {
                     } else {
                         key.key = self.utf8[self.first + 1..self.end - 1].into();
                         self.next(indent + 1)?;
-                        item = Some(self.list(indent, arena)?);
+                        item = Some(self.list(indent)?);
                     }
                 }
                 b'@' => {
@@ -533,11 +540,11 @@ impl<'a, 'r> Input<'a, 'r> {
                         }
                         (b'[', b']') => {
                             self.next(indent + 1)?;
-                            item = Some(self.list(indent, arena)?);
+                            item = Some(self.list(indent)?);
                         }
                         (b'{', b'}') => {
                             self.next(indent + 1)?;
-                            item = Some(self.dict(indent, arena)?);
+                            item = Some(self.dict(indent)?);
                         }
                         _ => {
                             self.report(ParseError::at(
@@ -555,7 +562,7 @@ impl<'a, 'r> Input<'a, 'r> {
                     } else {
                         key.key = self.utf8[self.first + 1..self.end - 1].into();
                         self.next(indent + 1)?;
-                        item = Some(self.dict(indent, arena)?);
+                        item = Some(self.dict(indent)?);
                     }
                 }
                 b'\t' => {
@@ -577,7 +584,7 @@ impl<'a, 'r> Input<'a, 'r> {
                 }
             }
             if let Some(item) = item {
-                if let Err(err) = arena.push_entry(Entry { name: key, item }) {
+                if let Err(err) = self.arena.push_entry(Entry { name: key, item }) {
                     self.report(ParseError::Memory(err))?;
                 }
                 count += 1;
@@ -586,13 +593,13 @@ impl<'a, 'r> Input<'a, 'r> {
             }
         }
         if count == 0 {
-            Some(&[])
+            Ok(&[])
         } else {
-            match arena.finish_entries(count) {
-                Ok(cells) => Some(cells),
+            match self.arena.finish_entries(count) {
+                Ok(cells) => Ok(cells),
                 Err(err) => {
                     self.report(ParseError::Memory(err))?;
-                    None
+                    Err(())
                 }
             }
         }

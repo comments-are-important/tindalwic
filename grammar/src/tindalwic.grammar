@@ -1,32 +1,32 @@
 // Tindalwic is:
 
-text {( indentT Line* dedent )?}
+Text { ( block )? }
+block { indentT Line+ dedent }
 
 // in Nested
 
-Dict {( indentD Prolog? Entry* dedent )?}
-List {( indentL Prolog? Item* dedent )?}
+Dict { ( indentD Prolog? Entry* dedent )? }
+List { ( indentL Prolog? Item* dedent )? }
 
 // with Important
 
-Comment { "//" Line text } // keys
-Prolog { "#" Line text }   // File Dict List
-Epilog { "#" Line text }   // Text Dict List
-Shebang { "#!" Line text } // File
+Comment { "///" GFM } // Key
+Prolog { "//" GFM }   // File Dict List
+Epilog { "//" GFM }   // Text Dict List
+// Every comment has a specific subject. The Rust API/parser differs:
+//  + unified `struct Comment` tracks preceding gaps that are `@skip`ped here.
+//  + subjects are sometimes at another nesting level, and Rust reshapes the tree
+//      (e.g. it moves epilogs to be inside their Text/Dict/List structs).
 
-// Each comment is GFM and has a specific subject they are about.
-// Note the possible subjects listed here match the Rust API, and that
-// these rules attach some comments incorrectly to accommodate LR parsing.
-
-// The outermost non-nested context is a Dict but with different comments:
-@top File { Shebang? Prolog? Entry* }
-
-// The aggregate contexts are arrays, so keys can repeated.
+// Both nesting contexts are arrays where each key/value can be subject of a comment:
 Item { ( value | OneLine ) Epilog? }
 Entry { Comment? keyValue Epilog? }
 
-// Brackets surround keys but indicate value type.
-// Keys can be empty, and in a List they all must be.
+// The outermost context is a zero-indent dictionary and may begin with a "#!".
+@top File { Shebang? Prolog? Entry* }
+
+// Brackets surround keys and indicate type for the following value.
+// Keys can repeat and can be empty (a List can be viewed as having only empty keys).
 value {
     "<>" eol Text
   | "{}" eol Dict
@@ -37,34 +37,45 @@ keyValue {
   | "{" KeyDict "}" eol Dict
   | "[" KeyList "]" eol List
 
-// Keys can span multiple lines.
-  | "@" eol Key { text } value
+  // There is a shortcut available when a Text value only has OneLine:
+  | KeyShort "=" OneLine
 
-// There are shortcuts available when a Text value only has one Line:
-  | KeyShort eq OneLine // The other shortcut is above, in the List Item rule.
+  // Keys can span multiple lines using an indented block before the value:
+  | "@" eol KeyBlock value
 }
 
-// The next few rules are about tweaking the way lezer builds the trees
-Text { text } // lowercase rules get collapsed, capitalized rules make nodes
+// The OneLine shortcuts produce nodes named (and shaped like) `Text`:
 OneLine[@name=Text] { Line }
-KeyShort[@name=Key] { keyShort }
+
+// Comments are all Github Flavored Markdown, while Shebang is plain text.
+GFM { Line block? }
+Shebang { "#!" Interpreter block? }
+Interpreter { Line }
+
+// Most of the tokens are tricky/impossible to express here:
+@external tokens terms from "./lexical.ts" {
+  dedent indentT indentD indentL margin // fairly typical indentation mechanism
+  eol // { "\n" | @eof } overlaps and defers to Line
+
+  // RESERVED  # / @ { } [ ] < >
+  Line // { ![\n]* eol } except in ListContext 1st char can't be RESERVED
+  keyShort[@name=Line] // { ![=\n]* } except 1st char can't be RESERVED
+
+  keyText[@name=Line] // { ![\n]* } excluding the angle ket at eol
+  keyDict[@name=Line] // { ![\n]* } excluding the curly ket at eol
+  keyList[@name=Line] // { ![\n]* } excluding the square ket at eol
+}
+
+// All Key* rules produce nodes named `Key` holding at least one `Line`:
 KeyText[@name=Key] { keyText }
 KeyDict[@name=Key] { keyDict }
 KeyList[@name=Key] { keyList }
-// Most of the tokens are irregular or difficult to express here:
-@external tokens terms from "./lexical.ts" {
-    // RESERVED  # / @ { } [ ] < >
-    Line // { ![\n]* eol } except in ListContext 1st char can't be RESERVED
-    keyShort[@name=Line] // { ![=\n]* } except 1st char can't be RESERVED
-    keyText[@name=Line] // { ![\n]* } but don't grab the angle ket at the end
-    keyDict[@name=Line] // { ![\n]* } but don't grab the curly ket at the end
-    keyList[@name=Line] // { ![\n]* } but don't grab the square ket at the end
-    eol // { "\n" | @eof } must have lower precedence than Line
-    eq // { "=" } - has to be here because of lezer token precedence
-    // these help lezer keep track of the indentation
-    dedent indentT indentD indentL margin
-}
-@tokens {} // all the "" tokens live here, and they need to be lowest precedence
-@skip { margin } // note that the Rust parser tracks gaps but lezer doesn't
+KeyShort[@name=Key] { keyShort }
+KeyBlock[@name=Key] { block? }
+
+// A few last Lezer details:
+@skip { margin } // completely empty lines and/or indentation TAB chars
 @context margin from "./context.ts"
+@tokens { /* inline must have lower precedence than external */
+"#!" "//" "///" "<>" "{}" "[]" "<" ">" "{" "}" "[" "]" "@" "=" }
 @external propSource highlight from "./properties.ts"

@@ -120,11 +120,6 @@ const tokenizer = new ExternalTokenizer((input, stack) => {
             // keep going
         }
 
-        if (stack.canShift(terms.eq) && input.next === EQ) {
-            input.acceptToken(terms.eq, 1)
-            break scan
-        }
-
         if (stack.canShift(terms.keyShort)) {
             if (input.next !== EQ && RESERVED.includes(input.next))
                 output?.debug(`reject KeyShort[0] ${String.fromCharCode(input.next)}`)

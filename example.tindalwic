@@ -1,39 +1,41 @@
-#
+#!/usr/bin/env -S tindalwic same
+	probably shouldn't use `same` - I *think* it is limited to dev build
+//
 	# Introduction to `Tindalwic`
 	
-	In fourteen examples...
+	In a few examples...
 
 {comment block}
-	#
+	//
 		This example has only a prolog comment block.
 		Comments are [Github Flavored Markdown](https://github.github.com/gfm/)
 
 {comment shortcut}
-	# you can skip the block if there's just one line
+	// you can skip the block if there's just one line
 
 {comment flow}
-	# if you really want to you can flow from the first line into a block...
+	// if you really want to you can flow from the first line into a block...
 		but that can obscure the GFM: this whole block looks like it is a code block
 		
-		    this is actually a code block because it has four spaces more than the text
+		    this is actually a code block because it has four spaces more
 		
 		tindalwic consumes the margin before sending the content on to GFM
 
 {warning about shortcut comments}
-	# they can't follow values, the # must always come right after the margin
+	// they can't follow values, the # must always come right after the margin
 		{writing something like this} # is tempting but not supported (yet?)
 
 {curly brackets surround keys and open a nested dictionary}
-	# you've seen several of these already - all the examples are dictionaries
+	// you've seen several of these already - all the examples are dictionaries
 	{dictionaries can nest}
 		{as deep as you need them to go}
 			{}
-				# the empty string is a valid key
+				// the empty string is a valid key
 		{{{no quoting/escaping, only the 1st and last chars are brackets}}}
 
 {square brackets surround keys and open a nested list}
 	[lists entries in dictionaries have keys]
-		# but keys aren't a thing for list items so the brackets surround nothing
+		// but keys aren't a thing for list items so the brackets surround nothing
 		{}
 			[]
 			[previous entry's key was empty]
@@ -55,40 +57,40 @@
 
 {epilog comments for text}
 	<key>
-		# this is text, not a comment (verbatim, no quoting/escaping).
+		// this is text, not a comment (verbatim, no quoting/escaping).
 		there's no room in the block for anything but text.
-	# epilog comments can follow the block so you can describe a text values
+	// epilog comments can follow the block so you can describe a text values
 		they dedent back to the same level as the brackets
 
 {shortcut for single-line text dictionary entries}
 	{dict}
-		# two ways to write the same entry:
+		// two ways to write the same entry:
 		key=value
 		<key>
 			value
-		# spaces are not (yet?) stripped, so this is different:
+		// spaces are not (yet?) stripped, so this is different:
 		key = value
-		# that key is 4 chars long
+		// that key is 4 chars long
 
 {shortcut for single-line text list items}
 	[list]
-		# two ways to write the same item:
+		// two ways to write the same item:
 		value
 		<>
 			value
 
 {epilog comments are not just for text}
-	# dedent-and-follow works for dictionaries and lists as well
+	// dedent-and-follow works for dictionaries and lists as well
 	{dict}
-		# prolog for dict
+		// prolog for dict
 		key=value
-		# epilog for value
-	# epilog for dict
+		// epilog for value
+	// epilog for dict
 	[list]
-		# prolog for list
+		// prolog for list
 		item
-		# epilog for item
-	# epilog for list
+		// epilog for item
+	// epilog for list
 
 {keys aren't limited to single-line text}
 	@
@@ -100,17 +102,17 @@
 		it would be invalid syntax for the brackets to surround any chars
 
 {keys can also have comments}
-	# they can't use # or they would be ambiguous with prolog comments like this, so
+	// they can't use # or they would be ambiguous with prolog comments like this, so
 
-	// key comments precede the entry and use the double-slash syntax
+	/// key comments precede the entry and use the Rust triple-slash syntax
 		they flow, and they can follow a blank line. WARNING: completely blank lines in
 		other places confuse the parser. the 3rd line of this file, for example, looks blank,
 		but it needs to have the indentation or it confuses the parsers. I'll fix that ASAP.
 	key1=value1
 
 	key2=value2
-	# as you may have noticed already, a blank line is allowed even without a comment
+	// as you may have noticed already, a blank line is allowed even without a comment
 
-	// they work the same way for all the key flavors
+	/// they work the same way for all the key flavors
 	<key3>
 		value3

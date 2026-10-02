@@ -51,8 +51,8 @@ fn three_blank_comments() {
     let encoded = file.to_string();
     let expect = "
         #!
-        #
         //
+        ///
         {}
     ";
     assert_eq!(encoded, from_literal(expect));
@@ -63,10 +63,10 @@ fn text_stretch_bug() {
     let spaces = "
         [K]
             V
-        #E
+        //E
     ";
     let content = from_literal(spaces);
-    assert_eq!("[K]\n\tV\n#E", content);
+    assert_eq!("[K]\n\tV\n//E", content);
     arena! {
         let mut arena = <1dict,1list>;
     }
@@ -196,7 +196,7 @@ fn change_in_list() {
         File::try_from_dict_without_epilog(&dict)
             .unwrap()
             .to_string(),
-        "{a}\n\t[b]\n\t\tv\n\t\t#c"
+        "{a}\n\t[b]\n\t\tv\n\t\t//c"
     );
 }
 
@@ -237,7 +237,7 @@ fn inject_comments() {
         File::try_from_dict_without_epilog(&dict)
             .unwrap()
             .to_string(),
-        "//b\nk=v\n#c"
+        "///b\nk=v\n//c"
     );
 }
 
@@ -262,7 +262,7 @@ fn change_structure() {
         File::try_from_dict_without_epilog(&dict)
             .unwrap()
             .to_string(),
-        "[k]\n\t{}\n\t\tp=v\n\t\t#b"
+        "[k]\n\t{}\n\t\tp=v\n\t\t//b"
     )
 }
 
@@ -496,16 +496,14 @@ mod parse_err {
     fn list_errors() {
         let bump = Bump::new();
         let mut arena = HeapArena::new(&bump);
-        let content = "[data]\n\t/\n\t#\n\t//\n\t<_\n\t[_\n\t{_\n\t<>\n\t[]\n\t{}";
+        let content = "[data]\n\t/\n\t//\n\t///\n\t<_\n\t[_\n\t{_\n\t<>\n\t[]\n\t{}";
         let errors = arena
             .collect_errors(&content, usize::MAX)
             .expect_err("invalid");
         assert_eq!(
             errors,
             vec!(
-                ParseError::at(2, "malformed // comment"),
-                ParseError::at(3, "stray `#` comment"),
-                ParseError::at(4, "no // comments in lists"),
+                ParseError::at(4, "stray comment"),
                 ParseError::at(5, "malformed `<>` in list"),
                 ParseError::at(6, "malformed `[]` in list"),
                 ParseError::at(7, "malformed `{}` in list"),
@@ -516,7 +514,7 @@ mod parse_err {
     fn dict_gap_error() {
         let mut arena = StackArena::wrap(NO_ITEMS, NO_ENTRIES);
         assert_eq!(
-            arena.first_error("//"),
+            arena.first_error("///"),
             Err(ParseError::at(2, "gap/comment but no key"))
         );
     }
@@ -524,15 +522,15 @@ mod parse_err {
     fn dict_errors() {
         let bump = Bump::new();
         let mut arena = HeapArena::new(&bump);
-        let content = "{data}\n\t/\n\t#\n\t<_\n\t[_\n\t{_\n\t<t>\n\t[l]\n\t{d}";
+        let content = "{data}\n\t/\n\t//\n\t<_\n\t[_\n\t{_\n\t<t>\n\t[l]\n\t{d}";
         let errors = arena
             .collect_errors(&content, usize::MAX)
             .expect_err("invalid");
         assert_eq!(
             errors,
             vec!(
-                ParseError::at(2, "malformed // comment"),
-                ParseError::at(3, "stray `#` comment"),
+                ParseError::at(2, "missing `=` in dict"),
+                ParseError::at(3, "stray comment"),
                 ParseError::at(4, "malformed `<key>` in dict"),
                 ParseError::at(5, "malformed `[key]` in dict"),
                 ParseError::at(6, "malformed `{key}` in dict"),

@@ -139,6 +139,12 @@ pub(super) fn indentation(bytes: &[u8], start: usize, limit: usize) -> usize {
     offset - start
 }
 
+enum CommentMark {
+    Shebang,
+    DoubleSlash,
+    TripleSlash,
+}
+
 struct Input<'a, 'r> {
     utf8: &'a str, // entire tindalwic encoded content
     line: usize,   // the number of the current line
@@ -177,8 +183,8 @@ impl<'a, 'r> Input<'a, 'r> {
             return None;
         }
         input.next(0)?;
-        let hashbang = input.comment(0, b"#!")?;
-        let prolog = input.comment(0, b"#")?;
+        let hashbang = input.comment(0, CommentMark::Shebang)?;
+        let prolog = input.comment(0, CommentMark::DoubleSlash)?;
         let cells = input.entries(0, arena)?;
         if input.start != usize::MAX {
             // not covered (impossible to get, can't suppress completely).
@@ -319,20 +325,35 @@ impl<'a, 'r> Input<'a, 'r> {
         true
     }
 
-    /// use this whenever a comment is allowed, returns None if current line does not
-    /// have exactly the provided indent and prefix.
-    fn comment(&mut self, indent: usize, prefix: &'static [u8]) -> Option<Option<Comment<'a>>> {
+    fn looking_at(&self, mark: &[u8]) -> usize {
+        self.utf8
+            .as_bytes()
+            .get(self.first..)
+            .unwrap_or(b"")
+            .iter()
+            .zip(mark)
+            .take_while(|(have, want)| have == want)
+            .count()
+    }
+
+    /// use this whenever a comment is allowed. returns None if stretch fails (so caller
+    /// can ?), Some(None) if current line has wrong indent/mark, or Some(Some(Comment)).
+    fn comment(&mut self, indent: usize, mark: CommentMark) -> Option<Option<Comment<'a>>> {
         if self.start == usize::MAX || self.tabs != indent {
             return Some(None);
         }
-        let bytes = self.utf8.as_bytes();
-        let limit = bytes.len();
-        let from = self.first + prefix.len();
-        if from > limit || &bytes[self.first..from] != prefix {
-            return Some(None);
-        }
-        let more = indent + 1;
-        let value = self.stretch(more, from)?;
+        let same = self.looking_at(if matches!(mark, CommentMark::Shebang) {
+            b"#!"
+        } else {
+            b"///" // to be able to reject 3rd if DoubleSlash is called for
+        });
+        let from = match mark {
+            CommentMark::Shebang if same == 2 => 2,
+            CommentMark::DoubleSlash if same == 2 => 2,
+            CommentMark::TripleSlash if same == 3 => 3,
+            _ => return Some(None),
+        };
+        let value = self.stretch(indent + 1, self.first + from)?;
         Some(Some(Comment { value }))
     }
 
@@ -341,7 +362,7 @@ impl<'a, 'r> Input<'a, 'r> {
     /// lenient - one-liners can stretch.
     fn text(&mut self, indent: usize, from: usize) -> Option<Item<'a>> {
         let value = self.stretch(indent + 1, from)?;
-        let epilog = self.comment(indent, b"#")?;
+        let epilog = self.comment(indent, CommentMark::DoubleSlash)?;
         Some(Item::Text { value, epilog })
     }
     /// text block follows current line. block might have zero lines.
@@ -359,9 +380,9 @@ impl<'a, 'r> Input<'a, 'r> {
     /// previous line opened a list context, so parse all the lines in it.
     fn list(&mut self, indent: usize, arena: &mut dyn Build<'a>) -> Option<Item<'a>> {
         Some(Item::List {
-            prolog: self.comment(indent + 1, b"#")?,
+            prolog: self.comment(indent + 1, CommentMark::DoubleSlash)?,
             cells: self.items(indent + 1, arena)?,
-            epilog: self.comment(indent, b"#")?,
+            epilog: self.comment(indent, CommentMark::DoubleSlash)?,
         })
     }
     fn items(&mut self, indent: usize, arena: &mut dyn Build<'a>) -> Option<Items<'a>> {
@@ -378,21 +399,6 @@ impl<'a, 'r> Input<'a, 'r> {
             } else {
                 let len = self.end - self.first;
                 match bytes[self.first] {
-                    b'#' => {
-                        self.report(ParseError::at(self.line, "stray `#` comment"))?;
-                        self.comment(indent, b"#")?; // read and throw away
-                    }
-                    b'/' => {
-                        self.report(ParseError::at(
-                            self.line,
-                            if len < 2 || bytes[self.first + 1] != b'/' {
-                                "malformed // comment"
-                            } else {
-                                "no // comments in lists"
-                            },
-                        ))?;
-                        self.comment(indent, b"/")?; // read and throw away
-                    }
                     b'<' => {
                         if len != 2 || bytes[self.end - 1] != b'>' {
                             self.report(ParseError::at(self.line, "malformed `<>` in list"))?;
@@ -418,6 +424,17 @@ impl<'a, 'r> Input<'a, 'r> {
                             self.next(indent + 1)?;
                             item = Some(self.dict(indent, arena)?);
                         }
+                    }
+                    b'/' if len > 1 && bytes[self.first + 1] == b'/' => {
+                        self.report(ParseError::at(self.line, "stray comment"))?;
+                        self.comment(
+                            indent,
+                            if len > 2 && bytes[self.first + 2] == b'/' {
+                                CommentMark::TripleSlash
+                            } else {
+                                CommentMark::DoubleSlash
+                            },
+                        )?; // read and throw away
                     }
                     _ => {
                         item = Some(self.text(indent, self.start + indent)?);
@@ -447,9 +464,9 @@ impl<'a, 'r> Input<'a, 'r> {
     /// previous line opened a dict context, so parse all the lines in it.
     fn dict(&mut self, indent: usize, arena: &mut dyn Build<'a>) -> Option<Item<'a>> {
         Some(Item::Dict {
-            prolog: self.comment(indent + 1, b"#")?,
+            prolog: self.comment(indent + 1, CommentMark::DoubleSlash)?,
             cells: self.entries(indent + 1, arena)?,
-            epilog: self.comment(indent, b"#")?,
+            epilog: self.comment(indent, CommentMark::DoubleSlash)?,
         })
     }
     fn entries(&mut self, indent: usize, arena: &mut dyn Build<'a>) -> Option<Entries<'a>> {
@@ -462,7 +479,7 @@ impl<'a, 'r> Input<'a, 'r> {
             if key.gap {
                 self.next(indent)?;
             }
-            key.comment = self.comment(indent, b"//")?;
+            key.comment = self.comment(indent, CommentMark::TripleSlash)?;
             if self.start == usize::MAX || self.tabs != indent {
                 if key.gap || key.comment.is_some() {
                     self.report(ParseError::at(self.line, "gap/comment but no key"))?;
@@ -471,21 +488,6 @@ impl<'a, 'r> Input<'a, 'r> {
             }
             let len = self.end - self.first;
             match bytes[self.first] {
-                b'#' => {
-                    self.report(ParseError::at(self.line, "stray `#` comment"))?;
-                    self.comment(indent, b"#")?; // read and throw away
-                }
-                b'/' => {
-                    self.report(ParseError::at(
-                        self.line,
-                        if len < 2 || bytes[self.first + 1] != b'/' {
-                            "malformed // comment"
-                        } else {
-                            "stray `//` comment"
-                        },
-                    ))?;
-                    self.comment(indent, b"/")?; // read and throw away
-                }
                 b'<' => {
                     if len < 2 || bytes[self.end - 1] != b'>' {
                         self.report(ParseError::at(self.line, "malformed `<key>` in dict"))?;
@@ -559,6 +561,10 @@ impl<'a, 'r> Input<'a, 'r> {
                 b'\t' => {
                     self.report(ParseError::at(self.line, "excess indentation?"))?;
                     self.next(indent)?;
+                }
+                b'/' if len > 1 && bytes[self.first + 1] == b'/' => {
+                    self.report(ParseError::at(self.line, "stray comment"))?;
+                    self.comment(indent, CommentMark::DoubleSlash)?; // read and throw away
                 }
                 _ => {
                     if self.assign == usize::MAX {

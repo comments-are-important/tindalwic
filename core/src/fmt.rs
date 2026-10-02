@@ -169,7 +169,7 @@ impl<'o, 'f> Output<'o, 'f> {
                     self.string(value)?;
                     self.indent -= 1;
                 }
-                self.comment("#", epilog)
+                self.comment("//", epilog)
             }
             Item::List {
                 prolog,
@@ -179,12 +179,12 @@ impl<'o, 'f> Output<'o, 'f> {
                 self.indent()?;
                 self.out.write_str("[]")?;
                 self.indent += 1;
-                self.comment("#", prolog)?;
+                self.comment("//", prolog)?;
                 for cell in *cells {
                     self.item_in_list(cell)?;
                 }
                 self.indent -= 1;
-                self.comment("#", epilog)
+                self.comment("//", epilog)
             }
             Item::Dict {
                 prolog,
@@ -194,12 +194,12 @@ impl<'o, 'f> Output<'o, 'f> {
                 self.indent()?;
                 self.out.write_str("{}")?;
                 self.indent += 1;
-                self.comment("#", prolog)?;
+                self.comment("//", prolog)?;
                 for cell in *cells {
                     self.entry_in_dict(cell)?;
                 }
                 self.indent -= 1;
-                self.comment("#", epilog)
+                self.comment("//", epilog)
             }
         }
     }
@@ -208,7 +208,7 @@ impl<'o, 'f> Output<'o, 'f> {
         if entry.name.gap {
             self.indent()?;
         }
-        self.comment("//", &entry.name.comment)?;
+        self.comment("///", &entry.name.comment)?;
         match &entry.item {
             Item::Text { value, epilog } => {
                 self.indent()?;
@@ -240,7 +240,7 @@ impl<'o, 'f> Output<'o, 'f> {
                     self.string(value)?;
                     self.indent -= 1;
                 }
-                self.comment("#", epilog)
+                self.comment("//", epilog)
             }
             Item::List {
                 prolog,
@@ -263,12 +263,12 @@ impl<'o, 'f> Output<'o, 'f> {
                     self.out.write_str("[]")?;
                 }
                 self.indent += 1;
-                self.comment("#", prolog)?;
+                self.comment("//", prolog)?;
                 for cell in *cells {
                     self.item_in_list(cell)?;
                 }
                 self.indent -= 1;
-                self.comment("#", epilog)
+                self.comment("//", epilog)
             }
             Item::Dict {
                 prolog,
@@ -291,18 +291,18 @@ impl<'o, 'f> Output<'o, 'f> {
                     self.out.write_str("{}")?;
                 }
                 self.indent += 1;
-                self.comment("#", prolog)?;
+                self.comment("//", prolog)?;
                 for cell in *cells {
                     self.entry_in_dict(cell)?;
                 }
                 self.indent -= 1;
-                self.comment("#", epilog)
+                self.comment("//", epilog)
             }
         }
     }
     fn file<'a>(&mut self, file: &File<'a>) -> Result {
         self.comment("#!", &file.hashbang)?;
-        self.comment("#", &file.prolog)?;
+        self.comment("//", &file.prolog)?;
         for cell in file.cells {
             self.entry_in_dict(cell)?;
         }

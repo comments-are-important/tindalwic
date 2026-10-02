@@ -96,12 +96,27 @@ fn epilog(item: &Item) -> Option<String> {
 }
 
 fn comment(tag: &str, maybe: &Option<Comment>) -> Option<String> {
-    maybe.map(|it| text(tag, &it.value))
+    let Some(comment) = maybe else { return None };
+    if tag != "Shebang" {
+        return Some(format!("{tag}({})", text("GFM", &comment.value)));
+    }
+    Some(format!(
+        "Shebang{}",
+        lines(&comment.value, Some("Interpreter"))
+    ))
 }
 
 fn text(tag: &str, value: &Value) -> String {
+    format!("{tag}{}", lines(value, None))
+}
+
+fn lines(value: &Value, wrap_first: Option<&str>) -> String {
+    let first = match wrap_first {
+        None => "Line".to_owned(),
+        Some(wrap) => format!("{wrap}(Line)"),
+    };
     match value.lines().count() {
-        0 => format!("{tag}"),
-        n => format!("{tag}(Line{})", ",Line".repeat(n - 1)),
+        0 => "".to_owned(),
+        n => format!("({first}{})", ",Line".repeat(n - 1)),
     }
 }

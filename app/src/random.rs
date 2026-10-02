@@ -55,7 +55,7 @@ impl Args {
                     }
                     Ok(parsed) if parsed != original => {
                         anyhow::bail!(
-                            "difference after {count} successes\n{original:?}\n{parsed:?}"
+                            "difference after {count} successes\n{original:?}\n{parsed:?}\n{encoded}\n"
                         )
                     }
                     _ => {}

@@ -132,15 +132,6 @@ pub enum Reported {
     Continue,
 }
 
-/// start at provided offset, count tab chars.
-pub(super) fn indentation(bytes: &[u8], start: usize, limit: usize) -> usize {
-    let mut offset = start;
-    while offset < limit && bytes[offset] == b'\t' {
-        offset += 1;
-    }
-    offset - start
-}
-
 enum CommentMark {
     Shebang,
     DoubleSlash,
@@ -289,7 +280,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
     /// current line has been recognized as beginning of a Comment or Text that might
     /// continue, so stretch a portion of it out to include the whole thing.
     fn stretch(&mut self, indent: usize, from: &'a str) -> Result<Value<'a>, &'static str> {
-        let start = Value::one_liner(from);
+        let start = Value::from(from);
         return match self.next(indent, false)? {
             None => Ok(start),
             Some(previous) => {
@@ -337,13 +328,9 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
     /// a block (optionally) follows current line (at indent+1).
     /// always need some value, use end of current if no block follows
     fn block(&mut self, indent: usize) -> Result<Value<'a>, &'static str> {
-        let Some(intro) = self.after_indent(indent) else {
-            return Err("parse.block: need a current line");
-        };
-        let empty = &intro[intro.len()..];
         self.advance();
         let Some(first) = self.after_indent(indent + 1) else {
-            return Ok(Value::one_liner(empty));
+            return Ok(Value::default());
         };
         self.stretch(indent, first)
     }

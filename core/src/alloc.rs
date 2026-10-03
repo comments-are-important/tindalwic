@@ -11,7 +11,7 @@ impl<'a> Value<'a> {
         if let Some(slice) = self.verbatim(0) {
             String::from(slice)
         } else {
-            let mut result = String::with_capacity(self.byte_count());
+            let mut result = String::with_capacity(self.len());
             let mut iter = self.lines();
             if let Some(first) = iter.next() {
                 result.push_str(first)

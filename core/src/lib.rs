@@ -23,7 +23,6 @@ pub use tindalwic_macros::arena;
 
 pub mod capped;
 pub mod fmt;
-pub mod parse;
 pub mod walk;
 
 #[cfg(feature = "alloc")]
@@ -31,205 +30,24 @@ pub mod alloc;
 #[cfg(feature = "bumpalo")]
 pub mod bumpalo;
 
+mod value;
+
+/// converting bytes into a File
+pub mod parse {
+    pub use super::value::parse::{Build, Parse, ParseError, Reported};
+}
+
 /// the semver plus the git fingerprint
 pub const VERSION: &str = env!("TINDALWIC_VERSION");
 
 // ====================================================================================
 
-mod value {
-    /// All primitive values in Tindalwic are string slice references, not owned.
-    ///
-    ///  + [Comment::value](super::Comment::value)
-    ///  + [Text::value](super::Item::Text::value)
-    ///  + [Name::key](super::Name::key)
-    ///
-    /// They often contain embedded indentation because the parser is zero-copy from
-    /// the encoded data. The methods here will strip indentation as necessary.
-    /// Apps that modify only a few values do not have to pay for any processing of
-    /// unmodified values that are already appropriately indented.
-    #[derive(Clone, Copy, Debug)]
-    pub struct Value<'a> {
-        slice: &'a str,
-        indent: usize, // usize::MAX => single line
-    }
-    impl<'a> PartialEq for Value<'a> {
-        fn eq(&self, other: &Self) -> bool {
-            if self.indent == other.indent {
-                self.slice == other.slice
-            } else {
-                self.lines().eq(other.lines())
-            }
-        }
-    }
-    impl<'a> Value<'a> {
-        /// `true` when zero chars (see [str::is_empty]).
-        pub fn is_empty(&self) -> bool {
-            self.slice.is_empty()
-        }
-        /// `true` if prefix matches (see [str::starts_with]).
-        ///
-        /// Restricted to char until [core::str::pattern::Pattern] is stable.
-        pub fn starts_with(&self, pat: char) -> bool {
-            self.slice.starts_with(pat)
-        }
-        /// the format sometimes allows shorter encoding for single line values
-        pub fn only_line(&self) -> Option<&'a str> {
-            if self.indent == usize::MAX {
-                Some(self.slice)
-            } else {
-                None
-            }
-        }
-        /// if the value was captured at this indent, then it can be used as is.
-        pub fn verbatim(&self, indent: usize) -> Option<&'a str> {
-            let only = self.only_line();
-            if only.is_some() {
-                only
-            } else if indent == self.indent {
-                Some(self.slice)
-            } else {
-                None
-            }
-        }
-        /// Returned iterator produces one sub-slice for each line.
-        ///
-        /// Always produces at least one line. Omits indentation and newline chars.
-        pub fn lines(&self) -> impl Iterator<Item = &'a str> {
-            // that return type is tricky to satisfy: having two branches here (one
-            // optimized for absent indentation) causes E0308 incompatible types:
-            //   "distinct uses of `impl Trait` result in different opaque types"
-            // attempting to hide them behind closures does not help either:
-            //   "no two closures, even if identical, have the same type"
-            let d = if self.only_line().is_some() {
-                0
-            } else {
-                self.indent
-            };
-            self.slice.split('\n').enumerate().map(move |(i, s)| {
-                if i == 0 || d == 0 || s.is_empty() {
-                    s
-                } else {
-                    &s[d..]
-                }
-            })
-        }
-        /// Take as many chars as possible from beginning of slice.
-        ///
-        /// No indentation is expected at the beginning, subsequent indented lines
-        /// (even those with excess indentation) are included.
-        pub fn slice_prefix(indent: usize, slice: &'a str) -> Self {
-            assert!(indent != usize::MAX, "indent can't be MAX");
-            if slice.is_empty() {
-                return Value::default();
-            }
-            let bytes = slice.as_bytes();
-            let limit = bytes.len();
-            let mut offset = 0usize;
-            while bytes[offset] != b'\n' {
-                offset += 1;
-                if offset >= limit {
-                    let indent = usize::MAX;
-                    return Value { slice, indent };
-                }
-            }
-            if indent == 0 {
-                return Value { slice, indent };
-            }
-            let mut tabs = crate::parse::indentation(bytes, offset + 1, limit);
-            if tabs < indent {
-                return Value {
-                    slice: &slice[..offset],
-                    indent: usize::MAX,
-                };
-            }
-            loop {
-                offset += tabs + 1;
-                if offset >= limit {
-                    return Value { slice, indent };
-                }
-                while bytes[offset] != b'\n' {
-                    offset += 1;
-                    if offset >= limit {
-                        return Value { slice, indent };
-                    }
-                }
-                tabs = crate::parse::indentation(bytes, offset + 1, limit);
-                if tabs < indent {
-                    let slice = &slice[..offset];
-                    return Value { slice, indent };
-                }
-            }
-        }
-        #[cfg(feature = "alloc")]
-        pub(crate) fn byte_count(&self) -> usize {
-            self.slice.as_bytes().len()
-        }
-        pub(crate) fn one_liner(slice: &'a str) -> Self {
-            Value {
-                slice,
-                indent: usize::MAX,
-            }
-        }
-        pub(crate) fn stretched(
-            &self,
-            indent: usize,
-            concat: &'a str,
-            source: &'a str,
-        ) -> Result<Self, &'static str> {
-            if indent == usize::MAX {
-                return Err("value.stretched: sentinel value passed as indent");
-            }
-            if self.indent != usize::MAX && self.indent != indent {
-                return Err("value.stretched: incompatible indents");
-            }
-            let base = source.as_ptr() as usize;
-            let first = self.slice.as_ptr() as usize;
-            if first < base || base + source.len() <= first {
-                return Err("value.stretched: self did not come from that source");
-            }
-            let second = concat.as_ptr() as usize;
-            if second < base || base + source.len() <= second {
-                return Err("value.stretched: concat isn't from that source");
-            }
-            if second < first + self.slice.len() {
-                return Err("value.stretched: concat must follow this value");
-            }
-            let slice = &source[first - base..second - base + concat.len()];
-            Ok(Value { slice, indent })
-        }
-    }
-    impl<'a> Default for Value<'a> {
-        fn default() -> Self {
-            Value {
-                slice: "",
-                indent: usize::MAX,
-            }
-        }
-    }
-}
 pub use value::Value;
 impl<'a> Value<'a> {
     /// linear `O(n)` scan.
     // TODO: add link to `alloc` map view, say it "offers `O(1)`."
     pub fn find_linearly_in(self, cells: Entries<'_>) -> Option<usize> {
         cells.iter().position(|cell| cell.get().name.key == self)
-    }
-}
-impl<'a> From<&'a str> for Value<'a> {
-    fn from(value: &'a str) -> Self {
-        Value::slice_prefix(0, value)
-    }
-}
-impl<'a> Eq for Value<'a> {}
-impl<'a> core::hash::Hash for Value<'a> {
-    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        let mut lines = self.lines();
-        let first = lines.next().expect("lines is never empty");
-        first.hash(state);
-        for line in self.lines() {
-            b'\n'.hash(state);
-            line.hash(state);
-        }
     }
 }
 

@@ -9,24 +9,6 @@ use tindalwic::parse::Parse as _;
 use tindalwic::{Comment, Entry, File, Item, Value, arena, json, path};
 
 #[test]
-fn value_eq() {
-    let value: Value<'_> = "ONE\nTWO\nTHREE".into();
-    assert_eq!(value, Value::slice_prefix(2, "ONE\n\t\tTWO\n\t\tTHREE"));
-    assert_eq!(
-        3,
-        Value::slice_prefix(1, "X\n\t").verbatim(1).unwrap().len()
-    );
-}
-#[cfg(feature = "alloc")]
-#[test]
-fn value_joined() {
-    let value = Value::slice_prefix(2, "ONE\n\t\tTWO\n\t\tTHREE");
-    let expect = "ONE\nTWO\nTHREE";
-    assert_eq!(value.joined(), expect);
-    assert_eq!(value.to_string(), expect);
-}
-
-#[test]
 fn from_dict() {
     assert!(File::try_from_dict_without_epilog(&Item::text("nope".into())).is_none());
     assert!(File::try_from_dict_without_epilog(&Item::list(&[])).is_none());

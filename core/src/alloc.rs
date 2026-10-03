@@ -24,6 +24,11 @@ impl<'a> Value<'a> {
         }
     }
 }
+impl<'a> From<&'a String> for Value<'a> {
+    fn from(value: &'a String) -> Self {
+        Value::from(&value[..])
+    }
+}
 
 /// turn a formatted Rust source code string literal into tindalwic.
 pub fn from_literal(literal: &'static str) -> String {

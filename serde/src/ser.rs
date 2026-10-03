@@ -1,7 +1,7 @@
 use super::{Error, Result};
 use serde::ser::Serialize;
 use tindalwic::parse::Build;
-use tindalwic::{Entries, Entry, File, Item, Items, Name, Value};
+use tindalwic::{Entries, Entry, File, Item, Items, List, Name, Text, Value};
 
 /// encode a type that is compatible with dictionary into a tindalwic data file.
 pub fn to_tindalwic<'a, T: ?Sized + Serialize>(
@@ -94,7 +94,7 @@ impl<'c, 'b, 'a> serde::Serializer for &'c mut ItemSer<'b, 'a> {
     }
 
     fn serialize_str(self, v: &str) -> Result<Item<'a>> {
-        Ok(Item::text(self.intern(v)?.into()))
+        Ok(self.intern(v)?.into())
     }
     fn serialize_bytes(self, v: &[u8]) -> Result<Item<'a>> {
         if v.is_ascii() {
@@ -108,7 +108,7 @@ impl<'c, 'b, 'a> serde::Serializer for &'c mut ItemSer<'b, 'a> {
     }
 
     fn serialize_none(self) -> Result<Item<'a>> {
-        Ok(Item::list(&[]))
+        Ok(Item::List(List::default()))
     }
     fn serialize_some<T: ?Sized + Serialize>(self, value: &T) -> Result<Item<'a>> {
         let mut seq = SeqSer {
@@ -152,7 +152,7 @@ impl<'c, 'b, 'a> serde::Serializer for &'c mut ItemSer<'b, 'a> {
         let key = self.intern(variant)?.into();
         self.push_entry(Entry { name: key, item })?;
         let cells = self.finish_entries(1)?;
-        Ok(Item::dict(cells))
+        Ok(cells.into())
     }
 
     fn serialize_seq(self, _len: Option<usize>) -> Result<Self::SerializeSeq> {
@@ -233,7 +233,7 @@ impl<'c, 'b, 'a> SeqSer<'c, 'b, 'a> {
         Ok(())
     }
     fn list(self) -> Result<Item<'a>> {
-        Ok(Item::list(self.ser.finish_items(self.count)?))
+        Ok(self.ser.finish_items(self.count)?.into())
     }
 }
 impl<'c, 'b, 'a> serde::ser::SerializeSeq for SeqSer<'c, 'b, 'a> {
@@ -283,13 +283,13 @@ impl<'c, 'b, 'a> serde::ser::SerializeTupleVariant for TupleVariantSer<'c, 'b, '
         Ok(())
     }
     fn end(self) -> Result<Item<'a>> {
-        let list = Item::list(self.ser.finish_items(self.count)?);
+        let list = self.ser.finish_items(self.count)?.into();
         self.ser.push_entry(Entry {
             name: self.variant.into(),
             item: list,
         })?;
         let cells = self.ser.finish_entries(1)?;
-        Ok(Item::dict(cells))
+        Ok(cells.into())
     }
 }
 
@@ -304,7 +304,7 @@ impl<'c, 'b, 'a> serde::ser::SerializeMap for MapSer<'c, 'b, 'a> {
     type Error = Error;
     fn serialize_key<T: ?Sized + Serialize>(&mut self, key: &T) -> Result<()> {
         match key.serialize(&mut *self.ser)? {
-            Item::Text { value, .. } => {
+            Item::Text(Text { value, .. }) => {
                 self.key = Some(value);
                 Ok(())
             }
@@ -328,7 +328,7 @@ impl<'c, 'b, 'a> serde::ser::SerializeMap for MapSer<'c, 'b, 'a> {
         Ok(())
     }
     fn end(self) -> Result<Item<'a>> {
-        Ok(Item::dict(self.ser.finish_entries(self.count)?))
+        Ok(self.ser.finish_entries(self.count)?.into())
     }
 }
 
@@ -356,7 +356,7 @@ impl<'c, 'b, 'a> serde::ser::SerializeStruct for StructSer<'c, 'b, 'a> {
     }
     fn end(self) -> Result<Item<'a>> {
         let cells = self.ser.finish_entries(self.count)?;
-        Ok(Item::dict(cells))
+        Ok(cells.into())
     }
 }
 
@@ -384,12 +384,12 @@ impl<'c, 'b, 'a> serde::ser::SerializeStructVariant for StructVariantSer<'c, 'b,
         Ok(())
     }
     fn end(self) -> Result<Item<'a>> {
-        let dict = Item::dict(self.ser.finish_entries(self.count)?);
+        let dict = self.ser.finish_entries(self.count)?.into();
         self.ser.push_entry(Entry {
             name: self.variant.into(),
             item: dict,
         })?;
         let cells = self.ser.finish_entries(1)?;
-        Ok(Item::dict(cells))
+        Ok(cells.into())
     }
 }

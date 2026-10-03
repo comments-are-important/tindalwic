@@ -3,7 +3,7 @@
 use crate::Value;
 use crate::parse::ParseError;
 use crate::walk::PathError;
-use crate::{Comment, Entry, File, Item};
+use crate::{Comment, Dict, Entry, File, Item, List, Text};
 
 use core::cell::Cell;
 use core::fmt::{Display, Formatter, Result, Write};
@@ -45,6 +45,22 @@ impl<'p> Display for PathError<'p> {
         Ok(())
     }
 }
+
+/*
+pub struct Indented<'a, T> {
+    pub thing: &'a T,
+    pub indent: usize,
+}
+
+impl<'a, T> Indented<'a, T> {
+    pub fn new(thing: &'a T, indent: usize) -> Self {
+        Self { thing, indent }
+    }
+}
+
+impl Display for Indented<'_, Node> {
+}
+*/
 
 /// the string value (without indentation, *not* the encoded form).
 impl<'a> Display for Value<'a> {
@@ -93,6 +109,12 @@ impl<'o, 'f> Output<'o, 'f> {
         }
         Ok(())
     }
+    fn gap(&mut self, len: usize) -> Result {
+        for _ in 0..len {
+            self.out.write_char('\n')?;
+        }
+        Ok(())
+    }
     const fn special_first(byte: u8) -> bool {
         matches!(
             byte,
@@ -114,19 +136,18 @@ impl<'o, 'f> Output<'o, 'f> {
         }
         Ok(())
     }
-    fn some_comment<'a>(&mut self, marker: &'a str, comment: &Comment<'a>) -> Result {
-        self.indent()?;
-        self.out.write_str(marker)?;
-        if !comment.value.is_empty() {
-            self.indent += 1;
-            self.string(&comment.value)?;
-            self.indent -= 1;
-        }
+    fn comment<'a>(&mut self, marker: &'a str, comment: &Comment<'a>) -> Result {
+        self.gap(comment.gap)?;
+        self.maybe(marker, &comment.value)?;
         Ok(())
     }
-    fn comment<'a>(&mut self, marker: &'a str, option: &Option<Comment<'a>>) -> Result {
-        if let Some(comment) = option {
-            self.some_comment(marker, comment)?;
+    fn maybe<'a>(&mut self, marker: &'a str, option: &Option<Value<'a>>) -> Result {
+        if let Some(value) = option {
+            self.indent()?;
+            self.out.write_str(marker)?;
+            self.indent += 1;
+            self.string(&value)?;
+            self.indent -= 1;
         }
         Ok(())
     }
@@ -158,7 +179,7 @@ impl<'o, 'f> Output<'o, 'f> {
     fn item_in_list<'a>(&mut self, cell: &Cell<Item<'a>>) -> Result {
         let item = cell.get();
         match &item {
-            Item::Text { value, epilog } => {
+            Item::Text(Text { value, epilog }) => {
                 self.indent()?;
                 if let Some(slice) = Output::one_liner_in_list(value) {
                     self.out.write_str(slice)?;
@@ -169,13 +190,13 @@ impl<'o, 'f> Output<'o, 'f> {
                     self.string(value)?;
                     self.indent -= 1;
                 }
-                self.comment("//", epilog)
+                self.maybe("//", epilog)
             }
-            Item::List {
+            Item::List(List {
                 prolog,
-                cells,
+                items: cells,
                 epilog,
-            } => {
+            }) => {
                 self.indent()?;
                 self.out.write_str("[]")?;
                 self.indent += 1;
@@ -186,11 +207,11 @@ impl<'o, 'f> Output<'o, 'f> {
                 self.indent -= 1;
                 self.comment("//", epilog)
             }
-            Item::Dict {
+            Item::Dict(Dict {
                 prolog,
-                cells,
+                entries: cells,
                 epilog,
-            } => {
+            }) => {
                 self.indent()?;
                 self.out.write_str("{}")?;
                 self.indent += 1;
@@ -205,12 +226,9 @@ impl<'o, 'f> Output<'o, 'f> {
     }
     fn entry_in_dict<'a>(&mut self, cell: &Cell<Entry<'a>>) -> Result {
         let entry = cell.get();
-        if entry.name.gap {
-            self.indent()?;
-        }
         self.comment("///", &entry.name.comment)?;
         match &entry.item {
-            Item::Text { value, epilog } => {
+            Item::Text(Text { value, epilog }) => {
                 self.indent()?;
                 if let Some(only) = entry.name.key.only_line() {
                     if let Some(text) = Output::one_liner_in_dict(value, only) {
@@ -240,13 +258,13 @@ impl<'o, 'f> Output<'o, 'f> {
                     self.string(value)?;
                     self.indent -= 1;
                 }
-                self.comment("//", epilog)
+                self.maybe("//", epilog)
             }
-            Item::List {
+            Item::List(List {
                 prolog,
-                cells,
+                items: cells,
                 epilog,
-            } => {
+            }) => {
                 self.indent()?;
                 if let Some(only) = entry.name.key.only_line() {
                     self.out.write_char('[')?;
@@ -270,11 +288,11 @@ impl<'o, 'f> Output<'o, 'f> {
                 self.indent -= 1;
                 self.comment("//", epilog)
             }
-            Item::Dict {
+            Item::Dict(Dict {
                 prolog,
-                cells,
+                entries: cells,
                 epilog,
-            } => {
+            }) => {
                 self.indent()?;
                 if let Some(only) = entry.name.key.only_line() {
                     self.out.write_char('{')?;
@@ -301,9 +319,9 @@ impl<'o, 'f> Output<'o, 'f> {
         }
     }
     fn file<'a>(&mut self, file: &File<'a>) -> Result {
-        self.comment("#!", &file.hashbang)?;
+        self.maybe("#!", &file.hashbang)?;
         self.comment("//", &file.prolog)?;
-        for cell in file.cells {
+        for cell in file.entries {
             self.entry_in_dict(cell)?;
         }
         Ok(())

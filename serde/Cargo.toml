@@ -15,6 +15,7 @@ bumpalo = { workspace = true }
 bytes = { workspace = true, features = ["serde"]}
 ryu = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+strum = { workspace = true, features = ["derive"] }
 tindalwic = { path = "../core", features = ["bumpalo"] }
 
 [dev-dependencies]

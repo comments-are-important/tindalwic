@@ -2,7 +2,7 @@ use super::{Error, Result};
 use serde::de::{DeserializeSeed, Unexpected, Visitor};
 use serde::de::{Deserializer as _, Error as _};
 use tindalwic::parse::Parse;
-use tindalwic::{Entry, Item, Value};
+use tindalwic::{Dict, Entry, Item, List, Text, Value};
 
 /// decode tindalwic data file into a type that is compatible with dictionary
 pub fn from_tindalwic<'de, T: ::serde::Deserialize<'de>>(
@@ -32,13 +32,13 @@ impl<'de, 'a> ItemDe<'de, 'a> {
         }
     }
     fn with_text(&self, value: Value<'a>) -> Self {
-        self.with_item(Item::Text {
+        self.with_item(Item::Text(Text {
             value,
-            epilog: None,
-        })
+            epilog: Default::default(),
+        }))
     }
     fn parse<T: std::str::FromStr>(&self) -> Option<T> {
-        if let Item::Text { value, .. } = self.item {
+        if let Item::Text(Text { value, .. }) = self.item {
             if let Some(verbatim) = value.verbatim(0) {
                 if let Ok(value) = verbatim.trim().parse::<T>() {
                     return Some(value);
@@ -75,18 +75,18 @@ impl<'de, 'a> serde::Deserializer<'de> for ItemDe<'de, 'a> {
     /// the no conversion behavior or (more often) a good error.
     fn deserialize_any<V: Visitor<'de>>(self, v: V) -> Result<V::Value> {
         match self.item {
-            Item::Text { value, .. } => {
+            Item::Text(Text { value, .. }) => {
                 if let Some(verbatim) = self.outlive(value) {
                     v.visit_borrowed_str(verbatim)
                 } else {
                     v.visit_string(value.joined())
                 }
             }
-            Item::List { cells, .. } => {
+            Item::List(List { items: cells, .. }) => {
                 let items = cells.iter().map(|cell| self.with_item(cell.get()));
                 v.visit_seq(serde::de::value::SeqDeserializer::new(items))
             }
-            Item::Dict { cells, .. } => {
+            Item::Dict(Dict { entries: cells, .. }) => {
                 let entries = cells.iter().map(|cell| {
                     let Entry {
                         name: key, item, ..
@@ -184,7 +184,7 @@ impl<'de, 'a> serde::Deserializer<'de> for ItemDe<'de, 'a> {
                 _ => None,
             }
         }
-        if let Item::Text { value, .. } = self.item {
+        if let Item::Text(Text { value, .. }) = self.item {
             if let Some(verbatim) = value.verbatim(0) {
                 if let Some(only) = only_char(verbatim) {
                     return v.visit_char(only);
@@ -206,7 +206,7 @@ impl<'de, 'a> serde::Deserializer<'de> for ItemDe<'de, 'a> {
         self.deserialize_any(v)
     }
     fn deserialize_bytes<V: Visitor<'de>>(self, v: V) -> Result<V::Value> {
-        if let Item::Text { value, .. } = self.item {
+        if let Item::Text(Text { value, .. }) = self.item {
             if let Some(verbatim) = self.outlive(value).filter(|it| it.is_ascii()) {
                 return v.visit_borrowed_bytes(verbatim.as_bytes());
             }
@@ -228,7 +228,7 @@ impl<'de, 'a> serde::Deserializer<'de> for ItemDe<'de, 'a> {
     }
 
     fn deserialize_option<V: Visitor<'de>>(self, v: V) -> Result<V::Value> {
-        if let Item::List { cells, .. } = self.item {
+        if let Item::List(List { items: cells, .. }) = self.item {
             return match cells {
                 [] => v.visit_none(),
                 [value] => v.visit_some(self.with_item(value.get())),
@@ -241,7 +241,7 @@ impl<'de, 'a> serde::Deserializer<'de> for ItemDe<'de, 'a> {
     }
 
     fn deserialize_unit<V: Visitor<'de>>(self, v: V) -> Result<V::Value> {
-        if let Item::List { cells, .. } = self.item {
+        if let Item::List(List { items: cells, .. }) = self.item {
             if cells.is_empty() {
                 return v.visit_unit();
             }
@@ -254,7 +254,7 @@ impl<'de, 'a> serde::Deserializer<'de> for ItemDe<'de, 'a> {
         name: &'static str,
         v: V,
     ) -> Result<V::Value> {
-        if let Item::Text { value, .. } = self.item {
+        if let Item::Text(Text { value, .. }) = self.item {
             if let Some(verbatim) = value.verbatim(0) {
                 if verbatim == name {
                     return v.visit_unit();
@@ -314,12 +314,14 @@ impl<'de, 'a> serde::Deserializer<'de> for ItemDe<'de, 'a> {
         v: V,
     ) -> Result<V::Value> {
         match self.item {
-            Item::Text { value, .. } => v.visit_enum(EnumDe {
+            Item::Text(Text { value, .. }) => v.visit_enum(EnumDe {
                 de: &self,
                 name: value,
                 payload: None,
             }),
-            Item::Dict { cells: [entry], .. } => {
+            Item::Dict(Dict {
+                entries: [entry], ..
+            }) => {
                 let Entry {
                     name: key, item, ..
                 } = entry.get();
@@ -368,7 +370,7 @@ impl<'de, 'a, 'i> serde::de::VariantAccess<'de> for VariantDe<'de, 'a, 'i> {
     fn unit_variant(self) -> Result<()> {
         if let Some(item) = self.payload {
             match item {
-                Item::Text { value, .. } => {
+                Item::Text(Text { value, .. }) => {
                     if value.is_empty() {
                         Ok(())
                     } else {
@@ -380,8 +382,12 @@ impl<'de, 'a, 'i> serde::de::VariantAccess<'de> for VariantDe<'de, 'a, 'i> {
                         ))
                     }
                 }
-                Item::List { .. } => Err(Error::invalid_type(Unexpected::Seq, &"unit variant")),
-                Item::Dict { .. } => Err(Error::invalid_type(Unexpected::Map, &"unit variant")),
+                Item::List(List { .. }) => {
+                    Err(Error::invalid_type(Unexpected::Seq, &"unit variant"))
+                }
+                Item::Dict(Dict { .. }) => {
+                    Err(Error::invalid_type(Unexpected::Map, &"unit variant"))
+                }
             }
         } else {
             Ok(())

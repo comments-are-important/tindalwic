@@ -1,13 +1,10 @@
-extern crate alloc;
-
 use super::{ValueDe, ValueSer};
-use alloc::string::{String, ToString};
 use serde::de::{DeserializeSeed, Deserializer, Error, MapAccess, SeqAccess, Visitor};
 use serde::ser::{Serialize, Serializer};
 use serde::ser::{SerializeMap as _, SerializeSeq as _};
 use std::fmt;
 use tindalwic::{
-    Entries, Entry, File, Item, Items,
+    Dict, Entries, Entry, File, Item, Items, List, Text,
     parse::{Build, Parse},
 };
 
@@ -16,9 +13,9 @@ impl<'a> Serialize for ItemSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let ItemSer(this) = self;
         match this {
-            Item::Text { value, .. } => ValueSer(*value).serialize(s),
-            Item::List { cells, .. } => ItemsSer(cells).serialize(s),
-            Item::Dict { cells, .. } => EntriesSer(cells).serialize(s),
+            Item::Text(Text { value, .. }) => ValueSer(*value).serialize(s),
+            Item::List(List { items: cells, .. }) => ItemsSer(cells).serialize(s),
+            Item::Dict(Dict { entries: cells, .. }) => EntriesSer(cells).serialize(s),
         }
     }
 }
@@ -78,7 +75,7 @@ impl<'de, 'a, 'b> Visitor<'de> for ItemDe<'a, 'b> {
     }
     fn visit_str<E: Error>(self, v: &str) -> Result<Self::Value, E> {
         let ItemDe(build) = self;
-        Ok(Item::text(ValueDe(build).visit_str(v)?))
+        Ok(ValueDe(build).visit_str(v)?.into())
     }
     fn visit_bytes<E: Error>(self, v: &[u8]) -> Result<Self::Value, E> {
         if v.is_ascii() {
@@ -94,11 +91,11 @@ impl<'de, 'a, 'b> Visitor<'de> for ItemDe<'a, 'b> {
     }
     fn visit_seq<A: SeqAccess<'de>>(self, seq: A) -> Result<Self::Value, A::Error> {
         let ItemDe(build) = self;
-        Ok(Item::list(ItemsDe(build).visit_seq(seq)?))
+        Ok(ItemsDe(build).visit_seq(seq)?.into())
     }
     fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
         let ItemDe(build) = self;
-        Ok(Item::dict(EntriesDe(build).visit_map(map)?))
+        Ok(EntriesDe(build).visit_map(map)?.into())
     }
 }
 
@@ -142,13 +139,11 @@ impl<'a> Serialize for EntriesSer<'a> {
         let EntriesSer(this) = self;
         let mut map = s.serialize_map(Some(this.len()))?;
         for cell in this.iter() {
-            let Entry {
-                name: key, item, ..
-            } = cell.get();
-            if let Some(verbatim) = key.key.verbatim(0) {
+            let Entry { name, item, .. } = cell.get();
+            if let Some(verbatim) = name.key.verbatim(0) {
                 map.serialize_entry(verbatim, &ItemSer(item))?;
             } else {
-                map.serialize_entry(&key.key.joined(), &ItemSer(item))?;
+                map.serialize_entry(&name.key.joined(), &ItemSer(item))?;
             }
         }
         map.end()
@@ -191,7 +186,7 @@ struct FileSer<'a>(File<'a>);
 impl<'a> Serialize for FileSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let FileSer(this) = self;
-        EntriesSer(this.cells).serialize(s)
+        EntriesSer(this.entries).serialize(s)
     }
 }
 struct FileDe<'a, 'b>(&'b mut dyn Build<'a>);
@@ -210,9 +205,8 @@ impl<'de, 'a, 'b> Visitor<'de> for FileDe<'a, 'b> {
         let FileDe(build) = self;
         let cells = EntriesDe(build).visit_map(map)?;
         Ok(File {
-            hashbang: None,
-            prolog: None,
-            cells,
+            entries: cells,
+            ..Default::default()
         })
     }
 }

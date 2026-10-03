@@ -1,11 +1,14 @@
 //! implementations of the serde features
 
 use serde::Deserialize;
-use serde::de::{DeserializeSeed, Error as DeError, Visitor};
+use serde::de::{DeserializeSeed, MapAccess, Visitor};
 use serde::ser::Serialize;
 use std::fmt::{self, Display};
+use std::marker::PhantomData;
 use std::result::Result as StdResult;
-use tindalwic::{Comment, Value, parse::Build};
+use strum::{EnumCount, IntoStaticStr, VariantArray, VariantNames};
+use tindalwic::parse::Build;
+use tindalwic::*;
 
 /// [conventional](https://serde.rs/conventions.html) Deserializer API module
 pub mod de;
@@ -45,6 +48,10 @@ impl serde::de::Error for Error {
 
 // ==================================================================================
 
+// the serde derive macros can't predict what seed might be used,
+// so even if the core crate had serde and could use the macros,
+// the de impl would still need to be written out.
+
 mod compact;
 mod neutered;
 mod verbose;
@@ -82,29 +89,28 @@ impl<'de, 'a, 'b> Visitor<'de> for ValueDe<'a, 'b> {
     fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
         out.write_str("a string value")
     }
-    fn visit_str<E: DeError>(self, v: &str) -> StdResult<Self::Value, E> {
+    fn visit_str<E: serde::de::Error>(self, v: &str) -> StdResult<Self::Value, E> {
         let ValueDe(build) = self;
         Ok(build.intern(v).map_err(E::custom)?.into())
     }
 }
 
-struct CommentSer<'a>(Option<Comment<'a>>);
-
-impl<'a> Serialize for CommentSer<'a> {
+struct MaybeSer<'a>(Option<Value<'a>>);
+impl<'a> Serialize for MaybeSer<'a> {
     fn serialize<S>(&self, s: S) -> StdResult<S::Ok, S::Error>
     where
         S: serde::ser::Serializer,
     {
-        let CommentSer(this) = self;
+        let MaybeSer(this) = self;
         match this {
             None => s.serialize_none(),
-            Some(comment) => s.serialize_some(&ValueSer(comment.value)),
+            Some(value) => s.serialize_some(&ValueSer(*value)),
         }
     }
 }
-struct CommentDe<'a, 'b>(&'b mut dyn Build<'a>);
-impl<'de, 'a, 'b> DeserializeSeed<'de> for CommentDe<'a, 'b> {
-    type Value = Option<Comment<'a>>;
+struct MaybeDe<'a, 'b>(&'b mut dyn Build<'a>);
+impl<'de, 'a, 'b> DeserializeSeed<'de> for MaybeDe<'a, 'b> {
+    type Value = Option<Value<'a>>;
     fn deserialize<D>(self, d: D) -> StdResult<Self::Value, D::Error>
     where
         D: serde::de::Deserializer<'de>,
@@ -112,69 +118,174 @@ impl<'de, 'a, 'b> DeserializeSeed<'de> for CommentDe<'a, 'b> {
         d.deserialize_option(self)
     }
 }
-impl<'de, 'a, 'b> Visitor<'de> for CommentDe<'a, 'b> {
-    type Value = Option<Comment<'a>>;
+impl<'de, 'a, 'b> Visitor<'de> for MaybeDe<'a, 'b> {
+    type Value = Option<Value<'a>>;
     fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-        out.write_str("a comment (or null)")
+        out.write_str("an optional value (comments)")
     }
-    fn visit_none<E: DeError>(self) -> StdResult<Self::Value, E> {
+    fn visit_none<E: serde::de::Error>(self) -> StdResult<Self::Value, E> {
         Ok(None)
     }
     fn visit_some<D>(self, d: D) -> StdResult<Self::Value, D::Error>
     where
         D: serde::de::Deserializer<'de>,
     {
-        let CommentDe(build) = self;
-        ValueDe(build)
-            .deserialize(d)
-            .map(|value| Some(Comment { value }))
+        let MaybeDe(build) = self;
+        ValueDe(build).deserialize(d).map(|value| Some(value))
     }
 }
 
-#[derive(Deserialize)]
+// ==================================================================================
+
+trait VariantHelp: VariantNames + Into<&'static str> + Copy {
+    const KIND: &'static str;
+    fn ord(self) -> usize;
+
+    const NAMES: &'static [&'static str] = <Self as VariantNames>::VARIANTS;
+    fn serialize<S, W>(&self, s: S, value: &W) -> StdResult<S::Ok, S::Error>
+    where
+        S: serde::ser::Serializer,
+        W: ?Sized + Serialize,
+    {
+        s.serialize_newtype_variant(Self::KIND, self.ord() as u32, (*self).into(), value)
+    }
+}
+macro_rules! variantHelp {
+    ($helper:ident<$type:ident>) => {
+        impl VariantHelp for $helper {
+            const KIND: &'static str = stringify!($type);
+            fn ord(self) -> usize {
+                self as usize
+            }
+        }
+    };
+}
+
+#[derive(Clone, Copy, Deserialize, IntoStaticStr, VariantNames)]
 #[serde(variant_identifier)]
 enum ItemVariants {
     Text,
     List,
     Dict,
 }
+variantHelp! { ItemVariants<Item> }
 
-#[derive(Deserialize)]
+struct Flags<H: FieldHelp> {
+    flags: Box<[bool]>,
+    phantom: PhantomData<H>,
+}
+impl<H: FieldHelp> Flags<H> {
+    fn count(&self) -> usize {
+        self.flags.iter().map(|flag| (*flag) as usize).sum()
+    }
+    fn selected(&self) -> impl std::iter::Iterator<Item = &H> {
+        H::ARRAY.iter().filter(|variant| self.flags[variant.ord()])
+    }
+    fn once<'de, A, F>(&mut self, variant: H, f: F) -> StdResult<H, A::Error>
+    where
+        A: MapAccess<'de>,
+        F: Fn(&'static str) -> A::Error,
+    {
+        if self.flags[variant.ord()] {
+            return Err(f(variant.into()));
+        }
+        self.flags[variant.ord()] = true;
+        Ok(variant)
+    }
+}
+trait FieldHelp: EnumCount + VariantArray + VariantNames + Into<&'static str> + Copy {
+    const KIND: &'static str;
+    fn ord(self) -> usize;
+
+    const NAMES: &'static [&'static str] = <Self as VariantNames>::VARIANTS;
+    const ARRAY: &'static [Self] = <Self as VariantArray>::VARIANTS;
+    fn each<'a>(value: bool) -> Flags<Self> {
+        Flags {
+            flags: vec![value; Self::COUNT].into_boxed_slice(),
+            phantom: PhantomData,
+        }
+    }
+    fn assign<F: Fn(Self) -> bool>(f: F) -> Flags<Self> {
+        let mut flags = Self::each(false);
+        for variant in Self::ARRAY {
+            flags.flags[variant.ord()] = (f)(*variant)
+        }
+        flags
+    }
+}
+macro_rules! fieldHelp {
+    ($helper:ident<$type:ident>) => {
+        impl FieldHelp for $helper {
+            const KIND: &'static str = stringify!($type);
+            fn ord(self) -> usize {
+                self as usize
+            }
+        }
+    };
+}
+
+#[derive(Clone, Copy, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
 #[serde(field_identifier, rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
+enum CommentFields {
+    Gap,
+    Value,
+}
+fieldHelp!(CommentFields<Comment>);
+
+#[derive(Clone, Copy, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
+#[serde(field_identifier, rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 enum TextFields {
     Value,
     Epilog,
 }
+fieldHelp!(TextFields<Text>);
 
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
 #[serde(field_identifier, rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 enum ListFields {
     Prolog,
-    Array,
+    Items,
     Epilog,
 }
+fieldHelp!(ListFields<List>);
 
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
 #[serde(field_identifier, rename_all = "lowercase")]
-enum EntryFields {
-    Gap,
-    Before,
+#[strum(serialize_all = "lowercase")]
+enum NameFields {
+    Comment,
     Key,
+}
+fieldHelp!(NameFields<Name>);
+
+#[derive(Clone, Copy, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
+#[serde(field_identifier, rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
+enum EntryFields {
+    Name,
     Item,
 }
+fieldHelp!(EntryFields<Entry>);
 
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
 #[serde(field_identifier, rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 enum DictFields {
     Prolog,
-    Array,
+    Entries,
     Epilog,
 }
+fieldHelp!(DictFields<Dict>);
 
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
 #[serde(field_identifier, rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 enum FileFields {
     Hashbang,
     Prolog,
-    Array,
+    Entries,
 }
+fieldHelp!(FileFields<File>);

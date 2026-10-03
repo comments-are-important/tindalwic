@@ -6,12 +6,12 @@ use tindalwic::Name;
 #[cfg(feature = "alloc")]
 use tindalwic::alloc::from_literal;
 use tindalwic::parse::Parse as _;
-use tindalwic::{Comment, Entry, File, Item, Value, arena, json, path};
+use tindalwic::{Dict, Entry, File, Item, List, Text, Value, arena, json, path};
 
 #[test]
 fn from_dict() {
-    assert!(File::try_from_dict_without_epilog(&Item::text("nope".into())).is_none());
-    assert!(File::try_from_dict_without_epilog(&Item::list(&[])).is_none());
+    assert!(File::try_from_dict_without_epilog(&Item::Text("nope".into())).is_none());
+    assert!(File::try_from_dict_without_epilog(&Item::List(List::default())).is_none());
 }
 
 #[test]
@@ -19,16 +19,16 @@ fn from_dict() {
 fn three_blank_comments() {
     let entry = Entry {
         name: Name {
-            comment: Comment::some(""),
+            comment: "".into(),
             ..Default::default()
         },
-        item: Item::dict(&[]),
+        item: Item::Dict(Dict::default()),
     };
     let entries = [core::cell::Cell::new(entry)];
     let file = File {
-        hashbang: Comment::some(""),
-        prolog: Comment::some(""),
-        cells: &entries,
+        hashbang: Some("".into()),
+        prolog: "".into(),
+        entries: &entries,
     };
     let encoded = file.to_string();
     let expect = "
@@ -66,12 +66,7 @@ fn two_lines() {
             one
             two
     ";
-    assert_eq!(
-        File::try_from_dict_without_epilog(&Item::dict(entries))
-            .unwrap()
-            .to_string(),
-        from_literal(expected)
-    );
+    assert_eq!(File::from(entries).to_string(), from_literal(expected));
 }
 
 #[test]
@@ -100,16 +95,17 @@ fn multi_line_key() {
 fn walk_error() {
     let bump = bumpalo::Bump::new();
     let mut arena = tindalwic::bumpalo::Arena::new(&bump);
-    let file = arena
-        .panic_first_error("[data]\n\tzero\n\t{}\n\t\tk=v")
-        .embed_without_hashbang();
-    path!({"data"}List).walk(file).unwrap();
-    path!({"data"}[0]List).walk(file).unwrap_err();
-    path!({"data"}[0]Text).walk(file).unwrap();
-    path!({"data"}[1]{"x"}Text).walk(file).unwrap_err();
-    path!({"data"}[1]{"k"}Text).walk(file).unwrap();
+    let file = arena.panic_first_error("[data]\n\tzero\n\t{}\n\t\tk=v");
+    path!({"data"}List).walk_file(&file).unwrap();
+    path!({"data"}[0]List).walk_file(&file).unwrap_err();
+    path!({"data"}[0]Text).walk_file(&file).unwrap();
+    path!({"data"}[1]{"x"}Text).walk_file(&file).unwrap_err();
+    path!({"data"}[1]{"k"}Text).walk_file(&file).unwrap();
     assert_eq!(
-        path!({"data"}[7]Text).walk(file).unwrap_err().to_string(),
+        path!({"data"}[7]Text)
+            .walk_file(&file)
+            .unwrap_err()
+            .to_string(),
         "walk ({data}[7]): index out of bounds"
     );
 }
@@ -119,19 +115,17 @@ fn nested_lists() {
         let items = [[[["value"]]]].unwrap();
     }
     let mut array = Entry::array::<1>();
-    array[0].get_mut().item = Item::list(items);
+    array[0].get_mut().item = Item::List(items.into());
     let file = File {
-        cells: &array[..],
+        entries: &array[..],
         ..Default::default()
     };
     assert_eq!(
         file.to_string(),
         "[]\n\t[]\n\t\t[]\n\t\t\t[]\n\t\t\t\tvalue"
     );
-    let cell = path!({""}[0][0][0][0]Text)
-        .walk(file.embed_without_hashbang())
-        .unwrap();
-    let Item::Text { value, .. } = cell.get() else {
+    let cell = path!({""}[0][0][0][0]Text).walk_file(&file).unwrap();
+    let Item::Text(Text { value, .. }) = cell.get() else {
         unreachable!("this destructuring always succeeds because path walk did");
     };
     assert_eq!(Vec::from_iter(value.lines()), vec!["value"]);
@@ -142,7 +136,6 @@ fn nested_dicts() {
     json! {
         let entries = {"1":"one","2":["two"],"a":{"b":{"c":{"d":{"k":"v"}}}}}.unwrap();
     }
-    let dict = Item::dict(entries);
     let mut keys = Vec::new();
     for entry in entries {
         let entry = entry.get();
@@ -150,13 +143,13 @@ fn nested_dicts() {
     }
     assert_eq!(keys, vec!["1", "2", "a"]);
     assert_eq!(
-        File::try_from_dict_without_epilog(&dict)
-            .unwrap()
-            .to_string(),
+        File::from(entries).to_string(),
         "1=one\n[2]\n\ttwo\n{a}\n\t{b}\n\t\t{c}\n\t\t\t{d}\n\t\t\t\tk=v"
     );
-    let cell = path!({"a"}{"b"}{"c"}{"d"}{"k"}Text).walk(dict).unwrap();
-    let Item::Text { value, .. } = cell.get().item else {
+    let cell = path!({"a"}{"b"}{"c"}{"d"}{"k"}Text)
+        .walk_item(entries.into())
+        .unwrap();
+    let Item::Text(Text { value, .. }) = cell.get().item else {
         unreachable!("this destructuring always succeeds because path walk did");
     };
     assert_eq!(Vec::from_iter(value.lines()), vec!["v"]);
@@ -167,17 +160,14 @@ fn change_in_list() {
     json! {
         let entries = {"a":{"b":["v"]}}.unwrap();
     }
-    let dict = Item::dict(entries);
-    let cell = path!({"a"}{"b"}[0]Text).walk(dict).unwrap();
-    let Item::Text { value, .. } = cell.get() else {
+    let cell = path!({"a"}{"b"}[0]Text).walk_item(entries.into()).unwrap();
+    let Item::Text(Text { value, .. }) = cell.get() else {
         unreachable!("this destructuring always succeeds because path walk did");
     };
-    let epilog = Comment::some("c");
-    cell.set(Item::Text { value, epilog });
+    let epilog = Some("c".into());
+    cell.set(Item::Text(Text { value, epilog }));
     assert_eq!(
-        File::try_from_dict_without_epilog(&dict)
-            .unwrap()
-            .to_string(),
+        File::from(entries).to_string(),
         "{a}\n\t[b]\n\t\tv\n\t\t//c"
     );
 }
@@ -187,17 +177,11 @@ fn change_in_dict() {
     json! {
         let entries = {"a":[{"b":"z"}]}.unwrap();
     }
-    let dict = Item::dict(entries);
-    let cell = path!({"a"}[0]{"b"}Text).walk(dict).unwrap();
+    let cell = path!({"a"}[0]{"b"}Text).walk_item(entries.into()).unwrap();
     let mut entry = cell.get();
-    entry.item = Item::text("c".into());
+    entry.item = Item::Text("c".into());
     cell.set(entry);
-    assert_eq!(
-        File::try_from_dict_without_epilog(&dict)
-            .unwrap()
-            .to_string(),
-        "[a]\n\t{}\n\t\tb=c"
-    );
+    assert_eq!(File::from(entries).to_string(), "[a]\n\t{}\n\t\tb=c");
 }
 
 #[test]
@@ -205,22 +189,16 @@ fn inject_comments() {
     json! {
         let entries = {"k":"v"}.unwrap();
     }
-    let dict = Item::dict(entries);
-    let cell = path!({"k"}Text).walk(dict).unwrap();
+    let cell = path!({"k"}Text).walk_item(entries.into()).unwrap();
     let mut entry = cell.get();
-    let Item::Text { value, .. } = entry.item else {
+    let Item::Text(Text { value, .. }) = entry.item else {
         unreachable!("this destructuring always succeeds because path walk did");
     };
-    let epilog = Comment::some("c");
-    entry.name.comment = Comment::some("b");
-    entry.item = Item::Text { value, epilog };
+    let epilog = Some("c".into());
+    entry.name.comment = "b".into();
+    entry.item = Item::Text(Text { value, epilog });
     cell.set(entry);
-    assert_eq!(
-        File::try_from_dict_without_epilog(&dict)
-            .unwrap()
-            .to_string(),
-        "///b\nk=v\n//c"
-    );
+    assert_eq!(File::from(entries).to_string(), "///b\nk=v\n//c");
 }
 
 #[test]
@@ -229,21 +207,18 @@ fn change_structure() {
     json! {
         let entries = {key:["v"]}.unwrap();
     }
-    let dict = Item::dict(entries);
-    let cell = path!({key}[0]Text).walk(dict).unwrap();
-    let Item::Text { value, .. } = cell.get() else {
+    let cell = path!({key}[0]Text).walk_item(entries.into()).unwrap();
+    let Item::Text(Text { value, .. }) = cell.get() else {
         unreachable!("this destructuring always succeeds because path walk did");
     };
     let b = String::from("b");
-    let epilog = Comment::some(&b);
+    let epilog = Some((&b[..]).into());
     json! {
-        let patch = {"p":(Item::Text { value, epilog })}.unwrap();
+        let patch = {"p":(Item::Text(Text{ value, epilog }))}.unwrap();
     }
-    cell.set(Item::dict(patch));
+    cell.set(Item::Dict(patch.into()));
     assert_eq!(
-        File::try_from_dict_without_epilog(&dict)
-            .unwrap()
-            .to_string(),
+        File::from(entries).to_string(),
         "[k]\n\t{}\n\t\tp=v\n\t\t//b"
     )
 }
@@ -299,8 +274,8 @@ fn empty() {
     let file = arena.panic_first_error("");
     assert!(!arena.completed().is_some());
     assert!(file.hashbang.is_none());
-    assert!(file.prolog.is_none());
-    assert!(file.cells.is_empty());
+    assert!(file.prolog.value.is_none());
+    assert!(file.entries.is_empty());
 }
 
 #[test]
@@ -311,13 +286,13 @@ fn key_eq_value() {
     let file = arena.panic_first_error("k=v");
     assert!(arena.completed().is_some());
     assert!(file.hashbang.is_none());
-    assert!(file.prolog.is_none());
-    assert_eq!(file.cells.len(), 1);
+    assert!(file.prolog.value.is_none());
+    assert_eq!(file.entries.len(), 1);
     let key: Value<'_> = "k".into();
-    let Some(position) = key.find_linearly_in(file.cells) else {
+    let Some(position) = key.find_linearly_in(file.entries) else {
         panic!("no 'k' key found");
     };
-    let Item::Text { value, .. } = file.cells[position].get().item else {
+    let Item::Text(Text { value, .. }) = file.entries[position].get().item else {
         panic!("not text?");
     };
     assert_lines_eq!(value, "v");
@@ -329,24 +304,24 @@ fn sub_list() {
     }
     let file = arena.panic_first_error("[k]\n\t1\n\t2\n\t3");
     assert!(arena.completed().is_some());
-    assert_eq!(file.cells.len(), 1);
+    assert_eq!(file.entries.len(), 1);
     let key: Value<'_> = "k".into();
-    let Some(position) = key.find_linearly_in(file.cells) else {
+    let Some(position) = key.find_linearly_in(file.entries) else {
         panic!("no 'k' key found");
     };
-    let Item::List { cells, .. } = file.cells[position].get().item else {
+    let Item::List(List { items: cells, .. }) = file.entries[position].get().item else {
         panic!("not list?");
     };
     assert_eq!(cells.len(), 3);
-    let Item::Text { value: one, .. } = cells[0].get() else {
+    let Item::Text(Text { value: one, .. }) = cells[0].get() else {
         panic!("not text?");
     };
     assert_lines_eq!(one, "1");
-    let Item::Text { value: two, .. } = cells[1].get() else {
+    let Item::Text(Text { value: two, .. }) = cells[1].get() else {
         panic!("not text?");
     };
     assert_lines_eq!(two, "2");
-    let Item::Text { value: three, .. } = cells[2].get() else {
+    let Item::Text(Text { value: three, .. }) = cells[2].get() else {
         panic!("not text?");
     };
     assert_lines_eq!(three, "3");
@@ -360,12 +335,12 @@ fn sub_dict() {
     assert!(arena.completed().is_some());
     use tindalwic::walk::*;
 
-    let Item::Text { value, .. } = Path::<true>::new(&[
+    let Item::Text(Text { value, .. }) = Path::<true>::new(&[
         Branch::Entry("z".into()),
         Branch::Entry("k".into()),
         Branch::Text,
     ])
-    .walk(file.embed_without_hashbang())
+    .walk_file(&file)
     .unwrap()
     .get()
     .item
@@ -465,10 +440,9 @@ mod parse_err {
         let mut arena = HeapArena::new(&bump);
         let content = "[data]\n\t\n";
         let file = arena.collect_errors(&content, usize::MAX).unwrap();
-        let cell = path!({"data"}List)
-            .walk(file.embed_without_hashbang())
-            .unwrap();
-        assert_eq!(cell.get().item, Item::list(&[Cell::new(Item::default())]));
+        let cell = path!({"data"}List).walk_file(&file).unwrap();
+        let list = &[Cell::new(Item::default())];
+        assert_eq!(cell.get().item, Item::List((&list[..]).into()));
     }
     #[test]
     fn list_errors() {

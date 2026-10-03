@@ -3,7 +3,9 @@
 use anyhow::{Error, Result};
 use bumpalo::Bump;
 use std::io::{self, Read};
-use tindalwic::{Comment, Entries, Entry, File, Item, Items, Value, bumpalo::Arena};
+use tindalwic::{
+    Comment, Dict, Entries, Entry, File, Item, Items, List, Text, Value, bumpalo::Arena,
+};
 
 /// read tindalwic from stdin, print expected lezer tree to stdout
 /// the core crate is authoritative so the lezer needs to conform.
@@ -21,9 +23,11 @@ pub fn run() -> Result<()> {
 
 fn file(file: &File) -> String {
     let mut kids = Vec::new();
-    kids.extend(comment("Shebang", &file.hashbang));
-    kids.extend(comment("Prolog", &file.prolog));
-    for kid in file.cells {
+    if let Some(shebang) = file.hashbang {
+        kids.push(text("Shebang", &shebang));
+    }
+    kids.extend(comment("Prolog", &file.prolog.value));
+    for kid in file.entries {
         kids.push(entry(&kid.get()))
     }
     if kids.is_empty() {
@@ -35,7 +39,7 @@ fn file(file: &File) -> String {
 
 fn entry(entry: &Entry) -> String {
     let mut parts = Vec::new();
-    parts.extend(comment("Comment", &entry.name.comment));
+    parts.extend(comment("Comment", &entry.name.comment.value));
     parts.push(text("Key", &entry.name.key));
     parts.push(item(&entry.item));
     parts.extend(epilog(&entry.item));
@@ -44,15 +48,23 @@ fn entry(entry: &Entry) -> String {
 
 fn item(item: &Item) -> String {
     match item {
-        Item::Text { value, .. } => text("Text", &value),
-        Item::List { prolog, cells, .. } => list(prolog, cells),
-        Item::Dict { prolog, cells, .. } => dict(prolog, cells),
+        Item::Text(Text { value, .. }) => text("Text", &value),
+        Item::List(List {
+            prolog,
+            items: cells,
+            ..
+        }) => list(prolog, cells),
+        Item::Dict(Dict {
+            prolog,
+            entries: cells,
+            ..
+        }) => dict(prolog, cells),
     }
 }
 
-fn dict(prolog: &Option<Comment>, entries: Entries) -> String {
+fn dict(prolog: &Comment, entries: Entries) -> String {
     let mut kids = Vec::new();
-    kids.extend(comment("Prolog", prolog));
+    kids.extend(comment("Prolog", &prolog.value));
     for kid in entries {
         kids.push(entry(&kid.get()))
     }
@@ -63,16 +75,24 @@ fn dict(prolog: &Option<Comment>, entries: Entries) -> String {
     }
 }
 
-fn list(prolog: &Option<Comment>, items: Items) -> String {
+fn list(prolog: &Comment, items: Items) -> String {
     let mut kids = Vec::new();
-    kids.extend(comment("Prolog", prolog));
+    kids.extend(comment("Prolog", &prolog.value));
     for kid in items {
         let item = kid.get();
         let mut parts = Vec::new();
         parts.push(match item {
-            Item::Text { value, .. } => text("Text", &value),
-            Item::List { prolog, cells, .. } => list(&prolog, cells),
-            Item::Dict { prolog, cells, .. } => dict(&prolog, cells),
+            Item::Text(Text { value, .. }) => text("Text", &value),
+            Item::List(List {
+                prolog,
+                items: cells,
+                ..
+            }) => list(&prolog, cells),
+            Item::Dict(Dict {
+                prolog,
+                entries: cells,
+                ..
+            }) => dict(&prolog, cells),
         });
         parts.extend(epilog(&item));
         kids.push(format!("Item({})", parts.join(",")));
@@ -88,22 +108,18 @@ fn epilog(item: &Item) -> Option<String> {
     comment(
         "Epilog",
         match item {
-            Item::Text { epilog, .. } => epilog,
-            Item::List { epilog, .. } => epilog,
-            Item::Dict { epilog, .. } => epilog,
+            Item::Text(Text { epilog, .. }) => epilog,
+            Item::List(List { epilog, .. }) => &epilog.value,
+            Item::Dict(Dict { epilog, .. }) => &epilog.value,
         },
     )
 }
 
-fn comment(tag: &str, maybe: &Option<Comment>) -> Option<String> {
-    let Some(comment) = maybe else { return None };
-    if tag != "Shebang" {
-        return Some(format!("{tag}({})", text("GFM", &comment.value)));
-    }
-    Some(format!(
-        "Shebang{}",
-        lines(&comment.value, Some("Interpreter"))
-    ))
+fn comment(tag: &str, maybe: &Option<Value>) -> Option<String> {
+    let Some(comment) = maybe else {
+        return None;
+    };
+    return Some(format!("{tag}({})", text("GFM", &comment)));
 }
 
 fn text(tag: &str, value: &Value) -> String {

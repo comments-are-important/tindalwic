@@ -4,11 +4,12 @@ use bumpalo::Bump;
 use rand::prelude::IndexedRandom;
 use rand::rngs::SmallRng;
 use rand::{Rng, RngExt, SeedableRng as _};
+use rand_distr::{Distribution as _, Zipf};
 use std::fmt::{self, Write};
 use std::io::Write as _;
 use tindalwic::bumpalo::Arena;
 use tindalwic::parse::Parse as _;
-use tindalwic::{Comment, Entry, File, Item, Name, VERSION};
+use tindalwic::{Comment, Dict, Entry, File, Item, List, Name, VERSION};
 
 #[derive(clap::Args, Debug)]
 pub struct Args {
@@ -89,7 +90,7 @@ impl Args {
         let sample = Args::sample(self.unicode);
         let mut random = Random::new(arena, &mut rng, sample)?;
         let mut file = random.file(self.items)?;
-        file.hashbang = Comment::some(arena.intern(&hashbang));
+        file.hashbang = Some(arena.intern(&hashbang).into());
         Ok(file)
     }
 }
@@ -165,6 +166,7 @@ impl fmt::Display for Silhouette {
 pub struct Random<'a, 'r, R: Rng + ?Sized> {
     arena: &'r mut Arena<'a>,
     rng: &'r mut R,
+    gaps: Zipf<f32>,
     sample: Vec<char>,
 }
 impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
@@ -177,7 +179,13 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
         if sample.contains(&'\n') {
             anyhow::bail!("can't have LF char in sample");
         }
-        Ok(Random { arena, rng, sample })
+        let gaps = Zipf::new(4f32, 2f32).unwrap();
+        Ok(Random {
+            arena,
+            rng,
+            gaps,
+            sample,
+        })
     }
     fn not_linefeed(&mut self) -> char {
         if !self.sample.is_empty() {
@@ -210,14 +218,14 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
         }
         self.arena.intern(&value)
     }
-    fn comment(&mut self) -> Option<Comment<'a>> {
-        if self.rng.random_bool(0.5) {
-            Some(Comment {
-                value: self.value().into(),
-            })
+    fn comment(&mut self) -> Comment<'a> {
+        let gap = self.gaps.sample(self.rng) as usize;
+        let value = if self.rng.random_bool(0.5) {
+            Some(self.value().into())
         } else {
             None
-        }
+        };
+        Comment { gap, value }
     }
     fn item(&mut self, shape: &Option<Silhouette>) -> anyhow::Result<Item<'a>> {
         Ok(if let Some(parent) = shape {
@@ -229,7 +237,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
                 self.list(count)?
             }
         } else {
-            Item::text(self.value().into())
+            Item::Text(self.value().into())
         })
     }
     fn items(&mut self, kids: &[Option<Silhouette>]) -> anyhow::Result<usize> {
@@ -243,20 +251,19 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
         Ok(kids.len())
     }
     fn list(&mut self, count: usize) -> anyhow::Result<Item<'a>> {
-        Ok(Item::List {
+        Ok(Item::List(List {
             prolog: self.comment(),
-            cells: self
+            items: self
                 .arena
                 .builder()
                 .finish_items(count)
                 .map_err(anyhow::Error::msg)?,
             epilog: self.comment(),
-        })
+        }))
     }
     fn entries(&mut self, kids: &[Option<Silhouette>]) -> anyhow::Result<usize> {
         for kid in kids {
             let key = Name {
-                gap: self.rng.random_bool(0.2),
                 comment: self.comment(),
                 key: self.value().into(),
             };
@@ -269,23 +276,28 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
         Ok(kids.len())
     }
     fn dict(&mut self, count: usize) -> anyhow::Result<Item<'a>> {
-        Ok(Item::Dict {
+        Ok(Item::Dict(Dict {
             prolog: self.comment(),
-            cells: self
+            entries: self
                 .arena
                 .builder()
                 .finish_entries(count)
                 .map_err(anyhow::Error::msg)?,
             epilog: self.comment(),
-        })
+        }))
     }
     pub fn file(&mut self, grow: usize) -> anyhow::Result<File<'a>> {
         let shape = Silhouette::random(grow, self.rng);
         let count = self.entries(&shape.children)?;
+        let hashbang = if self.rng.random_bool(0.5) {
+            None
+        } else {
+            Some(self.value().into())
+        };
         Ok(File {
-            hashbang: self.comment(),
+            hashbang,
             prolog: self.comment(),
-            cells: self
+            entries: self
                 .arena
                 .builder()
                 .finish_entries(count)

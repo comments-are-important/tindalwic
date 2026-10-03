@@ -3,7 +3,7 @@ pub mod parse;
 /// All primitive values in Tindalwic are string slice references, not owned.
 ///
 ///  + [Comment::value](super::Comment::value)
-///  + [Text::value](super::Item::Text::value)
+///  + [Text::value](super::Text::value)
 ///  + [Name::key](super::Name::key)
 ///
 /// They often contain embedded indentation because the parser is zero-copy from

@@ -1,150 +1,180 @@
-extern crate alloc;
-
-use super::{CommentDe, CommentSer, ValueDe, ValueSer};
-use super::{DictFields, EntryFields, FileFields, ItemVariants, ListFields, TextFields};
-use alloc::string::String;
-use serde::de::VariantAccess as _;
-use serde::de::{
-    DeserializeSeed, Deserializer, EnumAccess, Error as DeError, MapAccess, SeqAccess, Visitor,
-};
+use super::*;
+use serde::de::{DeserializeSeed, Deserializer, EnumAccess, MapAccess, SeqAccess, Visitor};
+use serde::de::{Error as _, VariantAccess as _};
 use serde::ser::{Serialize, Serializer};
 use serde::ser::{SerializeSeq as _, SerializeStruct as _};
 use std::fmt;
-use tindalwic::Name;
-use tindalwic::{
-    Comment, Entries, Entry, File, Item, Items, Value,
-    parse::{Build, Parse},
-};
+use tindalwic::parse::{Build, Parse};
 
 struct ItemSer<'a>(Item<'a>);
 impl<'a> Serialize for ItemSer<'a> {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+    fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let ItemSer(this) = self;
         match this {
-            Item::Text { value, epilog } => {
-                s.serialize_newtype_variant("Item", 0, "Text", &TextSer((*value, *epilog)))
-            }
-            Item::List {
-                prolog,
-                cells,
-                epilog,
-            } => {
-                s.serialize_newtype_variant("Item", 1, "List", &ListSer((*prolog, cells, *epilog)))
-            }
-            Item::Dict {
-                prolog,
-                cells,
-                epilog,
-            } => {
-                s.serialize_newtype_variant("Item", 2, "Dict", &DictSer((*prolog, cells, *epilog)))
-            }
+            Item::Text(text) => ItemVariants::Text.serialize(s, &TextSer(*text)),
+            Item::List(list) => ItemVariants::List.serialize(s, &ListSer(*list)),
+            Item::Dict(dict) => ItemVariants::Dict.serialize(s, &DictSer(*dict)),
         }
     }
 }
 struct ItemDe<'a, 'b>(&'b mut dyn Build<'a>);
 impl<'de, 'a, 'b> DeserializeSeed<'de> for ItemDe<'a, 'b> {
     type Value = Item<'a>;
-    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
-        d.deserialize_enum("Item", &["Text", "List", "Dict"], self)
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
+        d.deserialize_enum(ItemVariants::KIND, ItemVariants::NAMES, self)
     }
 }
 impl<'de, 'a, 'b> Visitor<'de> for ItemDe<'a, 'b> {
     type Value = Item<'a>;
     fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-        out.write_str("a verbose Item (Text, List, or Dict)")
+        let kind = ItemVariants::KIND;
+        let names = ItemVariants::NAMES.join(" | ");
+        write!(out, "{STYLE} {kind}: {names}")
     }
-    fn visit_enum<A: EnumAccess<'de>>(self, data: A) -> Result<Self::Value, A::Error> {
+    fn visit_enum<A: EnumAccess<'de>>(self, data: A) -> StdResult<Self::Value, A::Error> {
         let ItemDe(build) = self;
         let (this, access) = data.variant::<ItemVariants>()?;
         Ok(match this {
-            ItemVariants::Text => {
-                let (value, epilog) = access.newtype_variant_seed(TextDe(build))?;
-                Item::Text { value, epilog }
-            }
-            ItemVariants::List => {
-                let (prolog, cells, epilog) = access.newtype_variant_seed(ListDe(build))?;
-                Item::List {
-                    prolog,
-                    cells,
-                    epilog,
-                }
-            }
-            ItemVariants::Dict => {
-                let (prolog, cells, epilog) = access.newtype_variant_seed(DictDe(build))?;
-                Item::Dict {
-                    prolog,
-                    cells,
-                    epilog,
-                }
-            }
+            ItemVariants::Text => Item::Text(access.newtype_variant_seed(TextDe(build))?),
+            ItemVariants::List => Item::List(access.newtype_variant_seed(ListDe(build))?),
+            ItemVariants::Dict => Item::Dict(access.newtype_variant_seed(DictDe(build))?),
         })
     }
 }
 
-struct TextSer<'a>((Value<'a>, Option<Comment<'a>>));
+struct CommentSer<'a>(Comment<'a>);
+impl<'a> Serialize for CommentSer<'a> {
+    fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
+        let CommentSer(this) = self;
+        let should = CommentFields::each(true);
+        let mut fields = s.serialize_struct(CommentFields::KIND, should.count())?;
+        for field in should.selected() {
+            match field {
+                CommentFields::Gap => fields.serialize_field(field.into(), &this.gap)?,
+                CommentFields::Value => {
+                    fields.serialize_field(field.into(), &MaybeSer(this.value))?
+                }
+            }
+        }
+        fields.end()
+    }
+}
+struct CommentDe<'a, 'b>(&'b mut dyn Build<'a>);
+impl<'de, 'a, 'b> DeserializeSeed<'de> for CommentDe<'a, 'b> {
+    type Value = Comment<'a>;
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
+        d.deserialize_struct(CommentFields::KIND, CommentFields::NAMES, self)
+    }
+}
+impl<'de, 'a, 'b> Visitor<'de> for CommentDe<'a, 'b> {
+    type Value = Comment<'a>;
+    fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
+        let kind = CommentFields::KIND;
+        let names = CommentFields::NAMES.join(", ");
+        write!(out, "{STYLE} {kind}: {names}")
+    }
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> StdResult<Self::Value, A::Error> {
+        let CommentDe(build) = self;
+        let mut result = Comment::default();
+        let mut seen = CommentFields::each(false);
+        while let Some(field) = map.next_key()? {
+            match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
+                CommentFields::Gap => result.gap = map.next_value()?,
+                CommentFields::Value => result.value = map.next_value_seed(MaybeDe(build))?,
+            }
+        }
+        Ok(result)
+    }
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> StdResult<Self::Value, A::Error> {
+        let CommentDe(build) = self;
+        let mut result = Comment::default();
+        for field in CommentFields::each(true).selected() {
+            match field {
+                CommentFields::Gap => {
+                    result.gap = seq
+                        .next_element::<usize>()?
+                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &CommentDe(build)))?;
+                }
+                CommentFields::Value => {
+                    result.value = seq
+                        .next_element_seed(MaybeDe(build))?
+                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &CommentDe(build)))?
+                        .into();
+                }
+            }
+        }
+        Ok(result)
+    }
+}
+
+struct TextSer<'a>(Text<'a>);
 impl<'a> Serialize for TextSer<'a> {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+    fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let TextSer(this) = self;
-        let (this_value, this_epilog) = this;
-        let mut fields = s.serialize_struct("Text", 2)?;
-        fields.serialize_field("value", &ValueSer(*this_value))?;
-        fields.serialize_field("epilog", &CommentSer(*this_epilog))?;
+        let should = TextFields::each(true);
+        let mut fields = s.serialize_struct(TextFields::KIND, should.count())?;
+        for field in should.selected() {
+            match field {
+                TextFields::Value => fields.serialize_field(field.into(), &ValueSer(this.value))?,
+                TextFields::Epilog => {
+                    fields.serialize_field(field.into(), &MaybeSer(this.epilog))?
+                }
+            }
+        }
         fields.end()
     }
 }
 struct TextDe<'a, 'b>(&'b mut dyn Build<'a>);
-impl<'a, 'b> TextDe<'a, 'b> {
-    const EXPECTING: &'static str = "a verbose Text: string value + epilog comment";
-}
 impl<'de, 'a, 'b> DeserializeSeed<'de> for TextDe<'a, 'b> {
-    type Value = (Value<'a>, Option<Comment<'a>>);
-    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
-        d.deserialize_struct("Text", &["value", "epilog"], self)
+    type Value = Text<'a>;
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
+        d.deserialize_struct(TextFields::KIND, TextFields::NAMES, self)
     }
 }
 impl<'de, 'a, 'b> Visitor<'de> for TextDe<'a, 'b> {
-    type Value = (Value<'a>, Option<Comment<'a>>);
+    type Value = Text<'a>;
     fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-        out.write_str(TextDe::EXPECTING)
+        let kind = TextFields::KIND;
+        let names = TextFields::NAMES.join(", ");
+        write!(out, "{STYLE} {kind}: {names}")
     }
-    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> StdResult<Self::Value, A::Error> {
         let TextDe(build) = self;
-        let err = || A::Error::invalid_length(2, &TextDe::EXPECTING);
-        Ok((
-            seq.next_element_seed(ValueDe(build))?.ok_or_else(err)?,
-            seq.next_element_seed(CommentDe(build))?.ok_or_else(err)?,
-        ))
-    }
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-        let TextDe(build) = self;
-        let mut value = None;
-        let mut epilog = None;
+        let mut result = Text::default();
+        let mut seen = TextFields::each(false);
         while let Some(field) = map.next_key()? {
+            match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
+                TextFields::Value => result.value = map.next_value_seed(ValueDe(build))?,
+                TextFields::Epilog => result.epilog = map.next_value_seed(MaybeDe(build))?,
+            }
+        }
+        Ok(result)
+    }
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> StdResult<Self::Value, A::Error> {
+        let TextDe(build) = self;
+        let mut result = Text::default();
+        for field in TextFields::each(true).selected() {
             match field {
                 TextFields::Value => {
-                    if value.is_some() {
-                        return Err(A::Error::duplicate_field("value"));
-                    }
-                    value = Some(map.next_value_seed(ValueDe(build))?);
+                    result.value = seq
+                        .next_element_seed(ValueDe(build))?
+                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &TextDe(build)))?;
                 }
                 TextFields::Epilog => {
-                    if epilog.is_some() {
-                        return Err(A::Error::duplicate_field("epilog"));
-                    }
-                    epilog = Some(map.next_value_seed(CommentDe(build))?);
+                    result.epilog = seq
+                        .next_element_seed(MaybeDe(build))?
+                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &TextDe(build)))?
+                        .into();
                 }
             }
         }
-        Ok((
-            value.ok_or_else(|| A::Error::missing_field("value"))?,
-            epilog.ok_or_else(|| A::Error::missing_field("epilog"))?,
-        ))
+        Ok(result)
     }
 }
 
 struct ItemsSer<'a>(Items<'a>);
 impl<'a> Serialize for ItemsSer<'a> {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+    fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let ItemsSer(this) = self;
         let mut seq = s.serialize_seq(Some(this.len()))?;
         for cell in this.iter() {
@@ -156,16 +186,17 @@ impl<'a> Serialize for ItemsSer<'a> {
 struct ItemsDe<'a, 'b>(&'b mut dyn Build<'a>);
 impl<'de, 'a, 'b> DeserializeSeed<'de> for ItemsDe<'a, 'b> {
     type Value = Items<'a>;
-    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
         d.deserialize_seq(self)
     }
 }
 impl<'de, 'a, 'b> Visitor<'de> for ItemsDe<'a, 'b> {
     type Value = Items<'a>;
     fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-        out.write_str("sequence of verbose Items")
+        let kind = ItemVariants::KIND;
+        write!(out, "sequence of {STYLE} {kind}")
     }
-    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> StdResult<Self::Value, A::Error> {
         let ItemsDe(build) = self;
         let mut count = 0usize;
         while let Some(item) = seq.next_element_seed(ItemDe(build))? {
@@ -176,178 +207,214 @@ impl<'de, 'a, 'b> Visitor<'de> for ItemsDe<'a, 'b> {
     }
 }
 
-struct ListSer<'a>((Option<Comment<'a>>, Items<'a>, Option<Comment<'a>>));
+struct ListSer<'a>(List<'a>);
 impl<'a> Serialize for ListSer<'a> {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+    fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let ListSer(this) = self;
-        let (this_prolog, this_cells, this_epilog) = this;
-        let mut fields = s.serialize_struct("List", 3)?;
-        fields.serialize_field("prolog", &CommentSer(*this_prolog))?;
-        fields.serialize_field("array", &ItemsSer(this_cells))?;
-        fields.serialize_field("epilog", &CommentSer(*this_epilog))?;
+        let should = ListFields::each(true);
+        let mut fields = s.serialize_struct(ListFields::KIND, should.count())?;
+        for field in should.selected() {
+            match field {
+                ListFields::Prolog => {
+                    fields.serialize_field(field.into(), &CommentSer(this.prolog))?
+                }
+                ListFields::Items => fields.serialize_field(field.into(), &ItemsSer(this.items))?,
+                ListFields::Epilog => {
+                    fields.serialize_field(field.into(), &CommentSer(this.epilog))?
+                }
+            }
+        }
         fields.end()
     }
 }
 struct ListDe<'a, 'b>(&'b mut dyn Build<'a>);
-
-impl<'a, 'b> ListDe<'a, 'b> {
-    const EXPECTING: &'static str = "a verbose List: prolog + array of items + epilog";
-}
 impl<'de, 'a, 'b> DeserializeSeed<'de> for ListDe<'a, 'b> {
-    type Value = (Option<Comment<'a>>, Items<'a>, Option<Comment<'a>>);
-    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
-        d.deserialize_struct("List", &["prolog", "items", "epilog"], self)
+    type Value = List<'a>;
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
+        d.deserialize_struct(ListFields::KIND, ListFields::NAMES, self)
     }
 }
 impl<'de, 'a, 'b> Visitor<'de> for ListDe<'a, 'b> {
-    type Value = (Option<Comment<'a>>, Items<'a>, Option<Comment<'a>>);
+    type Value = List<'a>;
     fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-        out.write_str(ListDe::EXPECTING)
+        let kind = ListFields::KIND;
+        let names = ListFields::NAMES.join(", ");
+        write!(out, "{STYLE} {kind}: {names}")
     }
-    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> StdResult<Self::Value, A::Error> {
         let ListDe(build) = self;
-        let err = || A::Error::invalid_length(3, &ListDe::EXPECTING);
-        Ok((
-            seq.next_element_seed(CommentDe(build))?.ok_or_else(err)?,
-            seq.next_element_seed(ItemsDe(build))?.ok_or_else(err)?,
-            seq.next_element_seed(CommentDe(build))?.ok_or_else(err)?,
-        ))
-    }
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-        let ListDe(build) = self;
-        let mut prolog = None;
-        let mut array = None;
-        let mut epilog = None;
+        let mut result = List::default();
+        let mut seen = ListFields::each(false);
         while let Some(field) = map.next_key()? {
+            match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
+                ListFields::Prolog => result.prolog = map.next_value_seed(CommentDe(build))?,
+                ListFields::Items => result.items = map.next_value_seed(ItemsDe(build))?,
+                ListFields::Epilog => result.epilog = map.next_value_seed(CommentDe(build))?,
+            }
+        }
+        Ok(result)
+    }
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> StdResult<Self::Value, A::Error> {
+        let ListDe(build) = self;
+        let mut result = List::default();
+        for field in ListFields::each(true).selected() {
             match field {
                 ListFields::Prolog => {
-                    if prolog.is_some() {
-                        return Err(A::Error::duplicate_field("prolog"));
-                    }
-                    prolog = Some(map.next_value_seed(CommentDe(build))?);
+                    result.prolog = seq
+                        .next_element_seed(CommentDe(build))?
+                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &ListDe(build)))?
+                        .into();
                 }
-                ListFields::Array => {
-                    if array.is_some() {
-                        return Err(A::Error::duplicate_field("array"));
-                    }
-                    array = Some(map.next_value_seed(ItemsDe(build))?);
+                ListFields::Items => {
+                    result.items = seq
+                        .next_element_seed(ItemsDe(build))?
+                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &ListDe(build)))?;
                 }
                 ListFields::Epilog => {
-                    if epilog.is_some() {
-                        return Err(A::Error::duplicate_field("epilog"));
-                    }
-                    epilog = Some(map.next_value_seed(CommentDe(build))?);
+                    result.epilog = seq
+                        .next_element_seed(CommentDe(build))?
+                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &ListDe(build)))?
+                        .into();
                 }
             }
         }
-        Ok((
-            prolog.ok_or_else(|| A::Error::missing_field("prolog"))?,
-            array.ok_or_else(|| A::Error::missing_field("array"))?,
-            epilog.ok_or_else(|| A::Error::missing_field("epilog"))?,
-        ))
+        Ok(result)
+    }
+}
+
+struct NameSer<'a>(Name<'a>);
+impl<'a> Serialize for NameSer<'a> {
+    fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
+        let NameSer(this) = self;
+        let should = NameFields::each(true);
+        let mut fields = s.serialize_struct(NameFields::KIND, should.count())?;
+        for field in should.selected() {
+            match field {
+                NameFields::Comment => {
+                    fields.serialize_field(field.into(), &CommentSer(this.comment))?
+                }
+                NameFields::Key => fields.serialize_field(field.into(), &ValueSer(this.key))?,
+            }
+        }
+        fields.end()
+    }
+}
+struct NameDe<'a, 'b>(&'b mut dyn Build<'a>);
+impl<'de, 'a, 'b> DeserializeSeed<'de> for NameDe<'a, 'b> {
+    type Value = Name<'a>;
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
+        d.deserialize_struct(NameFields::KIND, NameFields::NAMES, self)
+    }
+}
+impl<'de, 'a, 'b> Visitor<'de> for NameDe<'a, 'b> {
+    type Value = Name<'a>;
+    fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
+        let kind = NameFields::KIND;
+        let names = NameFields::NAMES.join(", ");
+        write!(out, "{STYLE} {kind}: {names}")
+    }
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> StdResult<Self::Value, A::Error> {
+        let NameDe(build) = self;
+        let mut result = Name::default();
+        let mut seen = NameFields::each(false);
+        while let Some(field) = map.next_key()? {
+            match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
+                NameFields::Comment => result.comment = map.next_value_seed(CommentDe(build))?,
+                NameFields::Key => result.key = map.next_value_seed(ValueDe(build))?,
+            }
+        }
+        Ok(result)
+    }
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> StdResult<Self::Value, A::Error> {
+        let NameDe(build) = self;
+        let mut result = Name::default();
+        for field in NameFields::each(true).selected() {
+            match field {
+                NameFields::Comment => {
+                    result.comment = seq
+                        .next_element_seed(CommentDe(build))?
+                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &ListDe(build)))?;
+                }
+                NameFields::Key => {
+                    result.key = seq
+                        .next_element_seed(ValueDe(build))?
+                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &ListDe(build)))?;
+                }
+            }
+        }
+        Ok(result)
     }
 }
 
 struct EntrySer<'a>(Entry<'a>);
 impl<'a> Serialize for EntrySer<'a> {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+    fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let EntrySer(this) = self;
-        let mut fields = s.serialize_struct("Entry", 4)?;
-        fields.serialize_field("gap", &this.name.gap)?;
-        fields.serialize_field("before", &CommentSer(this.name.comment))?;
-        if let Some(verbatim) = this.name.key.verbatim(0) {
-            fields.serialize_field("key", verbatim)?;
-        } else {
-            fields.serialize_field("key", &this.name.key.joined())?;
+        let should = EntryFields::each(true);
+        let mut fields = s.serialize_struct(EntryFields::KIND, should.count())?;
+        for field in should.selected() {
+            match field {
+                EntryFields::Name => fields.serialize_field(field.into(), &NameSer(this.name))?,
+                EntryFields::Item => fields.serialize_field(field.into(), &ItemSer(this.item))?,
+            }
         }
-        fields.serialize_field("item", &ItemSer(this.item))?;
         fields.end()
     }
 }
 struct EntryDe<'a, 'b>(&'b mut dyn Build<'a>);
-
-impl<'a, 'b> EntryDe<'a, 'b> {
-    const EXPECTING: &'static str = "a verbose entry in a dictionary: gap + before + key + item";
-}
 impl<'de, 'a, 'b> DeserializeSeed<'de> for EntryDe<'a, 'b> {
     type Value = Entry<'a>;
-    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
-        d.deserialize_struct("Entry", &["gap", "before", "key", "item"], self)
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
+        d.deserialize_struct(EntryFields::KIND, EntryFields::NAMES, self)
     }
 }
 impl<'de, 'a, 'b> Visitor<'de> for EntryDe<'a, 'b> {
     type Value = Entry<'a>;
     fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-        out.write_str(EntryDe::EXPECTING)
+        let kind = EntryFields::KIND;
+        let names = EntryFields::NAMES.join(", ");
+        write!(out, "{STYLE} {kind}: {names}")
     }
-    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> StdResult<Self::Value, A::Error> {
         let EntryDe(build) = self;
-        let err = || A::Error::invalid_length(4, &EntryDe::EXPECTING);
-        Ok(Entry {
-            name: Name {
-                gap: seq.next_element()?.ok_or_else(err)?,
-                comment: seq.next_element_seed(CommentDe(build))?.ok_or_else(err)?,
-                key: build
-                    .intern(&seq.next_element::<String>()?.ok_or_else(err)?)
-                    .map_err(A::Error::custom)?
-                    .into(),
-            },
-            item: seq.next_element_seed(ItemDe(build))?.ok_or_else(err)?,
-        })
-    }
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-        let EntryDe(build) = self;
-        let mut gap = None;
-        let mut before = None;
-        let mut key = None;
-        let mut item = None;
+        let mut result = Entry::default();
+        let mut seen = EntryFields::each(false);
         while let Some(field) = map.next_key()? {
-            match field {
-                EntryFields::Gap => {
-                    if gap.is_some() {
-                        return Err(A::Error::duplicate_field("gap"));
-                    }
-                    gap = Some(map.next_value()?);
-                }
-                EntryFields::Before => {
-                    if before.is_some() {
-                        return Err(A::Error::duplicate_field("before"));
-                    }
-                    before = Some(map.next_value_seed(CommentDe(build))?);
-                }
-                EntryFields::Key => {
-                    if key.is_some() {
-                        return Err(A::Error::duplicate_field("key"));
-                    }
-                    key = Some(
-                        build
-                            .intern(&map.next_value::<String>()?)
-                            .map_err(A::Error::custom)?
-                            .into(),
-                    );
+            match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
+                EntryFields::Name => {
+                    result.name = map.next_value_seed(NameDe(build))?;
                 }
                 EntryFields::Item => {
-                    if item.is_some() {
-                        return Err(A::Error::duplicate_field("item"));
-                    }
-                    item = Some(map.next_value_seed(ItemDe(build))?);
+                    result.item = map.next_value_seed(ItemDe(build))?;
                 }
             }
         }
-        Ok(Entry {
-            name: Name {
-                gap: gap.ok_or_else(|| A::Error::missing_field("gap"))?,
-                comment: before.ok_or_else(|| A::Error::missing_field("before"))?,
-                key: key.ok_or_else(|| A::Error::missing_field("key"))?,
-            },
-            item: item.ok_or_else(|| A::Error::missing_field("item"))?,
-        })
+        Ok(result)
+    }
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> StdResult<Self::Value, A::Error> {
+        let EntryDe(build) = self;
+        let mut result = Entry::default();
+        for field in EntryFields::each(true).selected() {
+            match field {
+                EntryFields::Name => {
+                    result.name = seq
+                        .next_element_seed(NameDe(build))?
+                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &EntryDe(build)))?;
+                }
+                EntryFields::Item => {
+                    result.item = seq
+                        .next_element_seed(ItemDe(build))?
+                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &EntryDe(build)))?;
+                }
+            }
+        }
+        Ok(result)
     }
 }
 
 struct EntriesSer<'a>(Entries<'a>);
 impl<'a> Serialize for EntriesSer<'a> {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+    fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let EntriesSer(this) = self;
         let mut seq = s.serialize_seq(Some(this.len()))?;
         for cell in this.iter() {
@@ -359,16 +426,17 @@ impl<'a> Serialize for EntriesSer<'a> {
 struct EntriesDe<'a, 'b>(&'b mut dyn Build<'a>);
 impl<'de, 'a, 'b> DeserializeSeed<'de> for EntriesDe<'a, 'b> {
     type Value = Entries<'a>;
-    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
         d.deserialize_seq(self)
     }
 }
 impl<'de, 'a, 'b> Visitor<'de> for EntriesDe<'a, 'b> {
     type Value = Entries<'a>;
     fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-        out.write_str("sequence of verbose Entry")
+        let kind = EntryFields::KIND;
+        write!(out, "sequence of {STYLE} {kind}")
     }
-    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> StdResult<Self::Value, A::Error> {
         let EntriesDe(build) = self;
         let mut count = 0usize;
         while let Some(entry) = seq.next_element_seed(EntryDe(build))? {
@@ -379,153 +447,163 @@ impl<'de, 'a, 'b> Visitor<'de> for EntriesDe<'a, 'b> {
     }
 }
 
-struct DictSer<'a>((Option<Comment<'a>>, Entries<'a>, Option<Comment<'a>>));
+struct DictSer<'a>(Dict<'a>);
 impl<'a> Serialize for DictSer<'a> {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        let DictSer(this) = self;
-        let (this_prolog, this_cells, this_epilog) = this;
-        let mut fields = s.serialize_struct("Dict", 3)?;
-        fields.serialize_field("prolog", &CommentSer(*this_prolog))?;
-        fields.serialize_field("array", &EntriesSer(this_cells))?;
-        fields.serialize_field("epilog", &CommentSer(*this_epilog))?;
+    fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
+        let DictSer(dict) = self;
+        let should = DictFields::each(true);
+        let mut fields = s.serialize_struct(DictFields::KIND, should.count())?;
+        for field in should.selected() {
+            match field {
+                DictFields::Prolog => {
+                    fields.serialize_field(field.into(), &MaybeSer(dict.prolog.value))?
+                }
+                DictFields::Entries => {
+                    fields.serialize_field(field.into(), &EntriesSer(dict.entries))?
+                }
+                DictFields::Epilog => {
+                    fields.serialize_field(field.into(), &MaybeSer(dict.epilog.value))?
+                }
+            }
+        }
         fields.end()
     }
 }
 struct DictDe<'a, 'b>(&'b mut dyn Build<'a>);
-
-impl<'a, 'b> DictDe<'a, 'b> {
-    const EXPECTING: &'static str = "a verbose Dict: prolog + array of entries + epilog";
-}
 impl<'de, 'a, 'b> DeserializeSeed<'de> for DictDe<'a, 'b> {
-    type Value = (Option<Comment<'a>>, Entries<'a>, Option<Comment<'a>>);
-    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
-        d.deserialize_struct("Dict", &["prolog", "entries", "epilog"], self)
+    type Value = Dict<'a>;
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
+        d.deserialize_struct(DictFields::KIND, DictFields::NAMES, self)
     }
 }
 impl<'de, 'a, 'b> Visitor<'de> for DictDe<'a, 'b> {
-    type Value = (Option<Comment<'a>>, Entries<'a>, Option<Comment<'a>>);
+    type Value = Dict<'a>;
     fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-        out.write_str(DictDe::EXPECTING)
+        let kind = DictFields::KIND;
+        let names = DictFields::NAMES.join(", ");
+        write!(out, "{STYLE} {kind}: {names}")
     }
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> StdResult<Self::Value, A::Error> {
         let DictDe(build) = self;
-        let mut prolog = None;
-        let mut array = None;
-        let mut epilog = None;
+        let mut result = Dict::default();
+        let mut seen = DictFields::each(false);
         while let Some(field) = map.next_key()? {
+            match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
+                DictFields::Prolog => result.prolog = map.next_value_seed(CommentDe(build))?,
+                DictFields::Entries => result.entries = map.next_value_seed(EntriesDe(build))?,
+                DictFields::Epilog => result.epilog = map.next_value_seed(CommentDe(build))?,
+            }
+        }
+        Ok(result)
+    }
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> StdResult<Self::Value, A::Error> {
+        let DictDe(build) = self;
+        let mut result = Dict::default();
+        for field in DictFields::each(true).selected() {
             match field {
                 DictFields::Prolog => {
-                    if prolog.is_some() {
-                        return Err(A::Error::duplicate_field("prolog"));
-                    }
-                    prolog = Some(map.next_value_seed(CommentDe(build))?);
+                    result.prolog = seq
+                        .next_element_seed(CommentDe(build))?
+                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &EntryDe(build)))?
+                        .into();
                 }
-                DictFields::Array => {
-                    if array.is_some() {
-                        return Err(A::Error::duplicate_field("array"));
-                    }
-                    array = Some(map.next_value_seed(EntriesDe(build))?);
+                DictFields::Entries => {
+                    result.entries = seq
+                        .next_element_seed(EntriesDe(build))?
+                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &EntryDe(build)))?;
                 }
                 DictFields::Epilog => {
-                    if epilog.is_some() {
-                        return Err(A::Error::duplicate_field("epilog"));
-                    }
-                    epilog = Some(map.next_value_seed(CommentDe(build))?);
+                    result.epilog = seq
+                        .next_element_seed(CommentDe(build))?
+                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &EntryDe(build)))?
+                        .into();
                 }
             }
         }
-        Ok((
-            prolog.ok_or_else(|| A::Error::missing_field("prolog"))?,
-            array.ok_or_else(|| A::Error::missing_field("array"))?,
-            epilog.ok_or_else(|| A::Error::missing_field("epilog"))?,
-        ))
-    }
-    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let DictDe(build) = self;
-        let err = || A::Error::invalid_length(3, &DictDe::EXPECTING);
-        Ok((
-            seq.next_element_seed(CommentDe(build))?.ok_or_else(err)?,
-            seq.next_element_seed(EntriesDe(build))?.ok_or_else(err)?,
-            seq.next_element_seed(CommentDe(build))?.ok_or_else(err)?,
-        ))
+        Ok(result)
     }
 }
 
 struct FileSer<'a>(File<'a>);
 impl<'a> Serialize for FileSer<'a> {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+    fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let FileSer(this) = self;
-        let mut fields = s.serialize_struct("File", 3)?;
-        fields.serialize_field("hashbang", &CommentSer(this.hashbang))?;
-        fields.serialize_field("prolog", &CommentSer(this.prolog))?;
-        fields.serialize_field("array", &EntriesSer(this.cells))?;
+        let should = FileFields::each(true);
+        let mut fields = s.serialize_struct(FileFields::KIND, should.count())?;
+        for field in should.selected() {
+            match field {
+                FileFields::Hashbang => {
+                    fields.serialize_field(field.into(), &MaybeSer(this.hashbang))?
+                }
+                FileFields::Prolog => {
+                    fields.serialize_field(field.into(), &MaybeSer(this.prolog.value))?
+                }
+                FileFields::Entries => {
+                    fields.serialize_field(field.into(), &EntriesSer(this.entries))?
+                }
+            }
+        }
         fields.end()
     }
 }
 struct FileDe<'a, 'b>(&'b mut dyn Build<'a>);
-
-impl<'a, 'b> FileDe<'a, 'b> {
-    const EXPECTING: &'static str = "a verbose File: hashbang + prolog + array of entries";
-}
 impl<'de, 'a, 'b> DeserializeSeed<'de> for FileDe<'a, 'b> {
     type Value = File<'a>;
-    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
-        d.deserialize_struct("File", &["hashbang", "prolog", "entries"], self)
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
+        d.deserialize_struct(FileFields::KIND, FileFields::NAMES, self)
     }
 }
 impl<'de, 'a, 'b> Visitor<'de> for FileDe<'a, 'b> {
     type Value = File<'a>;
     fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-        out.write_str(FileDe::EXPECTING)
+        let kind = FileFields::KIND;
+        let names = FileFields::NAMES.join(", ");
+        write!(out, "{STYLE} {kind}: {names}")
     }
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> StdResult<Self::Value, A::Error> {
         let FileDe(build) = self;
-        let mut hashbang = None;
-        let mut prolog = None;
-        let mut array = None;
+        let mut result = File::default();
+        let mut seen = FileFields::each(false);
         while let Some(field) = map.next_key()? {
+            match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
+                FileFields::Hashbang => result.hashbang = map.next_value_seed(MaybeDe(build))?,
+                FileFields::Prolog => result.prolog = map.next_value_seed(CommentDe(build))?,
+                FileFields::Entries => result.entries = map.next_value_seed(EntriesDe(build))?,
+            }
+        }
+        Ok(result)
+    }
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> StdResult<Self::Value, A::Error> {
+        let FileDe(build) = self;
+        let mut result = File::default();
+        for field in FileFields::each(true).selected() {
             match field {
                 FileFields::Hashbang => {
-                    if hashbang.is_some() {
-                        return Err(A::Error::duplicate_field("hashbang"));
-                    }
-                    hashbang = Some(map.next_value_seed(CommentDe(build))?);
+                    result.hashbang = seq
+                        .next_element_seed(MaybeDe(build))?
+                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &FileDe(build)))?
                 }
                 FileFields::Prolog => {
-                    if prolog.is_some() {
-                        return Err(A::Error::duplicate_field("prolog"));
-                    }
-                    prolog = Some(map.next_value_seed(CommentDe(build))?);
+                    result.prolog = seq
+                        .next_element_seed(CommentDe(build))?
+                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &FileDe(build)))?
+                        .into()
                 }
-                FileFields::Array => {
-                    if array.is_some() {
-                        return Err(A::Error::duplicate_field("array"));
-                    }
-                    array = Some(map.next_value_seed(EntriesDe(build))?);
+                FileFields::Entries => {
+                    result.entries = seq
+                        .next_element_seed(EntriesDe(build))?
+                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &FileDe(build)))?
                 }
             }
         }
-        Ok(File {
-            hashbang: hashbang.ok_or_else(|| A::Error::missing_field("hashbang"))?,
-            prolog: prolog.ok_or_else(|| A::Error::missing_field("prolog"))?,
-            cells: array.ok_or_else(|| A::Error::missing_field("array"))?,
-        })
-    }
-    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-        let FileDe(build) = self;
-        let err = || A::Error::invalid_length(3, &FileDe::EXPECTING);
-        Ok(File {
-            hashbang: seq.next_element_seed(CommentDe(build))?.ok_or_else(err)?,
-            prolog: seq.next_element_seed(CommentDe(build))?.ok_or_else(err)?,
-            cells: seq.next_element_seed(EntriesDe(build))?.ok_or_else(err)?,
-        })
+        Ok(result)
     }
 }
 
 /// serialize all fields, avoiding "skip_serializing_if"
 pub struct Verbose<'a>(pub File<'a>);
 impl<'a> Serialize for Verbose<'a> {
-    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+    fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let Verbose(this) = self;
         FileSer(*this).serialize(s)
     }
@@ -542,3 +620,5 @@ impl<'a> Verbose<'a> {
         FileDe(parse.builder())
     }
 }
+
+const STYLE: &'static str = stringify!(Verbose);

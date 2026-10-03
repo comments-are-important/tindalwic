@@ -2,7 +2,7 @@
 
 use core::str::SplitInclusive;
 
-use crate::{Comment, Entries, Entry, File, Item, Items, Name, Value};
+use crate::{Comment, Dict, Entries, Entry, File, Item, Items, List, Name, Text, Value};
 
 // there are some lines/branches here that are impossible to get coverage for,
 // and the mechanisms for suppressing the report are inadequate ... until:
@@ -55,31 +55,31 @@ pub trait Build<'a> {
     fn finish_entries(&mut self, count: usize) -> Result<Entries<'a>, &'static str>;
     /// push an [Item::Text] (no metadata) for a future .finish_items to use.
     fn text_item(&mut self, value: &'a str) -> Result<(), &'static str> {
-        self.push_item(Item::text(value.into()))
+        self.push_item(value.into())
     }
     /// push an [Item::List] (no metadata) for a future .finish_items to use.
     fn list_item(&mut self, count: usize) -> Result<(), &'static str> {
         let items = self.finish_items(count)?;
-        self.push_item(Item::list(items))
+        self.push_item(items.into())
     }
     /// push an [Item::Dict] (no metadata) for a future .finish_items to use.
     fn dict_item(&mut self, count: usize) -> Result<(), &'static str> {
         let entries = self.finish_entries(count)?;
-        self.push_item(Item::dict(entries))
+        self.push_item(entries.into())
     }
     /// push a `key` -> [Item::Text] association (no metadata) for a future .finish_entries to use.
     fn text_entry(&mut self, key: &'a str, value: &'a str) -> Result<(), &'static str> {
-        self.associate(key, Item::text(value.into()))
+        self.associate(key, value.into())
     }
     /// push a `key` -> [Item::List] association (no metadata) for a future .finish_entries to use.
     fn list_entry(&mut self, key: &'a str, count: usize) -> Result<(), &'static str> {
         let items = self.finish_items(count)?;
-        self.associate(key, Item::list(items))
+        self.associate(key, items.into())
     }
     /// push a `key` -> [Item::Dict] association (no metadata) for a future .finish_entries to use.
     fn dict_entry(&mut self, key: &'a str, count: usize) -> Result<(), &'static str> {
         let entries = self.finish_entries(count)?;
-        self.associate(key, Item::dict(entries))
+        self.associate(key, entries.into())
     }
     /// push a `key` -> `item` association (no metadata) for a future .finish_entries to use
     fn associate(&mut self, key: &'a str, item: Item<'a>) -> Result<(), &'static str> {
@@ -182,8 +182,8 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
             self.report(ParseError::Memory("way too big"))?;
             return Err("parse.file: can't even start");
         }
-        let hashbang = self.comment(0, CommentMark::Shebang)?;
-        let prolog = self.comment(0, CommentMark::DoubleSlash)?;
+        let hashbang = self.comment(0, false, CommentMark::Shebang)?.value;
+        let prolog = self.comment(0, true, CommentMark::DoubleSlash)?;
         let cells = self.entries(0)?;
         assert!(self.current.is_none(), "input was not completely consumed");
         // TODO do something with empties at EOF
@@ -193,7 +193,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
             Ok(File {
                 hashbang,
                 prolog,
-                cells,
+                entries: cells,
             })
         }
     }
@@ -239,6 +239,12 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
         } else {
             Some(&line[indent..].trim_end_matches('\n'))
         }
+    }
+
+    fn claim_empties(&mut self) -> usize {
+        let result = self.empties;
+        self.empties = 0;
+        result
     }
 
     /// done with current line, so advance past excessively indented lines.
@@ -289,27 +295,26 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
         };
     }
 
-    /// use this whenever a comment is allowed. returns None if current line has
-    /// wrong indent/mark, or Some(Comment).
+    /// use this whenever a comment is allowed.
     fn comment(
         &mut self,
         indent: usize,
+        gap: bool,
         mark: CommentMark,
-    ) -> Result<Option<Comment<'a>>, &'static str> {
-        let Some(line) = self.after_indent(indent) else {
-            return Ok(None);
-        };
-        let start = match mark {
+    ) -> Result<Comment<'a>, &'static str> {
+        let line = self.after_indent(indent).and_then(|line| match mark {
             CommentMark::Shebang => line.strip_prefix("#!"),
             CommentMark::DoubleSlash => line.strip_prefix("//"), // TODO reject triple?
             CommentMark::TripleSlash => line.strip_prefix("///"),
-        };
-        match start {
-            None => Ok(None),
-            Some(from) => Ok(Some(Comment {
-                value: self.stretch(indent, from)?,
-            })),
+        });
+        let mut comment = Comment::default();
+        if gap {
+            comment.gap = self.claim_empties();
         }
+        if let Some(from) = line {
+            comment.value = Some(self.stretch(indent, from)?);
+        }
+        return Ok(comment);
     }
 
     /// current line has been recognized as beginning a Text, from a `<>` context on
@@ -317,13 +322,13 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
     /// lenient - one-liners can stretch.
     fn text(&mut self, indent: usize, from: &'a str) -> Result<Item<'a>, &'static str> {
         let value = self.stretch(indent, from)?;
-        let epilog = self.comment(indent, CommentMark::DoubleSlash)?;
-        Ok(Item::Text { value, epilog })
+        let epilog = self.comment(indent, false, CommentMark::DoubleSlash)?.value;
+        Ok(Item::Text(Text { value, epilog }))
     }
     fn text_block(&mut self, indent: usize) -> Result<Item<'a>, &'static str> {
         let value = self.block(indent)?;
-        let epilog = self.comment(indent, CommentMark::DoubleSlash)?;
-        Ok(Item::Text { value, epilog })
+        let epilog = self.comment(indent, false, CommentMark::DoubleSlash)?.value;
+        Ok(Item::Text(Text { value, epilog }))
     }
     /// a block (optionally) follows current line (at indent+1).
     /// always need some value, use end of current if no block follows
@@ -337,11 +342,11 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
 
     /// previous line opened a list context, so parse all the lines in it.
     fn list(&mut self, indent: usize) -> Result<Item<'a>, &'static str> {
-        Ok(Item::List {
-            prolog: self.comment(indent + 1, CommentMark::DoubleSlash)?,
-            cells: self.items(indent + 1)?,
-            epilog: self.comment(indent, CommentMark::DoubleSlash)?,
-        })
+        Ok(Item::List(List {
+            prolog: self.comment(indent + 1, true, CommentMark::DoubleSlash)?,
+            items: self.items(indent + 1)?,
+            epilog: self.comment(indent, true, CommentMark::DoubleSlash)?,
+        }))
     }
 
     fn one_item(&mut self, indent: usize) -> Result<Option<Item<'a>>, &'static str> {
@@ -404,18 +409,17 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
 
     /// previous line opened a dict context, so parse all the lines in it.
     fn dict(&mut self, indent: usize) -> Result<Item<'a>, &'static str> {
-        Ok(Item::Dict {
-            prolog: self.comment(indent + 1, CommentMark::DoubleSlash)?,
-            cells: self.entries(indent + 1)?,
-            epilog: self.comment(indent, CommentMark::DoubleSlash)?,
-        })
+        Ok(Item::Dict(Dict {
+            prolog: self.comment(indent + 1, true, CommentMark::DoubleSlash)?,
+            entries: self.entries(indent + 1)?,
+            epilog: self.comment(indent, true, CommentMark::DoubleSlash)?,
+        }))
     }
     fn one_entry(&mut self, indent: usize) -> Result<Option<Entry<'a>>, &'static str> {
         loop {
-            let gap = self.empties > 0;
-            let comment = self.comment(indent, CommentMark::TripleSlash)?;
+            let comment = self.comment(indent, true, CommentMark::TripleSlash)?;
             let Some(scan) = self.after_indent(indent) else {
-                if gap || comment.is_some() {
+                if comment.gap > 0 || comment.value.is_some() {
                     self.report(ParseError::at(self.line, "gap/comment but no key"))?;
                 }
                 return Ok(None);
@@ -424,7 +428,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
             let message = if scan.starts_with('<') && scan.ends_with('>') {
                 let key = Value::from(&scan[1..scan.len() - 1]);
                 let item = self.text_block(indent)?;
-                let name = Name { gap, comment, key };
+                let name = Name { comment, key };
                 return Ok(Some(Entry { name, item }));
             } else if scan.starts_with('<') {
                 "malformed `<key>` in dict"
@@ -432,7 +436,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
                 let key = Value::from(&scan[1..scan.len() - 1]);
                 self.next(indent + 1, true)?;
                 let item = self.list(indent)?;
-                let name = Name { gap, comment, key };
+                let name = Name { comment, key };
                 return Ok(Some(Entry { name, item }));
             } else if scan.starts_with('[') {
                 "malformed `[key]` in dict"
@@ -440,14 +444,14 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
                 let key = Value::from(&scan[1..scan.len() - 1]);
                 self.next(indent + 1, true)?;
                 let item = self.dict(indent)?;
-                let name = Name { gap, comment, key };
+                let name = Name { comment, key };
                 return Ok(Some(Entry { name, item }));
             } else if scan.starts_with('{') {
                 "malformed `{key}` in dict"
             } else if scan == "@" {
                 let key = self.block(indent)?;
                 if let Some(item) = self.one_item(indent)? {
-                    let name = Name { gap, comment, key };
+                    let name = Name { comment, key };
                     return Ok(Some(Entry { name, item }));
                 }
                 "long `@` key needs a value"
@@ -458,7 +462,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
             } else if let Some((before, after)) = scan.split_once('=') {
                 let key = Value::from(before);
                 let item = self.text(indent, after)?;
-                let name = Name { gap, comment, key };
+                let name = Name { comment, key };
                 return Ok(Some(Entry { name, item }));
             } else {
                 "missing `=` in dict"

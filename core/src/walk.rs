@@ -3,7 +3,7 @@
 //! but using these directly is not recommended.
 //! using path! is much easier.
 
-use crate::{Entry, Item, Value};
+use crate::{Dict, Entry, File, Item, List, Value};
 use core::cell::Cell;
 
 /// a decision along a walk.
@@ -70,27 +70,31 @@ impl<'p> Path<'p, false> {
         Path { branches }
     }
     /// walk down a path that ends at an item in a list
-    pub fn walk<'a>(&self, mut item: Item<'a>) -> Result<&'a Cell<Item<'a>>, PathError<'p>> {
+    pub fn walk_file<'a>(&self, file: &File<'a>) -> Result<&'a Cell<Item<'a>>, PathError<'p>> {
+        self.walk_item(file.embed_without_hashbang())
+    }
+    /// walk down a path that ends at an item in a list
+    pub fn walk_item<'a>(&self, mut item: Item<'a>) -> Result<&'a Cell<Item<'a>>, PathError<'p>> {
         let mut cell: Option<&'a Cell<Item<'a>>> = None;
         for (step, branch) in self.branches.iter().enumerate() {
             match (branch, item) {
-                (Branch::Item(at), Item::List { cells, .. }) => {
+                (Branch::Item(at), Item::List(List { items: cells, .. })) => {
                     let Some(found) = cells.get(*at) else {
                         return Err(self.error_at(step, "index out of bounds"));
                     };
                     cell = Some(found);
                     item = found.get();
                 }
-                (Branch::Entry(key), Item::Dict { cells, .. }) => {
+                (Branch::Entry(key), Item::Dict(Dict { entries: cells, .. })) => {
                     let Some(found) = key.find_linearly_in(cells) else {
                         return Err(self.error_at(step, "key not found"));
                     };
                     cell = None;
                     item = cells[found].get().item;
                 }
-                (Branch::Text, Item::Text { .. })
-                | (Branch::List, Item::List { .. })
-                | (Branch::Dict, Item::Dict { .. }) => {
+                (Branch::Text, Item::Text(_))
+                | (Branch::List, Item::List(_))
+                | (Branch::Dict, Item::Dict(_)) => {
                     // the else branch might be impossible (because error already happened)
                     // avoid using .ok_or_else so the closure is not an uncovered fn...
                     return if let Some(found) = cell {
@@ -129,18 +133,22 @@ impl<'p> Path<'p, true> {
         Path { branches }
     }
     /// walk down a path that ends at an item in a dict
-    pub fn walk<'a>(&self, mut item: Item<'a>) -> Result<&'a Cell<Entry<'a>>, PathError<'p>> {
+    pub fn walk_file<'a>(&self, file: &File<'a>) -> Result<&'a Cell<Entry<'a>>, PathError<'p>> {
+        self.walk_item(file.embed_without_hashbang())
+    }
+    /// walk down a path that ends at an item in a dict
+    pub fn walk_item<'a>(&self, mut item: Item<'a>) -> Result<&'a Cell<Entry<'a>>, PathError<'p>> {
         let mut cell: Option<&'a Cell<Entry<'a>>> = None;
         for (step, branch) in self.branches.iter().enumerate() {
             match (branch, item) {
-                (Branch::Item(at), Item::List { cells, .. }) => {
+                (Branch::Item(at), Item::List(List { items: cells, .. })) => {
                     let Some(found) = cells.get(*at) else {
                         return Err(self.error_at(step, "index out of bounds"));
                     };
                     cell = None;
                     item = found.get();
                 }
-                (Branch::Entry(key), Item::Dict { cells, .. }) => {
+                (Branch::Entry(key), Item::Dict(Dict { entries: cells, .. })) => {
                     let Some(found) = key.find_linearly_in(cells) else {
                         return Err(self.error_at(step, "key not found"));
                     };
@@ -148,9 +156,9 @@ impl<'p> Path<'p, true> {
                     cell = Some(found);
                     item = found.get().item;
                 }
-                (Branch::Text, Item::Text { .. })
-                | (Branch::List, Item::List { .. })
-                | (Branch::Dict, Item::Dict { .. }) => {
+                (Branch::Text, Item::Text(_))
+                | (Branch::List, Item::List(_))
+                | (Branch::Dict, Item::Dict(_)) => {
                     // the else branch might be impossible (because error already happened)
                     // avoid using .ok_or_else so the closure is not an uncovered fn...
                     return if let Some(found) = cell {

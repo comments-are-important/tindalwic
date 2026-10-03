@@ -23,7 +23,7 @@ fn deserialize_file_from_json() {
     json! {
         let entries = {"key":"one\ntwo"}.unwrap();
     }
-    assert_eq!(file.cells, entries);
+    assert_eq!(file.entries, entries);
 }
 
 struct Check(bumpalo::Bump);

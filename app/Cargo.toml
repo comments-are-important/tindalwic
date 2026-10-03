@@ -16,6 +16,7 @@ bumpalo = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 diff = { workspace = true }
 rand = { workspace = true }
+rand_distr = { workspace = true }
 time = { workspace = true, features = ["formatting"] }
 tindalwic = { path = "../core", features = ["bumpalo"] }
 tindalwic-serde = { path = "../serde" }

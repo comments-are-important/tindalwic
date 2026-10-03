@@ -34,6 +34,7 @@ mod value;
 
 /// converting bytes into a File
 pub mod parse {
+    #[doc(inline)]
     pub use super::value::parse::{Build, Parse, ParseError, Reported};
 }
 
@@ -42,6 +43,7 @@ pub const VERSION: &str = env!("TINDALWIC_VERSION");
 
 // ====================================================================================
 
+#[doc(inline)]
 pub use value::Value;
 impl<'a> Value<'a> {
     /// linear `O(n)` scan.
@@ -50,8 +52,6 @@ impl<'a> Value<'a> {
         cells.iter().position(|cell| cell.get().name.key == self)
     }
 }
-
-// ====================================================================================
 
 /// Metadata about an [Item], [Entry] or [File].
 ///
@@ -72,36 +72,95 @@ impl<'a> Value<'a> {
 /// # #[cfg(feature="alloc")]
 /// # {
 /// use tindalwic::*;
-/// let comment = Comment {
-///     value: "with ~strikethrough~ extension".into(),
-/// };
+/// let comment: Comment = "with ~strikethrough~ extension".into();
 ///
-/// let html = markdown::to_html_with_options(&comment.value.joined(), &markdown::Options::gfm())
-///     .expect(
-///         "should never error, according to:
+/// let html =
+///     markdown::to_html_with_options(&comment.value.unwrap().joined(), &markdown::Options::gfm())
+///         .expect(
+///             "should never error, according to:
 ///      <https://docs.rs/markdown/latest/markdown/fn.to_html_with_options.html#errors>",
-///     );
+///         );
 ///
 /// assert_eq!(html, "<p>with <del>strikethrough</del> extension</p>");
 /// # }
 /// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Comment<'a> {
+    /// number of empty lines preceding
+    pub gap: usize,
     /// the string value
-    pub value: Value<'a>,
+    pub value: Option<Value<'a>>,
 }
-impl<'a> Comment<'a> {
-    /// helper for setting one of the fields.
-    pub fn some(value: &'a str) -> Option<Comment<'a>> {
-        Some(Comment {
-            value: value.into(),
-        })
+impl<'a, T> From<T> for Comment<'a>
+where
+    Value<'a>: From<T>,
+{
+    fn from(value: T) -> Self {
+        Comment {
+            value: Some(value.into()),
+            ..Default::default()
+        }
     }
 }
-impl<'a> From<&'a str> for Comment<'a> {
-    fn from(value: &'a str) -> Self {
-        Comment {
+
+/// a [Value]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Text<'a> {
+    /// the string value
+    pub value: Value<'a>,
+    /// A Text can have a Comment after it - but gap is impossible.
+    pub epilog: Option<Value<'a>>,
+}
+impl<'a, T> From<T> for Text<'a>
+where
+    Value<'a>: From<T>,
+{
+    fn from(value: T) -> Self {
+        Text {
             value: value.into(),
+            ..Default::default()
+        }
+    }
+}
+
+/// the slice type for [List::items]
+pub type Items<'a> = &'a [Cell<Item<'a>>];
+/// a linear array of [Item]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct List<'a> {
+    /// A List can have an introductory Comment.
+    pub prolog: Comment<'a>,
+    /// The contents of the Item::List.
+    pub items: Items<'a>,
+    /// A List can have a Comment after it.
+    pub epilog: Comment<'a>,
+}
+impl<'a> From<Items<'a>> for List<'a> {
+    fn from(value: Items<'a>) -> Self {
+        List {
+            items: value,
+            ..Default::default()
+        }
+    }
+}
+
+/// the slice type for [Dict::entries]
+pub type Entries<'a> = &'a [Cell<Entry<'a>>];
+/// an associative array of [Entry]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Dict<'a> {
+    /// A Dict can have an introductory Comment.
+    pub prolog: Comment<'a>,
+    /// The contents of the Item::Dict.
+    pub entries: Entries<'a>,
+    /// A Dict can have a Comment after it.
+    pub epilog: Comment<'a>,
+}
+impl<'a> From<Entries<'a>> for Dict<'a> {
+    fn from(value: Entries<'a>) -> Self {
+        Dict {
+            entries: value,
+            ..Default::default()
         }
     }
 }
@@ -111,15 +170,16 @@ impl<'a> From<&'a str> for Comment<'a> {
 /// the key in an association.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Name<'a> {
-    /// a key can have a blank line before it (above its comment)
-    pub gap: bool,
     /// a key can have a comment before it (below its blank line).
-    pub comment: Option<Comment<'a>>,
+    pub comment: Comment<'a>,
     /// the string value
     pub key: Value<'a>,
 }
-impl<'a> From<&'a str> for Name<'a> {
-    fn from(value: &'a str) -> Self {
+impl<'a, T> From<T> for Name<'a>
+where
+    Value<'a>: From<T>,
+{
+    fn from(value: T) -> Self {
         Name {
             key: value.into(),
             ..Default::default()
@@ -154,48 +214,19 @@ impl<'a> Entry<'a> {
 
 // ------------------------------------------------------------------------------------
 
-/// the slice type for [Item::Dict::cells]
-pub type Entries<'a> = &'a [Cell<Entry<'a>>];
-/// the slice type for [Item::List::cells]
-pub type Items<'a> = &'a [Cell<Item<'a>>];
-
-// ------------------------------------------------------------------------------------
-
 /// the three Item variants
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Item<'a> {
     /// a [Value]
-    Text {
-        /// the string value
-        value: Value<'a>,
-        /// A Text can have a Comment after it.
-        epilog: Option<Comment<'a>>,
-    },
+    Text(Text<'a>),
     /// a linear array of [Item]
-    List {
-        /// A List can have an introductory Comment.
-        prolog: Option<Comment<'a>>,
-        /// The contents of the Item::List.
-        cells: Items<'a>,
-        /// A List can have a Comment after it.
-        epilog: Option<Comment<'a>>,
-    },
+    List(List<'a>),
     /// an associative array of [Entry]
-    Dict {
-        /// A Dict can have an introductory Comment.
-        prolog: Option<Comment<'a>>,
-        /// The contents of the Item::Dict.
-        cells: Entries<'a>,
-        /// A Dict can have a Comment after it.
-        epilog: Option<Comment<'a>>,
-    },
+    Dict(Dict<'a>),
 }
 impl<'a> Default for Item<'a> {
     fn default() -> Self {
-        Item::Text {
-            value: Value::default(),
-            epilog: None,
-        }
+        Item::Text(Text::default())
     }
 }
 impl<'a> Item<'a> {
@@ -203,28 +234,23 @@ impl<'a> Item<'a> {
     pub fn array<const N: usize>() -> [Cell<Item<'a>>; N] {
         ::core::array::from_fn::<_, N, _>(|_| Cell::default())
     }
-    /// wrap a value (no epilog) into an Item::Text
-    pub fn text(value: Value<'a>) -> Self {
-        Item::Text {
-            value,
-            epilog: None,
-        }
+}
+impl<'a, T> From<T> for Item<'a>
+where
+    Text<'a>: From<T>,
+{
+    fn from(value: T) -> Self {
+        Item::Text(Text::from(value))
     }
-    /// wrap an array of cells of items into an Item::List
-    pub fn list(cells: Items<'a>) -> Self {
-        Item::List {
-            prolog: None,
-            cells,
-            epilog: None,
-        }
+}
+impl<'a> From<Items<'a>> for Item<'a> {
+    fn from(value: Items<'a>) -> Self {
+        Item::List(List::from(value))
     }
-    /// wrap an array of cells of entries into an Item::Dict
-    pub fn dict(cells: Entries<'a>) -> Self {
-        Item::Dict {
-            prolog: None,
-            cells,
-            epilog: None,
-        }
+}
+impl<'a> From<Entries<'a>> for Item<'a> {
+    fn from(value: Entries<'a>) -> Self {
+        Item::Dict(Dict::from(value))
     }
 }
 
@@ -236,32 +262,44 @@ impl<'a> Item<'a> {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct File<'a> {
     /// A File can start with a Unix `#!` Comment.
-    pub hashbang: Option<Comment<'a>>,
+    pub hashbang: Option<Value<'a>>,
     /// A File can have an introductory Comment.
-    pub prolog: Option<Comment<'a>>,
+    pub prolog: Comment<'a>,
     /// The contents of the Item::File.
-    pub cells: Entries<'a>,
+    pub entries: Entries<'a>,
 }
 impl<'a> File<'a> {
     /// make an [Item::Dict] from self.prolog and self.cells
     pub fn embed_without_hashbang(&self) -> Item<'a> {
-        Item::Dict {
+        Item::Dict(Dict {
             prolog: self.prolog,
-            cells: self.cells,
-            epilog: None,
+            entries: self.entries,
+            ..Default::default()
+        })
+    }
+    /// take prolog and entries from an [Dict] to make a new File.
+    pub fn from_dict_without_epilog(dict: &Dict<'a>) -> Self {
+        File {
+            prolog: dict.prolog,
+            entries: dict.entries,
+            ..Default::default()
         }
     }
-    /// take prolog and cells from an [Item::Dict] to make a new File.
+    /// take prolog and entries from an [Item::Dict] to make a new File.
     ///
     /// None if the item is not a dictionary.
     pub fn try_from_dict_without_epilog(dict: &Item<'a>) -> Option<Self> {
         match dict {
-            Item::Dict { prolog, cells, .. } => Some(File {
-                hashbang: None,
-                prolog: *prolog,
-                cells,
-            }),
+            Item::Dict(dict) => Some(File::from_dict_without_epilog(dict)),
             _ => None,
+        }
+    }
+}
+impl<'a> From<Entries<'a>> for File<'a> {
+    fn from(value: Entries<'a>) -> Self {
+        File {
+            entries: value,
+            ..Default::default()
         }
     }
 }

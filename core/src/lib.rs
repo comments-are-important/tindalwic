@@ -66,9 +66,6 @@ mod value {
         pub fn is_empty(&self) -> bool {
             self.slice.is_empty()
         }
-        pub(crate) fn byte_count(&self) -> usize {
-            self.slice.as_bytes().len()
-        }
         /// `true` if prefix matches (see [str::starts_with]).
         ///
         /// Restricted to char until [core::str::pattern::Pattern] is stable.
@@ -108,10 +105,13 @@ mod value {
             } else {
                 self.indent
             };
-            self.slice
-                .split('\n')
-                .enumerate()
-                .map(move |(i, s)| if i == 0 || d == 0 { s } else { &s[d..] })
+            self.slice.split('\n').enumerate().map(move |(i, s)| {
+                if i == 0 || d == 0 || s.is_empty() {
+                    s
+                } else {
+                    &s[d..]
+                }
+            })
         }
         /// Take as many chars as possible from beginning of slice.
         ///
@@ -159,6 +159,43 @@ mod value {
                     return Value { slice, indent };
                 }
             }
+        }
+        #[cfg(feature = "alloc")]
+        pub(crate) fn byte_count(&self) -> usize {
+            self.slice.as_bytes().len()
+        }
+        pub(crate) fn one_liner(slice: &'a str) -> Self {
+            Value {
+                slice,
+                indent: usize::MAX,
+            }
+        }
+        pub(crate) fn stretched(
+            &self,
+            indent: usize,
+            concat: &'a str,
+            source: &'a str,
+        ) -> Result<Self, &'static str> {
+            if indent == usize::MAX {
+                return Err("value.stretched: sentinel value passed as indent");
+            }
+            if self.indent != usize::MAX && self.indent != indent {
+                return Err("value.stretched: incompatible indents");
+            }
+            let base = source.as_ptr() as usize;
+            let first = self.slice.as_ptr() as usize;
+            if first < base || base + source.len() <= first {
+                return Err("value.stretched: self did not come from that source");
+            }
+            let second = concat.as_ptr() as usize;
+            if second < base || base + source.len() <= second {
+                return Err("value.stretched: concat isn't from that source");
+            }
+            if second < first + self.slice.len() {
+                return Err("value.stretched: concat must follow this value");
+            }
+            let slice = &source[first - base..second - base + concat.len()];
+            Ok(Value { slice, indent })
         }
     }
     impl<'a> Default for Value<'a> {

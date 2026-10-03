@@ -449,14 +449,15 @@ mod parse_err {
         assert_eq!(errors, ":1: error: (thru line 2) excess indentation\n");
         let errors = arena.format_errors("", content, usize::MAX).unwrap_err();
         assert_eq!(errors, ":1: error: (thru line 2) excess indentation\n");
-        let content = "\n\n\tx\nk=v";
-        let errors = arena.format_errors("", content, 1).unwrap_err();
-        assert_eq!(errors, ":1: error: consecutive empty lines\n");
-        let errors = arena.format_errors("", content, usize::MAX).unwrap_err();
-        assert_eq!(
-            errors,
-            ":1: error: consecutive empty lines\n:2: error: (thru line 3) excess indentation\n"
-        );
+        // decided to become more flexible about empties, so these aren't errors any more...
+        // let content = "\n\n\tx\nk=v";
+        // let errors = arena.format_errors("", content, 1).unwrap_err();
+        // assert_eq!(errors, ":1: error: consecutive empty lines\n");
+        // let errors = arena.format_errors("", content, usize::MAX).unwrap_err();
+        // assert_eq!(
+        //     errors,
+        //     ":1: error: consecutive empty lines\n:2: error: (thru line 3) excess indentation\n"
+        // );
     }
     #[test]
     fn excess_indent() {
@@ -473,13 +474,8 @@ mod parse_err {
         let bump = Bump::new();
         let mut arena = HeapArena::new(&bump);
         let content = "\n\n\nk=v";
-        let errors = arena
-            .collect_errors(&content, usize::MAX)
-            .expect_err("invalid");
-        assert_eq!(
-            errors,
-            vec!(ParseError::new(1, 3, "consecutive empty lines"))
-        );
+        arena.collect_errors(&content, usize::MAX).unwrap();
+        // TODO gap in only entry should be 3
     }
     #[test]
     fn list_shortcut() {
@@ -510,14 +506,14 @@ mod parse_err {
             )
         );
     }
-    #[test]
-    fn dict_gap_error() {
-        let mut arena = StackArena::wrap(NO_ITEMS, NO_ENTRIES);
-        assert_eq!(
-            arena.first_error("///"),
-            Err(ParseError::at(2, "gap/comment but no key"))
-        );
-    }
+    // #[test]
+    // fn dict_gap_error() {
+    //     let mut arena = StackArena::wrap(NO_ITEMS, NO_ENTRIES);
+    //     assert_eq!(
+    //         arena.first_error("///"), seen as prolog, only worked with # and //
+    //         Err(ParseError::at(2, "gap/comment but no key"))
+    //     );
+    // }
     #[test]
     fn dict_errors() {
         let bump = Bump::new();

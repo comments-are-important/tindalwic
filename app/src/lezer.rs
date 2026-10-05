@@ -2,21 +2,19 @@
 
 use anyhow::{Error, Result};
 use bumpalo::Bump;
-use std::io::{self, Read};
-use tindalwic::{
-    Comment, Dict, Entries, Entry, File, Item, Items, List, Text, Value, bumpalo::Arena,
-};
+use std::path::PathBuf;
+use tindalwic::bumpalo::Arena;
+use tindalwic::{Comment, Dict, Entries, Entry, File, Item, Items, List, Text, Value};
 
-/// read tindalwic from stdin, print expected lezer tree to stdout
+/// read tindalwic, print expected lezer tree to stdout
 /// the core crate is authoritative so the lezer needs to conform.
 /// a strategy for harmonizing is to generate the expected output for tests
 /// mechanically then tweak the grammar code so it produces correct trees.
-pub fn run() -> Result<()> {
-    let mut input = String::new();
-    io::stdin().read_to_string(&mut input)?;
+pub fn run(input: &PathBuf) -> Result<()> {
+    let content = super::read_to_string(input)?;
     let bump = Bump::new();
     let mut arena = Arena::new(&bump);
-    let parsed = arena.format_errors("<stdin>", &input, usize::MAX);
+    let parsed = arena.format_errors(&input.display(), &content, usize::MAX);
     println!("{}", file(&parsed.map_err(Error::msg)?));
     Ok(())
 }

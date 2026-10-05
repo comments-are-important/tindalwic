@@ -139,7 +139,7 @@ impl<'de, 'a, 'b> Visitor<'de> for MaybeDe<'a, 'b> {
 
 trait VariantHelp: VariantNames + Into<&'static str> + Copy {
     const KIND: &'static str;
-    fn ord(self) -> usize;
+    fn num(self) -> usize;
 
     const NAMES: &'static [&'static str] = <Self as VariantNames>::VARIANTS;
     fn serialize<S, W>(&self, s: S, value: &W) -> StdResult<S::Ok, S::Error>
@@ -147,14 +147,14 @@ trait VariantHelp: VariantNames + Into<&'static str> + Copy {
         S: serde::ser::Serializer,
         W: ?Sized + Serialize,
     {
-        s.serialize_newtype_variant(Self::KIND, self.ord() as u32, (*self).into(), value)
+        s.serialize_newtype_variant(Self::KIND, self.num() as u32, (*self).into(), value)
     }
 }
 macro_rules! variantHelp {
     ($helper:ident<$type:ident>) => {
         impl VariantHelp for $helper {
             const KIND: &'static str = stringify!($type);
-            fn ord(self) -> usize {
+            fn num(self) -> usize {
                 self as usize
             }
         }
@@ -179,23 +179,23 @@ impl<H: FieldHelp> Flags<H> {
         self.flags.iter().map(|flag| (*flag) as usize).sum()
     }
     fn selected(&self) -> impl std::iter::Iterator<Item = &H> {
-        H::ARRAY.iter().filter(|variant| self.flags[variant.ord()])
+        H::ARRAY.iter().filter(|variant| self.flags[variant.num()])
     }
     fn once<'de, A, F>(&mut self, variant: H, f: F) -> StdResult<H, A::Error>
     where
         A: MapAccess<'de>,
         F: Fn(&'static str) -> A::Error,
     {
-        if self.flags[variant.ord()] {
+        if self.flags[variant.num()] {
             return Err(f(variant.into()));
         }
-        self.flags[variant.ord()] = true;
+        self.flags[variant.num()] = true;
         Ok(variant)
     }
 }
 trait FieldHelp: EnumCount + VariantArray + VariantNames + Into<&'static str> + Copy {
     const KIND: &'static str;
-    fn ord(self) -> usize;
+    fn num(self) -> usize;
 
     const NAMES: &'static [&'static str] = <Self as VariantNames>::VARIANTS;
     const ARRAY: &'static [Self] = <Self as VariantArray>::VARIANTS;
@@ -208,7 +208,7 @@ trait FieldHelp: EnumCount + VariantArray + VariantNames + Into<&'static str> + 
     fn assign<F: Fn(Self) -> bool>(f: F) -> Flags<Self> {
         let mut flags = Self::each(false);
         for variant in Self::ARRAY {
-            flags.flags[variant.ord()] = (f)(*variant)
+            flags.flags[variant.num()] = (f)(*variant)
         }
         flags
     }
@@ -217,7 +217,7 @@ macro_rules! fieldHelp {
     ($helper:ident<$type:ident>) => {
         impl FieldHelp for $helper {
             const KIND: &'static str = stringify!($type);
-            fn ord(self) -> usize {
+            fn num(self) -> usize {
                 self as usize
             }
         }

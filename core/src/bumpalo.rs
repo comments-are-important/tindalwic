@@ -8,7 +8,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use bumpalo::Bump;
 use core::cell::Cell;
-use core::fmt::Write;
+use core::fmt::{Display, Write};
 use core::writeln;
 
 /// this pattern is typically implemented atop RefCell, but because this is in a
@@ -110,9 +110,9 @@ impl<'a> Arena<'a> {
         .ok_or_else(|| errors)
     }
     /// call the parser on the provided content, describe any errors using GCC format.
-    pub fn format_errors(
+    pub fn format_errors<P: Display + ?Sized>(
         &mut self,
-        path: &str,
+        path: &P,
         content: &'a str,
         count: usize,
     ) -> Result<File<'a>, String> {

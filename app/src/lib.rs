@@ -1,12 +1,13 @@
 //! CLI helpers that might also be useful in other apps.
 
 use std::fs;
-use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
-use std::path::{Path, PathBuf};
+use std::io::{self, Read as _, Write as _};
+use std::path::PathBuf;
 
 use anyhow::{Error, Result, bail};
 use bumpalo::Bump;
-use serde::de::DeserializeSeed;
+use either::Either;
+use serde::de::DeserializeSeed as _;
 use time::UtcDateTime;
 use time::format_description::well_known::Iso8601;
 use time::format_description::well_known::iso8601::{Config, TimePrecision};
@@ -35,17 +36,40 @@ pub fn now() -> String {
         .expect("trimming fractions should work")
 }
 
+const DASH: &'static str = "-";
+
+/// fully read the given file, DASH means stdin (never returning if no EOF)
+pub fn read_to_string(input: &PathBuf) -> Result<String> {
+    let mut content = String::new();
+    if input == DASH {
+        io::stdin().lock().read_to_string(&mut content)?;
+    } else {
+        content = fs::read_to_string(input)?;
+    }
+    Ok(content)
+}
+
+/// a file opened for writing, or stdout
+pub type Output<'a> = Either<io::BufWriter<fs::File>, io::StdoutLock<'a>>;
+/// create the file for writing, DASH means stdout
+pub fn create<'a>(output: &PathBuf) -> Result<Output<'a>> {
+    Ok(if output == DASH {
+        Either::Right(io::stdout().lock())
+    } else {
+        Either::Left(io::BufWriter::new(fs::File::create(output)?))
+    })
+}
+
 /// verify a round trip does not change anything
-pub fn idempotent() -> Result<()> {
-    let mut input = String::new();
-    io::stdin().read_to_string(&mut input)?;
+pub fn idempotent(input: &PathBuf) -> Result<()> {
+    let content = read_to_string(input)?;
     let bump = Bump::new();
     let mut arena = Arena::new(&bump);
-    let parsed = arena.format_errors("<stdin>", &input, usize::MAX);
+    let parsed = arena.format_errors(&input.display(), &content, usize::MAX);
     let file = parsed.map_err(Error::msg)?;
     let encoded = file.to_string();
-    if input != encoded {
-        for diff in diff::lines(&input, &encoded) {
+    if content != encoded {
+        for diff in diff::lines(&content, &encoded) {
             match diff {
                 diff::Result::Left(l) => eprintln!(" - {}", l),
                 diff::Result::Both(l, _) => eprintln!("   {}", l),
@@ -77,6 +101,11 @@ impl SerDe {
             _ => None,
         }
     }
+    /// recognizes the extension from the given path
+    pub fn ext(path: &PathBuf) -> Option<Self> {
+        path.extension()
+            .and_then(|ext| SerDe::from(ext.as_encoded_bytes()))
+    }
 
     /// serialize [File] to a [Neutered] pretty string
     pub fn ser(&self, file: &File) -> Result<String> {
@@ -106,97 +135,40 @@ impl SerDe {
     }
 }
 
-/// a [BufReader] and the format expected from it
-pub struct Reader {
-    /// the buffered stream
-    pub buffer: Box<dyn BufRead>,
-    /// the serde format
-    pub format: SerDe,
-}
-impl Reader {
-    /// read from [io::stdin] using the given format
-    pub fn stdin(format: SerDe) -> Self {
-        Reader {
-            buffer: Box::new(BufReader::new(io::stdin())),
-            format,
-        }
+/// deserialize input to tindalwic, encode and write to output
+pub fn de(input: &PathBuf, output: &PathBuf) -> Result<()> {
+    if input == DASH {
+        bail!("dash for input is not allowed here, need the format JSON/TOML/YAML");
     }
-    /// read from filesystem using the given format
-    pub fn open<P: AsRef<Path>>(path: P, format: SerDe) -> Result<Self> {
-        Ok(Reader {
-            buffer: Box::new(BufReader::new(fs::File::open(path)?)),
-            format,
-        })
-    }
-    /// interpret a CLI argument.
-    /// Err if unrecognized, naked extension means stdin, else open.
-    pub fn parse(arg: &PathBuf) -> Result<Self> {
-        if let Some(format) = SerDe::from(arg.as_os_str().as_encoded_bytes()) {
-            return Ok(Reader::stdin(format));
-        }
-        if let Some(extension) = arg.extension() {
-            if let Some(format) = SerDe::from(extension.as_encoded_bytes()) {
-                return Reader::open(arg, format);
-            }
-        }
-        bail!("unrecognized format/extension: {}", arg.to_string_lossy())
-    }
-    /// deserialize to tindalwic and write to stdout
-    pub fn run(&mut self) -> Result<()> {
-        let mut input = String::new();
-        self.buffer.read_to_string(&mut input)?;
-        let bump = Bump::new();
-        let mut arena = Arena::new(&bump);
-        let file = self.format.de(&mut arena, &input)?;
-        io::stdout().write(file.to_string().as_bytes())?;
-        Ok(())
-    }
+    let stdin = SerDe::from(input.as_os_str().as_encoded_bytes());
+    let or_ext = stdin.or_else(|| SerDe::ext(input));
+    let Some(found) = or_ext else {
+        bail!("need a format or an extension for input");
+    };
+    let dash = PathBuf::from(DASH);
+    let content = read_to_string(if stdin.is_some() { &dash } else { input })?;
+    let bump = Bump::new();
+    let mut arena = Arena::new(&bump);
+    let file = found.de(&mut arena, &content)?;
+    create(output)?.write(file.to_string().as_bytes())?;
+    Ok(())
 }
 
-/// a [BufWriter] and the format it expects
-pub struct Writer {
-    /// the buffered stream
-    pub buffer: Box<dyn Write>,
-    /// the serde format
-    pub format: SerDe,
-}
-impl Writer {
-    /// write to [io::stdout] using the given format
-    pub fn stdout(format: SerDe) -> Self {
-        Writer {
-            buffer: Box::new(BufWriter::new(io::stdout())),
-            format,
-        }
+/// parse tindalwic input, serialize to serde output
+pub fn ser(input: &PathBuf, output: &PathBuf) -> Result<()> {
+    if output == DASH {
+        bail!("dash for output is not allowed here, need the format JSON/TOML/YAML");
     }
-    /// write to filesystem using the given format
-    pub fn create<P: AsRef<Path>>(path: P, format: SerDe) -> Result<Self> {
-        Ok(Writer {
-            buffer: Box::new(BufWriter::new(fs::File::create(path)?)),
-            format,
-        })
-    }
-    /// interpret a CLI argument.
-    /// Err if unrecognized, naked extension means stdout, else create.
-    pub fn parse(arg: &PathBuf) -> Result<Self> {
-        if let Some(format) = SerDe::from(arg.as_os_str().as_encoded_bytes()) {
-            return Ok(Writer::stdout(format));
-        }
-        if let Some(extension) = arg.extension() {
-            if let Some(format) = SerDe::from(extension.as_encoded_bytes()) {
-                return Writer::create(arg, format);
-            }
-        }
-        bail!("unrecognized format/extension: {}", arg.to_string_lossy())
-    }
-    /// read tindalwic from stdin, then serialize
-    pub fn run(&mut self) -> Result<()> {
-        let mut input = String::new();
-        io::stdin().read_to_string(&mut input)?;
-        let bump = Bump::new();
-        let mut arena = Arena::new(&bump);
-        let parsed = arena.format_errors("<stdin>", &input, usize::MAX);
-        let file = parsed.map_err(Error::msg)?;
-        self.buffer.write(self.format.ser(&file)?.as_bytes())?;
-        Ok(())
-    }
+    let stdin = SerDe::from(output.as_os_str().as_encoded_bytes());
+    let or_ext = stdin.or_else(|| SerDe::ext(output));
+    let Some(found) = or_ext else {
+        bail!("need a format or an extension for output");
+    };
+    let content = read_to_string(input)?;
+    let bump = Bump::new();
+    let mut arena = Arena::new(&bump);
+    let parsed = arena.format_errors(&input.display(), &content, usize::MAX);
+    let file = parsed.map_err(Error::msg)?;
+    create(output)?.write(found.ser(&file)?.as_bytes())?;
+    Ok(())
 }

@@ -93,12 +93,12 @@ impl<'de, 'a, 'b> Visitor<'de> for CommentDe<'a, 'b> {
                 CommentFields::Gap => {
                     result.gap = seq
                         .next_element::<usize>()?
-                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &CommentDe(build)))?;
+                        .ok_or_else(|| A::Error::invalid_length(field.num(), &CommentDe(build)))?;
                 }
                 CommentFields::Value => {
                     result.value = seq
                         .next_element_seed(MaybeDe(build))?
-                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &CommentDe(build)))?
+                        .ok_or_else(|| A::Error::invalid_length(field.num(), &CommentDe(build)))?
                         .into();
                 }
             }
@@ -158,12 +158,12 @@ impl<'de, 'a, 'b> Visitor<'de> for TextDe<'a, 'b> {
                 TextFields::Value => {
                     result.value = seq
                         .next_element_seed(ValueDe(build))?
-                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &TextDe(build)))?;
+                        .ok_or_else(|| A::Error::invalid_length(field.num(), &TextDe(build)))?;
                 }
                 TextFields::Epilog => {
                     result.epilog = seq
                         .next_element_seed(MaybeDe(build))?
-                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &TextDe(build)))?
+                        .ok_or_else(|| A::Error::invalid_length(field.num(), &TextDe(build)))?
                         .into();
                 }
             }
@@ -262,18 +262,18 @@ impl<'de, 'a, 'b> Visitor<'de> for ListDe<'a, 'b> {
                 ListFields::Prolog => {
                     result.prolog = seq
                         .next_element_seed(CommentDe(build))?
-                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &ListDe(build)))?
+                        .ok_or_else(|| A::Error::invalid_length(field.num(), &ListDe(build)))?
                         .into();
                 }
                 ListFields::Items => {
                     result.items = seq
                         .next_element_seed(ItemsDe(build))?
-                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &ListDe(build)))?;
+                        .ok_or_else(|| A::Error::invalid_length(field.num(), &ListDe(build)))?;
                 }
                 ListFields::Epilog => {
                     result.epilog = seq
                         .next_element_seed(CommentDe(build))?
-                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &ListDe(build)))?
+                        .ok_or_else(|| A::Error::invalid_length(field.num(), &ListDe(build)))?
                         .into();
                 }
             }
@@ -333,12 +333,12 @@ impl<'de, 'a, 'b> Visitor<'de> for NameDe<'a, 'b> {
                 NameFields::Comment => {
                     result.comment = seq
                         .next_element_seed(CommentDe(build))?
-                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &ListDe(build)))?;
+                        .ok_or_else(|| A::Error::invalid_length(field.num(), &ListDe(build)))?;
                 }
                 NameFields::Key => {
                     result.key = seq
                         .next_element_seed(ValueDe(build))?
-                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &ListDe(build)))?;
+                        .ok_or_else(|| A::Error::invalid_length(field.num(), &ListDe(build)))?;
                 }
             }
         }
@@ -399,12 +399,12 @@ impl<'de, 'a, 'b> Visitor<'de> for EntryDe<'a, 'b> {
                 EntryFields::Name => {
                     result.name = seq
                         .next_element_seed(NameDe(build))?
-                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &EntryDe(build)))?;
+                        .ok_or_else(|| A::Error::invalid_length(field.num(), &EntryDe(build)))?;
                 }
                 EntryFields::Item => {
                     result.item = seq
                         .next_element_seed(ItemDe(build))?
-                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &EntryDe(build)))?;
+                        .ok_or_else(|| A::Error::invalid_length(field.num(), &EntryDe(build)))?;
                 }
             }
         }
@@ -504,18 +504,18 @@ impl<'de, 'a, 'b> Visitor<'de> for DictDe<'a, 'b> {
                 DictFields::Prolog => {
                     result.prolog = seq
                         .next_element_seed(CommentDe(build))?
-                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &EntryDe(build)))?
+                        .ok_or_else(|| A::Error::invalid_length(field.num(), &EntryDe(build)))?
                         .into();
                 }
                 DictFields::Entries => {
                     result.entries = seq
                         .next_element_seed(EntriesDe(build))?
-                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &EntryDe(build)))?;
+                        .ok_or_else(|| A::Error::invalid_length(field.num(), &EntryDe(build)))?;
                 }
                 DictFields::Epilog => {
                     result.epilog = seq
                         .next_element_seed(CommentDe(build))?
-                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &EntryDe(build)))?
+                        .ok_or_else(|| A::Error::invalid_length(field.num(), &EntryDe(build)))?
                         .into();
                 }
             }
@@ -581,18 +581,18 @@ impl<'de, 'a, 'b> Visitor<'de> for FileDe<'a, 'b> {
                 FileFields::Hashbang => {
                     result.hashbang = seq
                         .next_element_seed(MaybeDe(build))?
-                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &FileDe(build)))?
+                        .ok_or_else(|| A::Error::invalid_length(field.num(), &FileDe(build)))?
                 }
                 FileFields::Prolog => {
                     result.prolog = seq
                         .next_element_seed(CommentDe(build))?
-                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &FileDe(build)))?
+                        .ok_or_else(|| A::Error::invalid_length(field.num(), &FileDe(build)))?
                         .into()
                 }
                 FileFields::Entries => {
                     result.entries = seq
                         .next_element_seed(EntriesDe(build))?
-                        .ok_or_else(|| A::Error::invalid_length(field.ord(), &FileDe(build)))?
+                        .ok_or_else(|| A::Error::invalid_length(field.num(), &FileDe(build)))?
                 }
             }
         }

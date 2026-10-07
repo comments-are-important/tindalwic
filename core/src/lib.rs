@@ -13,7 +13,7 @@ pub use tindalwic_macros::path;
 ///
 /// this helps to write code snippets that make a structural change to a [File].
 /// a typical snippet would:
-///  + [path!].walk([File].cells) to the place to be changed,
+///  + [path!].walk([File].entries) to the place to be changed,
 ///  + use [json!] to build a new [Item],
 ///  + then use [core::cell::Cell::set] to affect the change.
 pub use tindalwic_macros::json;
@@ -48,8 +48,8 @@ pub use value::Value;
 impl<'a> Value<'a> {
     /// linear `O(n)` scan.
     // TODO: add link to `alloc` map view, say it "offers `O(1)`."
-    pub fn find_linearly_in(self, cells: Entries<'_>) -> Option<usize> {
-        cells.iter().position(|cell| cell.get().name.key == self)
+    pub fn find_linearly_in(self, entries: Entries<'_>) -> Option<usize> {
+        entries.iter().position(|cell| cell.get().name.key == self)
     }
 }
 
@@ -269,7 +269,7 @@ pub struct File<'a> {
     pub entries: Entries<'a>,
 }
 impl<'a> File<'a> {
-    /// make an [Item::Dict] from self.prolog and self.cells
+    /// make an [Item::Dict] from self.prolog and self.entries
     pub fn embed_without_hashbang(&self) -> Item<'a> {
         Item::Dict(Dict {
             prolog: self.prolog,

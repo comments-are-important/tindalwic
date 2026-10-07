@@ -1,5 +1,5 @@
 #!/usr/bin/env -S tindalwic same
-	probably shouldn't use `same` - I *think* it is limited to dev build
+
 //
 	# Introduction to `Tindalwic`
 	

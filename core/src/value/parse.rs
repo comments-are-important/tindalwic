@@ -184,8 +184,13 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
         }
         let hashbang = self.comment(0, false, CommentMark::Shebang)?.value;
         let prolog = self.comment(0, true, CommentMark::DoubleSlash)?;
-        let cells = self.entries(0)?;
-        assert!(self.current.is_none(), "input was not completely consumed");
+        let entries = self.entries(0)?;
+        if self.current.is_some() {
+            self.report(ParseError::at(
+                self.line,
+                "input was not completely consumed",
+            ))?;
+        }
         // TODO do something with empties at EOF
         if !self.good {
             Err("parse.file: something was reported")
@@ -193,7 +198,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
             Ok(File {
                 hashbang,
                 prolog,
-                entries: cells,
+                entries,
             })
         }
     }
@@ -263,7 +268,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
         loop {
             while self.current == Some("\n") {
                 self.empties += 1;
-                previous = self.current;
+                // leave previous, exclude last clump of empties from stretch
                 self.advance();
             }
             if self.current.is_none() {
@@ -399,7 +404,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
             match self.arena.finish_items(count) {
                 Ok(cells) => Ok(cells),
                 Err(err) => {
-                    // seems like .inspect_err should work except
+                    // seems like .inspect_err should work except for...
                     self.report(ParseError::Memory(err))?; // this `?`
                     Err(err) // memory err should always unwind but to be safe
                 }
@@ -417,6 +422,9 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
     }
     fn one_entry(&mut self, indent: usize) -> Result<Option<Entry<'a>>, &'static str> {
         loop {
+            if self.current.is_none() || self.tabs != indent {
+                return Ok(None);
+            }
             let comment = self.comment(indent, true, CommentMark::TripleSlash)?;
             let Some(scan) = self.after_indent(indent) else {
                 if comment.gap > 0 || comment.value.is_some() {
@@ -490,7 +498,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
             match self.arena.finish_entries(count) {
                 Ok(cells) => Ok(cells),
                 Err(err) => {
-                    // seems like .inspect_err should work except
+                    // seems like .inspect_err should work except for...
                     self.report(ParseError::Memory(err))?; // this `?`
                     Err(err) // memory err should always unwind but to be safe
                 }

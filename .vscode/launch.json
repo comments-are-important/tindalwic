@@ -5,24 +5,27 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "lezer main",
+            "name": "cli",
+            "type": "lldb",
+            "sourceLanguages": ["rust"],
+            "initCommands": ["command script import '${workspaceFolder}/lldb_tindalwic'"],
+            "cwd": "${workspaceFolder}",
+            "program": "${workspaceFolder}/target/debug/tindalwic-cli",
+            "args": ["same", "example.tindalwic"],
+            "preLaunchTask": "just: cli",
             "request": "launch",
+        },
+        {
+            "name": "lezer",
             "type": "node",
+            "cwd": "${workspaceFolder}/grammar",
             "program": "${workspaceFolder}/grammar/main.ts",
             "args": ["#F\n{ONE}\n\t#1\n{TWO}\n\t#T\n"],
             "env": {"LOG":"parse"},
+            "request": "launch",
             "skipFiles": [
-                //"<node_internals>/**"
+                "<node_internals>/**"
             ],
         },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "CLI random",
-            "program": "${workspaceFolder}/target/debug/tindalwic-cli",
-            "args": ["random"],
-            "cwd": "${workspaceFolder}",
-            "preLaunchTask": "just: cli",
-        }
     ]
 }

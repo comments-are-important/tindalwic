@@ -1,11 +1,11 @@
 #![allow(missing_docs)]
-
 use bumpalo::Bump;
 use rand::prelude::IndexedRandom;
 use rand::rngs::SmallRng;
 use rand::{Rng, RngExt, SeedableRng as _};
 use rand_distr::{Distribution as _, Zipf};
 use std::fmt::{self, Write};
+use std::fs;
 use std::io::Write as _;
 use tindalwic::bumpalo::Arena;
 use tindalwic::parse::Parse as _;
@@ -49,18 +49,33 @@ impl Args {
                 let sample = Args::sample(self.unicode);
                 let mut random = Random::new(&mut arena, &mut rng, sample)?;
                 let original = random.file(self.items)?;
-                let encoded = original.to_string();
-                match arena.format_errors("", &encoded, usize::MAX) {
-                    Err(message) => {
-                        anyhow::bail!("parse error after {count} successes\n{message}\n{encoded}\n")
-                    }
-                    Ok(parsed) if parsed != original => {
-                        anyhow::bail!(
-                            "difference after {count} successes\n{original:?}\n{parsed:?}\n{encoded}\n"
-                        )
-                    }
-                    _ => {}
+                let expected = original.to_string();
+                let (good, parsed, errors) = match arena.format_errors("", &expected, usize::MAX) {
+                    Ok(parsed) => (true, parsed, "".into()),
+                    Err(errors) => (false, File::default(), errors),
                 };
+                let actually = parsed.to_string();
+                if good && original == parsed && expected == actually {
+                    continue;
+                }
+                if count != 0 {
+                    println!("after {count} successes");
+                }
+                if !fs::exists("target/debug/tindalwic-cli")? {
+                    eprintln!("can't write to ./target/chk.*");
+                } else {
+                    fs::write("target/chk.original.debug_api", format!("{original:#?}"))?;
+                    fs::write("target/chk.original.tindalwic", &expected)?;
+                    fs::write("target/chk.parse.errors", &errors)?;
+                    fs::write("target/chk.parsed.debug_api", format!("{parsed:#?}"))?;
+                    fs::write("target/chk.parsed.tindalwic", &actually)?;
+                }
+                anyhow::bail! {
+                    if !good { "parse error"}
+                    else if original != parsed {"API difference"}
+                    else if expected != actually { "recoding difference"}
+                    else {"unknown difference"}
+                }
             }
             return Ok(());
         }
@@ -301,6 +316,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
                 .builder()
                 .finish_entries(count)
                 .map_err(anyhow::Error::msg)?,
+            trailing: self.rng.random_range(0..3),
         })
     }
 }

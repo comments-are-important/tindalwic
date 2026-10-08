@@ -23,6 +23,7 @@ fn three_blank_comments() {
         hashbang: Some("".into()),
         prolog: "".into(),
         entries: &entries,
+        trailing: 1,
     };
     let encoded = file.to_string();
     let expect = "
@@ -30,6 +31,7 @@ fn three_blank_comments() {
         //
         ///
         {}
+
     ";
     assert_eq!(encoded, from_literal(expect));
 }
@@ -224,10 +226,8 @@ fn hash_map() {
     }
     let mut map = HashMap::new();
     for entry in entries {
-        let Entry {
-            name: key, item, ..
-        } = entry.get();
-        map.insert(key.key, item);
+        let Entry { name, item, .. } = entry.get();
+        map.insert(name.key, item);
     }
     assert_eq!(map.len(), entries.len());
 }
@@ -238,7 +238,7 @@ fn parse_alloc() {
     let bump = bumpalo::Bump::new();
     let mut arena = tindalwic::bumpalo::Arena::new(&bump);
     let file = arena.panic_first_error("k=v\n");
-    assert_eq!(file.to_string(), "k=v");
+    assert_eq!(file.to_string(), "k=v\n");
 }
 #[test]
 #[cfg(feature = "bumpalo")]
@@ -421,9 +421,12 @@ mod parse_err {
     fn consecutive_empty() {
         let bump = Bump::new();
         let mut arena = HeapArena::new(&bump);
-        let content = "\n\n\nk=v";
-        arena.collect_errors(&content, usize::MAX).unwrap();
-        // TODO gap in only entry should be 3
+        let content = "\n\n\nk=v\n\n";
+        let file = arena.collect_errors(&content, usize::MAX).unwrap();
+        assert_eq!(file.entries.len(), 1);
+        assert_eq!(file.trailing, 2);
+        let entry = file.entries[0].get();
+        assert_eq!(entry.name.comment.gap, 3);
     }
     #[test]
     fn list_shortcut() {

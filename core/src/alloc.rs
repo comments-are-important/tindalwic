@@ -44,6 +44,11 @@ pub fn from_literal(literal: &'static str) -> String {
     let prefix = &line[0..line.len() - result.len()];
     let mut more = lines.next();
     while let Some((_, line)) = more {
+        if line.is_empty() {
+            result.push('\n');
+            more = lines.next();
+            continue;
+        }
         let Some(mut remainder) = line.strip_prefix(prefix) else {
             break;
         };

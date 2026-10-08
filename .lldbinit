@@ -1,0 +1,6 @@
+# the default behavior is to ignore this file and print a warning
+# suggest editing/creating $HOME/.lldbinit to contain:
+#     settings set target.load-cwd-lldbinit false
+#     command script import /workspaces/tindalwic/lldb_tindalwic
+# keeps ignoring this file but silences the warning
+command script import lldb_tindalwic

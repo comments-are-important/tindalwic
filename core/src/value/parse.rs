@@ -2,7 +2,7 @@
 
 use core::str::SplitInclusive;
 
-use crate::{Comment, Dict, Entries, Entry, File, Item, Items, List, Name, Text, Value};
+use crate::{Comment, Dict, Entries, Entry, File, Item, Items, List, Text, Value};
 
 // there are some lines/branches here that are impossible to get coverage for,
 // and the mechanisms for suppressing the report are inadequate ... until:
@@ -83,11 +83,10 @@ pub trait Build<'a> {
     }
     /// push a `key` -> `item` association (no metadata) for a future .finish_entries to use
     fn associate(&mut self, key: &'a str, item: Item<'a>) -> Result<(), &'static str> {
-        self.push_entry(Entry {
-            name: key.into(),
-            item,
-            ..Default::default()
-        })
+        let mut entry = Entry::default();
+        entry.name.key = key.into();
+        entry.item = item;
+        self.push_entry(entry)
     }
     /// default is an Err because intern needs alloc
     #[allow(unused_variables)]
@@ -146,7 +145,7 @@ struct Input<'a, 'b, 'r> {
     current: Option<&'a str>,
     good: bool,
     report: &'r mut dyn FnMut(ParseError) -> Reported,
-    pending: Option<SplitInclusive<'a, char>>,
+    pending: SplitInclusive<'a, char>,
     arena: &'b mut dyn Build<'a>,
     utf8: &'a str, // entire tindalwic encoded content
 }
@@ -157,17 +156,16 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
         utf8: &'a str,
         mut report: impl FnMut(ParseError) -> Reported + 'r,
     ) -> Option<File<'a>> {
-        let pending = Some(utf8.split_inclusive('\n'));
         let mut input = Input {
-            utf8,
-            arena,
             line: 0,
-            pending,
+            empties: 0,
+            tabs: 0,
+            current: None,
             good: true,
             report: &mut report,
-            current: None,
-            tabs: 0,
-            empties: 0,
+            pending: utf8.split_inclusive('\n'),
+            arena,
+            utf8,
         };
         if input.next(0, true).is_err() {
             return None;
@@ -183,25 +181,30 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
             self.report(ParseError::Memory("way too big"))?;
             return Err("parse.file: can't even start");
         }
-        let hashbang = self.comment(0, false, CommentMark::Shebang)?.value;
-        let prolog = self.comment(0, true, CommentMark::DoubleSlash)?;
-        let entries = self.entries(0)?;
+        let mut file = File::default();
+        file.hashbang = self.comment(0, false, CommentMark::Shebang)?.value;
+        file.prolog = self.comment(0, true, CommentMark::DoubleSlash)?;
+        file.entries = self.entries(0)?;
+        file.trailing = self.claim_empties();
+        if self.utf8.ends_with('\n') {
+            file.trailing += 1;
+        }
+        if file.prolog.gap != 0 && file.prolog.value.is_none() && !file.entries.is_empty() {
+            let mut entry = file.entries[0].get();
+            entry.name.comment.gap += file.prolog.gap;
+            file.entries[0].set(entry);
+            file.prolog.gap = 0;
+        }
         if self.current.is_some() {
             self.report(ParseError::at(
                 self.line,
                 "input was not completely consumed",
             ))?;
         }
-        let _cell = core::cell::Cell::new("hi");
-        // TODO do something with empties at EOF
         if !self.good {
             Err("parse.file: something was reported")
         } else {
-            Ok(File {
-                hashbang,
-                prolog,
-                entries,
-            })
+            Ok(file)
         }
     }
 
@@ -222,19 +225,12 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
     }
 
     fn advance(&mut self) {
-        let Some(mut iter) = self.pending.take() else {
-            self.current = None;
-            return;
-        };
-        self.current = iter.next();
         self.line += 1;
-        self.tabs = match self.current {
-            None => 0,
-            Some(line) => {
-                self.pending = Some(iter);
-                line.len() - line.trim_start_matches('\t').len()
-            }
-        }
+        self.current = self.pending.next();
+        self.tabs = self
+            .current
+            .map(|it| it.len() - it.trim_start_matches('\t').len())
+            .unwrap_or_default();
     }
 
     fn after_indent(&self, indent: usize) -> Option<&'a str> {
@@ -357,11 +353,11 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
 
     /// previous line opened a list context, so parse all the lines in it.
     fn list(&mut self, indent: usize) -> Result<Item<'a>, &'static str> {
-        Ok(Item::List(List {
-            prolog: self.comment(indent + 1, true, CommentMark::DoubleSlash)?,
-            items: self.items(indent + 1)?,
-            epilog: self.comment(indent, true, CommentMark::DoubleSlash)?,
-        }))
+        let mut list = List::default();
+        list.prolog = self.comment(indent + 1, true, CommentMark::DoubleSlash)?;
+        list.items = self.items(indent + 1)?;
+        list.epilog = self.comment(indent, true, CommentMark::DoubleSlash)?;
+        Ok(Item::List(list))
     }
 
     fn one_item(&mut self, indent: usize) -> Result<Option<Item<'a>>, &'static str> {
@@ -424,11 +420,17 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
 
     /// previous line opened a dict context, so parse all the lines in it.
     fn dict(&mut self, indent: usize) -> Result<Item<'a>, &'static str> {
-        Ok(Item::Dict(Dict {
-            prolog: self.comment(indent + 1, true, CommentMark::DoubleSlash)?,
-            entries: self.entries(indent + 1)?,
-            epilog: self.comment(indent, true, CommentMark::DoubleSlash)?,
-        }))
+        let mut dict = Dict::default();
+        dict.prolog = self.comment(indent + 1, true, CommentMark::DoubleSlash)?;
+        dict.entries = self.entries(indent + 1)?;
+        dict.epilog = self.comment(indent, true, CommentMark::DoubleSlash)?;
+        if dict.prolog.gap != 0 && dict.prolog.value.is_none() && !dict.entries.is_empty() {
+            let mut entry = dict.entries[0].get();
+            entry.name.comment.gap += dict.prolog.gap;
+            dict.entries[0].set(entry);
+            dict.prolog.gap = 0;
+        }
+        Ok(Item::Dict(dict))
     }
     fn one_entry(&mut self, indent: usize) -> Result<Option<Entry<'a>>, &'static str> {
         loop {
@@ -444,65 +446,42 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
             };
             let line = self.line;
             let message = if scan.starts_with('<') && scan.ends_with('>') {
-                let key = Value::from(&scan[1..scan.len() - 1]);
-                let item = self.text_block(indent)?;
-                let name = Name {
-                    comment,
-                    key,
-                    longer: true,
-                };
-                return Ok(Some(Entry {
-                    name,
-                    item,
-                    longer: false,
-                }));
+                let mut entry = Entry::default();
+                entry.name.key = Value::from(&scan[1..scan.len() - 1]);
+                entry.item = self.text_block(indent)?;
+                entry.name.comment = comment;
+                entry.name.longer = true;
+                return Ok(Some(entry));
             } else if scan.starts_with('<') {
                 "malformed `<key>` in dict"
             } else if scan.starts_with('[') && scan.ends_with(']') {
-                let key = Value::from(&scan[1..scan.len() - 1]);
+                let mut entry = Entry::default();
+                entry.name.key = Value::from(&scan[1..scan.len() - 1]);
                 self.next(indent + 1, true)?;
-                let item = self.list(indent)?;
-                let name = Name {
-                    comment,
-                    key,
-                    longer: true,
-                };
-                return Ok(Some(Entry {
-                    name,
-                    item,
-                    longer: false,
-                }));
+                entry.item = self.list(indent)?;
+                entry.name.comment = comment;
+                entry.name.longer = true;
+                return Ok(Some(entry));
             } else if scan.starts_with('[') {
                 "malformed `[key]` in dict"
             } else if scan.starts_with('{') && scan.ends_with('}') {
-                let key = Value::from(&scan[1..scan.len() - 1]);
+                let mut entry = Entry::default();
+                entry.name.key = Value::from(&scan[1..scan.len() - 1]);
                 self.next(indent + 1, true)?;
-                let item = self.dict(indent)?;
-                let name = Name {
-                    comment,
-                    key,
-                    longer: true,
-                };
-                return Ok(Some(Entry {
-                    name,
-                    item,
-                    longer: false,
-                }));
+                entry.item = self.dict(indent)?;
+                entry.name.comment = comment;
+                entry.name.longer = true;
+                return Ok(Some(entry));
             } else if scan.starts_with('{') {
                 "malformed `{key}` in dict"
             } else if scan == "@" {
-                let key = self.block(indent)?;
+                let mut entry = Entry::default();
+                entry.longer = true;
+                entry.name.key = self.block(indent)?;
                 if let Some(item) = self.one_item(indent)? {
-                    let name = Name {
-                        comment,
-                        key,
-                        longer: true,
-                    };
-                    return Ok(Some(Entry {
-                        name,
-                        item,
-                        longer: true,
-                    }));
+                    entry.item = item;
+                    entry.name.comment = comment;
+                    return Ok(Some(entry));
                 }
                 "long `@` key needs a value"
             } else if scan.starts_with('@') {
@@ -510,18 +489,11 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
             } else if scan.starts_with("//") {
                 "stray comment"
             } else if let Some((before, after)) = scan.split_once('=') {
-                let key = Value::from(before);
-                let item = self.text(indent, after)?;
-                let name = Name {
-                    comment,
-                    key,
-                    longer: false,
-                };
-                return Ok(Some(Entry {
-                    name,
-                    item,
-                    longer: false,
-                }));
+                let mut entry = Entry::default();
+                entry.name.key = Value::from(before);
+                entry.item = self.text(indent, after)?;
+                entry.name.comment = comment;
+                return Ok(Some(entry));
             } else {
                 "missing `=` in dict"
             };

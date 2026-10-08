@@ -58,6 +58,19 @@ pub fn create<'a>(output: &PathBuf) -> Result<Output<'a>> {
     })
 }
 
+/// run `diff -u` subprocess, return the output
+pub fn diff_unified(expected: &str, actually: &str) -> Result<String> {
+    let dir = tempfile::tempdir()?;
+    fs::write(dir.path().join("expected"), expected)?;
+    fs::write(dir.path().join("actually"), actually)?;
+    let output = std::process::Command::new("diff")
+        .args(["--unified", "expected", "actually"])
+        .current_dir(dir.path())
+        .stderr(std::process::Stdio::inherit())
+        .output()?;
+    Ok(String::from_utf8(output.stdout)?)
+}
+
 /// verify a round trip does not change anything
 pub fn idempotent(input: &PathBuf) -> Result<()> {
     let content = read_to_string(input)?;
@@ -67,14 +80,10 @@ pub fn idempotent(input: &PathBuf) -> Result<()> {
     let file = parsed.map_err(Error::msg)?;
     let encoded = file.to_string();
     if content != encoded {
-        for diff in diff::lines(&content, &encoded) {
-            match diff {
-                diff::Result::Left(l) => eprintln!(" - {}", l),
-                diff::Result::Both(l, _) => eprintln!("   {}", l),
-                diff::Result::Right(r) => eprintln!(" + {}", r),
-            }
-        }
-        bail!("different")
+        bail!(format!(
+            "differences after encoding:\n{}",
+            diff_unified(&content, &encoded)?
+        ))
     }
     Ok(())
 }

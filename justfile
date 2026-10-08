@@ -28,6 +28,7 @@ quiet := '(^| )(-q|--quiet)( |$)'
 color := '(\x1b\[[0-9;]*[mK])*'
 
 test *OPTS: _is_running_inside_devcontainer
+    # if infinite loop: `just test -- --no-capture --test-threads=1`
     cargo test -p tindalwic --test unit {{OPTS}}
     cargo test -p tindalwic --test unit --features alloc {{OPTS}}
     cargo test -p tindalwic --test unit --features bumpalo {{OPTS}}

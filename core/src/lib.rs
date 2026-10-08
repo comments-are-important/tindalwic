@@ -109,7 +109,7 @@ pub struct Text<'a> {
     /// the string value
     pub value: Value<'a>,
     /// does Text.value prefer a longer encoding? (i.e. `<>`)
-    longer: bool,
+    pub longer: bool,
     /// A Text can have a Comment after it - but gap is impossible.
     pub epilog: Option<Value<'a>>,
 }
@@ -177,7 +177,7 @@ pub struct Name<'a> {
     /// the string value
     pub key: Value<'a>,
     /// does Name.key prefer a longer encoding? (i.e. brackets instead of `=`)
-    longer: bool,
+    pub longer: bool,
 }
 impl<'a, T> From<T> for Name<'a>
 where
@@ -199,7 +199,7 @@ pub struct Entry<'a> {
     /// the key half
     pub name: Name<'a>,
     /// does Entry.name prefer a longer encoding? (i.e. `@`)
-    longer: bool,
+    pub longer: bool,
     /// the value half
     pub item: Item<'a>,
 }
@@ -265,6 +265,8 @@ pub struct File<'a> {
     pub prolog: Comment<'a>,
     /// The contents of the Item::File.
     pub entries: Entries<'a>,
+    /// number of trailing empty lines
+    pub trailing: usize,
 }
 impl<'a> File<'a> {
     /// make an [Item::Dict] from self.prolog and self.entries

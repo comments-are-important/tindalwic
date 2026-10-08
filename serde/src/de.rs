@@ -85,10 +85,8 @@ impl<'de, 'a> serde::Deserializer<'de> for ItemDe<'de, 'a> {
             }
             Item::Dict(Dict { entries: cells, .. }) => {
                 let entries = cells.iter().map(|cell| {
-                    let Entry {
-                        name: key, item, ..
-                    } = cell.get();
-                    (self.with_text(key.key), self.with_item(item))
+                    let Entry { name, item, .. } = cell.get();
+                    (self.with_text(name.key), self.with_item(item))
                 });
                 v.visit_map(serde::de::value::MapDeserializer::new(entries))
             }
@@ -319,12 +317,10 @@ impl<'de, 'a> serde::Deserializer<'de> for ItemDe<'de, 'a> {
             Item::Dict(Dict {
                 entries: [entry], ..
             }) => {
-                let Entry {
-                    name: key, item, ..
-                } = entry.get();
+                let Entry { name, item, .. } = entry.get();
                 v.visit_enum(EnumDe {
                     de: &self,
-                    name: key.key,
+                    name: name.key,
                     payload: Some(item),
                 })
             }

@@ -22,7 +22,10 @@ pub fn run(input: &PathBuf) -> Result<()> {
 fn file(file: &File) -> String {
     let mut kids = Vec::new();
     if let Some(shebang) = file.hashbang {
-        kids.push(text("Shebang", &shebang));
+        kids.push(format!(
+            "Shebang(\"#!\",{})",
+            lines(&shebang, Some("Interpreter"))
+        ))
     }
     kids.extend(comment("Prolog", &file.prolog.value));
     for kid in file.entries {
@@ -38,7 +41,14 @@ fn file(file: &File) -> String {
 fn entry(entry: &Entry) -> String {
     let mut parts = Vec::new();
     parts.extend(comment("Comment", &entry.name.comment.value));
+    let (bra, ket) = match &entry.item {
+        Item::Text(_) => ("\"<\"", "\">\""),
+        Item::List(_) => ("\"[\"", "\"]\""),
+        Item::Dict(_) => ("\"{\"", "\"}\""),
+    };
+    parts.push(bra.into());
     parts.push(text("Key", &entry.name.key));
+    parts.push(ket.into());
     parts.push(item(&entry.item));
     parts.extend(epilog(&entry.item));
     format!("Entry({})", parts.join(","))
@@ -79,21 +89,30 @@ fn list(prolog: &Comment, items: Items) -> String {
     for kid in items {
         let item = kid.get();
         let mut parts = Vec::new();
-        parts.push(match item {
-            Item::Text(Text { value, .. }) => text("Text", &value),
+        let bracket = match item {
+            Item::Text(Text { value, .. }) => {
+                parts.push(text("Text", &value));
+                "\"<>\""
+            }
             Item::List(List {
                 prolog,
                 items: cells,
                 ..
-            }) => list(&prolog, cells),
+            }) => {
+                parts.push(list(&prolog, cells));
+                "\"[]\""
+            }
             Item::Dict(Dict {
                 prolog,
                 entries: cells,
                 ..
-            }) => dict(&prolog, cells),
-        });
+            }) => {
+                parts.push(dict(&prolog, cells));
+                "\"{}\""
+            }
+        };
         parts.extend(epilog(&item));
-        kids.push(format!("Item({})", parts.join(",")));
+        kids.push(format!("Item({bracket},{})", parts.join(",")));
     }
     if kids.is_empty() {
         format!("List")
@@ -117,11 +136,12 @@ fn comment(tag: &str, maybe: &Option<Value>) -> Option<String> {
     let Some(comment) = maybe else {
         return None;
     };
-    return Some(format!("{tag}({})", text("GFM", &comment)));
+    let marker = if tag == "Comment" { "///" } else { "//" };
+    return Some(format!("{tag}(\"{marker}\",{})", text("GFM", &comment)));
 }
 
 fn text(tag: &str, value: &Value) -> String {
-    format!("{tag}{}", lines(value, None))
+    format!("{tag}({})", lines(value, None))
 }
 
 fn lines(value: &Value, wrap_first: Option<&str>) -> String {
@@ -131,6 +151,6 @@ fn lines(value: &Value, wrap_first: Option<&str>) -> String {
     };
     match value.lines().count() {
         0 => "".to_owned(),
-        n => format!("({first}{})", ",Line".repeat(n - 1)),
+        n => format!("{first}{}", ",Line".repeat(n - 1)),
     }
 }

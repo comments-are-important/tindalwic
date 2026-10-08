@@ -36,12 +36,10 @@ pub fn now() -> String {
         .expect("trimming fractions should work")
 }
 
-const DASH: &'static str = "-";
-
 /// fully read the given file, DASH means stdin (never returning if no EOF)
 pub fn read_to_string(input: &PathBuf) -> Result<String> {
     let mut content = String::new();
-    if input == DASH {
+    if input.as_os_str().as_encoded_bytes() == b"-" {
         io::stdin().lock().read_to_string(&mut content)?;
     } else {
         content = fs::read_to_string(input)?;
@@ -53,7 +51,7 @@ pub fn read_to_string(input: &PathBuf) -> Result<String> {
 pub type Output<'a> = Either<io::BufWriter<fs::File>, io::StdoutLock<'a>>;
 /// create the file for writing, DASH means stdout
 pub fn create<'a>(output: &PathBuf) -> Result<Output<'a>> {
-    Ok(if output == DASH {
+    Ok(if output.as_os_str().as_encoded_bytes() == b"-" {
         Either::Right(io::stdout().lock())
     } else {
         Either::Left(io::BufWriter::new(fs::File::create(output)?))
@@ -137,7 +135,7 @@ impl SerDe {
 
 /// deserialize input to tindalwic, encode and write to output
 pub fn de(input: &PathBuf, output: &PathBuf) -> Result<()> {
-    if input == DASH {
+    if input.as_os_str().as_encoded_bytes() == b"-" {
         bail!("dash for input is not allowed here, need the format JSON/TOML/YAML");
     }
     let stdin = SerDe::from(input.as_os_str().as_encoded_bytes());
@@ -145,7 +143,7 @@ pub fn de(input: &PathBuf, output: &PathBuf) -> Result<()> {
     let Some(found) = or_ext else {
         bail!("need a format or an extension for input");
     };
-    let dash = PathBuf::from(DASH);
+    let dash = PathBuf::from("-");
     let content = read_to_string(if stdin.is_some() { &dash } else { input })?;
     let bump = Bump::new();
     let mut arena = Arena::new(&bump);
@@ -156,7 +154,7 @@ pub fn de(input: &PathBuf, output: &PathBuf) -> Result<()> {
 
 /// parse tindalwic input, serialize to serde output
 pub fn ser(input: &PathBuf, output: &PathBuf) -> Result<()> {
-    if output == DASH {
+    if output.as_os_str().as_encoded_bytes() == b"-" {
         bail!("dash for output is not allowed here, need the format JSON/TOML/YAML");
     }
     let stdin = SerDe::from(output.as_os_str().as_encoded_bytes());

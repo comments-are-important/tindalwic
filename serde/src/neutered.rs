@@ -166,15 +166,14 @@ impl<'de, 'a, 'b> Visitor<'de> for EntriesDe<'a, 'b> {
         let mut count = 0usize;
         while let Some(key) = map.next_key_seed(ValueDe(build))? {
             let item = map.next_value_seed(ItemDe(build))?;
-            let entry = Entry {
-                name: if let Some(slice) = key.verbatim(0) {
-                    slice
-                } else {
-                    build.intern(&key.joined()).map_err(A::Error::custom)?
-                }
-                .into(),
-                item,
-            };
+            let mut entry = Entry::default();
+            entry.name.key = (if let Some(slice) = key.verbatim(0) {
+                slice
+            } else {
+                build.intern(&key.joined()).map_err(A::Error::custom)?
+            })
+            .into();
+            entry.item = item;
             build.push_entry(entry).map_err(A::Error::custom)?;
             count += 1;
         }

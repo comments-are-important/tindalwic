@@ -1,7 +1,7 @@
 use super::{Error, Result};
 use serde::ser::Serialize;
 use tindalwic::parse::Build;
-use tindalwic::{Entries, Entry, File, Item, Items, List, Name, Text, Value};
+use tindalwic::{Entries, Entry, File, Item, Items, List, Text, Value};
 
 /// encode a type that is compatible with dictionary into a tindalwic data file.
 pub fn to_tindalwic<'a, T: ?Sized + Serialize>(
@@ -148,9 +148,10 @@ impl<'c, 'b, 'a> serde::Serializer for &'c mut ItemSer<'b, 'a> {
         variant: &'static str,
         value: &T,
     ) -> Result<Item<'a>> {
-        let item = value.serialize(&mut *self)?;
-        let key = self.intern(variant)?.into();
-        self.push_entry(Entry { name: key, item })?;
+        let mut entry = Entry::default();
+        entry.item = value.serialize(&mut *self)?;
+        entry.name.key = self.intern(variant)?.into();
+        self.push_entry(entry)?;
         let cells = self.finish_entries(1)?;
         Ok(cells.into())
     }
@@ -283,11 +284,10 @@ impl<'c, 'b, 'a> serde::ser::SerializeTupleVariant for TupleVariantSer<'c, 'b, '
         Ok(())
     }
     fn end(self) -> Result<Item<'a>> {
-        let list = self.ser.finish_items(self.count)?.into();
-        self.ser.push_entry(Entry {
-            name: self.variant.into(),
-            item: list,
-        })?;
+        let mut entry = Entry::default();
+        entry.name.key = self.variant.into();
+        entry.item = self.ser.finish_items(self.count)?.into();
+        self.ser.push_entry(entry)?;
         let cells = self.ser.finish_entries(1)?;
         Ok(cells.into())
     }
@@ -312,18 +312,13 @@ impl<'c, 'b, 'a> serde::ser::SerializeMap for MapSer<'c, 'b, 'a> {
         }
     }
     fn serialize_value<T: ?Sized + Serialize>(&mut self, value: &T) -> Result<()> {
-        let item = value.serialize(&mut *self.ser)?;
-        let value = self
+        let mut entry = Entry::default();
+        entry.item = value.serialize(&mut *self.ser)?;
+        entry.name.key = self
             .key
             .take()
             .ok_or_else(|| Error::new("value before key"))?;
-        self.ser.push_entry(Entry {
-            name: Name {
-                key: value,
-                ..Default::default()
-            },
-            item,
-        })?;
+        self.ser.push_entry(entry)?;
         self.count += 1;
         Ok(())
     }
@@ -345,12 +340,10 @@ impl<'c, 'b, 'a> serde::ser::SerializeStruct for StructSer<'c, 'b, 'a> {
         key: &'static str,
         value: &T,
     ) -> Result<()> {
-        let item = value.serialize(&mut *self.ser)?;
-        let key = self.ser.intern(key)?;
-        self.ser.push_entry(Entry {
-            name: key.into(),
-            item,
-        })?;
+        let mut entry = Entry::default();
+        entry.item = value.serialize(&mut *self.ser)?;
+        entry.name.key = self.ser.intern(key)?.into();
+        self.ser.push_entry(entry)?;
         self.count += 1;
         Ok(())
     }
@@ -374,21 +367,18 @@ impl<'c, 'b, 'a> serde::ser::SerializeStructVariant for StructVariantSer<'c, 'b,
         key: &'static str,
         value: &T,
     ) -> Result<()> {
-        let item = value.serialize(&mut *self.ser)?;
-        let key = self.ser.intern(key)?;
-        self.ser.push_entry(Entry {
-            name: key.into(),
-            item,
-        })?;
+        let mut entry = Entry::default();
+        entry.item = value.serialize(&mut *self.ser)?;
+        entry.name.key = self.ser.intern(key)?.into();
+        self.ser.push_entry(entry)?;
         self.count += 1;
         Ok(())
     }
     fn end(self) -> Result<Item<'a>> {
-        let dict = self.ser.finish_entries(self.count)?.into();
-        self.ser.push_entry(Entry {
-            name: self.variant.into(),
-            item: dict,
-        })?;
+        let mut entry = Entry::default();
+        entry.item = self.ser.finish_entries(self.count)?.into();
+        entry.name.key = self.variant.into();
+        self.ser.push_entry(entry)?;
         let cells = self.ser.finish_entries(1)?;
         Ok(cells.into())
     }

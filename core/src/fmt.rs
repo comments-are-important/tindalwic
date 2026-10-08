@@ -152,7 +152,10 @@ impl<'o, 'f> Output<'o, 'f> {
         Ok(())
     }
 
-    fn one_liner_in_list<'a>(value: &Value<'a>) -> Option<&'a str> {
+    fn one_liner_in_list<'a>(value: &Value<'a>, longer: bool) -> Option<&'a str> {
+        if longer {
+            return None;
+        }
         let only = value.only_line()?;
         if value.is_empty() {
             Some(only)
@@ -163,7 +166,17 @@ impl<'o, 'f> Output<'o, 'f> {
         }
     }
 
-    fn one_liner_in_dict<'a>(value: &Value<'a>, key: &'_ str) -> Option<&'a str> {
+    fn one_line_key<'a>(entry: &Entry<'a>) -> Option<&'a str> {
+        if entry.longer {
+            return None;
+        }
+        entry.name.key.only_line()
+    }
+
+    fn one_liner_in_dict<'a>(value: &Value<'a>, longer: bool, key: &'_ str) -> Option<&'a str> {
+        if longer {
+            return None;
+        }
         let only = value.only_line()?;
         if key.is_empty() {
             Some(only)
@@ -179,9 +192,13 @@ impl<'o, 'f> Output<'o, 'f> {
     fn item_in_list<'a>(&mut self, cell: &Cell<Item<'a>>) -> Result {
         let item = cell.get();
         match &item {
-            Item::Text(Text { value, epilog }) => {
+            Item::Text(Text {
+                value,
+                longer,
+                epilog,
+            }) => {
                 self.indent()?;
-                if let Some(slice) = Output::one_liner_in_list(value) {
+                if let Some(slice) = Output::one_liner_in_list(value, *longer) {
                     self.out.write_str(slice)?;
                 } else {
                     self.out.write_str("<>")?;
@@ -228,10 +245,16 @@ impl<'o, 'f> Output<'o, 'f> {
         let entry = cell.get();
         self.comment("///", &entry.name.comment)?;
         match &entry.item {
-            Item::Text(Text { value, epilog }) => {
+            Item::Text(Text {
+                value,
+                longer,
+                epilog,
+            }) => {
                 self.indent()?;
-                if let Some(only) = entry.name.key.only_line() {
-                    if let Some(text) = Output::one_liner_in_dict(value, only) {
+                if let Some(only) = Output::one_line_key(&entry) {
+                    if let Some(text) =
+                        Output::one_liner_in_dict(value, entry.name.longer || *longer, only)
+                    {
                         self.out.write_str(only)?;
                         self.out.write_char('=')?;
                         self.out.write_str(text)?;

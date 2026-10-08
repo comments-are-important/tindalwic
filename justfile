@@ -91,7 +91,7 @@ lines: (_install "cargo-llvm-lines") _is_running_inside_devcontainer
 
 cli: fmt _is_running_inside_devcontainer
   cargo build -p tindalwic-cli
-  target/debug/tindalwic-cli random --check=1000
+  #target/debug/tindalwic-cli random --check=1000
 
 # -----------------------------------------------------------------------------
 

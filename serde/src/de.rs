@@ -32,10 +32,7 @@ impl<'de, 'a> ItemDe<'de, 'a> {
         }
     }
     fn with_text(&self, value: Value<'a>) -> Self {
-        self.with_item(Item::Text(Text {
-            value,
-            epilog: Default::default(),
-        }))
+        self.with_item(Item::Text(value.into()))
     }
     fn parse<T: std::str::FromStr>(&self) -> Option<T> {
         if let Item::Text(Text { value, .. }) = self.item {

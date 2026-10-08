@@ -108,6 +108,8 @@ where
 pub struct Text<'a> {
     /// the string value
     pub value: Value<'a>,
+    /// does Text.value prefer a longer encoding? (i.e. `<>`)
+    longer: bool,
     /// A Text can have a Comment after it - but gap is impossible.
     pub epilog: Option<Value<'a>>,
 }
@@ -174,6 +176,8 @@ pub struct Name<'a> {
     pub comment: Comment<'a>,
     /// the string value
     pub key: Value<'a>,
+    /// does Name.key prefer a longer encoding? (i.e. brackets instead of `=`)
+    longer: bool,
 }
 impl<'a, T> From<T> for Name<'a>
 where
@@ -190,20 +194,14 @@ where
 /// an association (from name to item).
 ///
 /// at the lowest level, these are stored in an array.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Entry<'a> {
     /// the key half
     pub name: Name<'a>,
+    /// does Entry.name prefer a longer encoding? (i.e. `@`)
+    longer: bool,
     /// the value half
     pub item: Item<'a>,
-}
-impl<'a> Default for Entry<'a> {
-    fn default() -> Self {
-        Entry {
-            name: Name::default(),
-            item: Item::default(),
-        }
-    }
 }
 impl<'a> Entry<'a> {
     /// Make a fixed-size array of cells on the stack.

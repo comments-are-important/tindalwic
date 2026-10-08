@@ -9,7 +9,7 @@ use std::fmt::{self, Write};
 use std::io::Write as _;
 use tindalwic::bumpalo::Arena;
 use tindalwic::parse::Parse as _;
-use tindalwic::{Comment, Dict, Entry, File, Item, List, Name, VERSION};
+use tindalwic::{Comment, Dict, Entry, File, Item, List, VERSION};
 
 #[derive(clap::Args, Debug)]
 pub struct Args {
@@ -263,14 +263,13 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
     }
     fn entries(&mut self, kids: &[Option<Silhouette>]) -> anyhow::Result<usize> {
         for kid in kids {
-            let key = Name {
-                comment: self.comment(),
-                key: self.value().into(),
-            };
-            let item = self.item(kid)?;
+            let mut entry = Entry::default();
+            entry.name.comment = self.comment();
+            entry.name.key = self.value().into();
+            entry.item = self.item(kid)?;
             self.arena
                 .builder()
-                .push_entry(Entry { name: key, item })
+                .push_entry(entry)
                 .map_err(anyhow::Error::msg)?;
         }
         Ok(kids.len())

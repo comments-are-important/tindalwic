@@ -2,8 +2,6 @@
 
 use std::collections::HashMap;
 #[cfg(feature = "alloc")]
-use tindalwic::Name;
-#[cfg(feature = "alloc")]
 use tindalwic::alloc::from_literal;
 use tindalwic::parse::Parse as _;
 use tindalwic::{Dict, Entry, File, Item, List, Text, Value, arena, json, path};
@@ -17,13 +15,9 @@ fn from_dict() {
 #[test]
 #[cfg(feature = "alloc")]
 fn three_blank_comments() {
-    let entry = Entry {
-        name: Name {
-            comment: "".into(),
-            ..Default::default()
-        },
-        item: Item::Dict(Dict::default()),
-    };
+    let mut entry = Entry::default();
+    entry.name.comment = "".into();
+    entry.item = Item::Dict(Dict::default());
     let entries = [core::cell::Cell::new(entry)];
     let file = File {
         hashbang: Some("".into()),
@@ -161,11 +155,11 @@ fn change_in_list() {
         let entries = {"a":{"b":["v"]}}.unwrap();
     }
     let cell = path!({"a"}{"b"}[0]Text).walk_item(entries.into()).unwrap();
-    let Item::Text(Text { value, .. }) = cell.get() else {
+    let Item::Text(mut text) = cell.get() else {
         unreachable!("this destructuring always succeeds because path walk did");
     };
-    let epilog = Some("c".into());
-    cell.set(Item::Text(Text { value, epilog }));
+    text.epilog = Some("c".into());
+    cell.set(text.into());
     assert_eq!(
         File::from(entries).to_string(),
         "{a}\n\t[b]\n\t\tv\n\t\t//c"
@@ -191,12 +185,12 @@ fn inject_comments() {
     }
     let cell = path!({"k"}Text).walk_item(entries.into()).unwrap();
     let mut entry = cell.get();
-    let Item::Text(Text { value, .. }) = entry.item else {
+    let Item::Text(mut text) = entry.item else {
         unreachable!("this destructuring always succeeds because path walk did");
     };
-    let epilog = Some("c".into());
+    text.epilog = Some("c".into());
     entry.name.comment = "b".into();
-    entry.item = Item::Text(Text { value, epilog });
+    entry.item = text.into();
     cell.set(entry);
     assert_eq!(File::from(entries).to_string(), "///b\nk=v\n//c");
 }
@@ -208,13 +202,13 @@ fn change_structure() {
         let entries = {key:["v"]}.unwrap();
     }
     let cell = path!({key}[0]Text).walk_item(entries.into()).unwrap();
-    let Item::Text(Text { value, .. }) = cell.get() else {
+    let Item::Text(mut text) = cell.get() else {
         unreachable!("this destructuring always succeeds because path walk did");
     };
     let b = String::from("b");
-    let epilog = Some((&b[..]).into());
+    text.epilog = Some((&b[..]).into());
     json! {
-        let patch = {"p":(Item::Text(Text{ value, epilog }))}.unwrap();
+        let patch = {"p":(text)}.unwrap();
     }
     cell.set(Item::Dict(patch.into()));
     assert_eq!(
@@ -375,10 +369,7 @@ mod parse_err {
             arena.builder().push_item(Item::default()),
             Err("no room for item")
         );
-        let blank = Entry {
-            name: Default::default(),
-            item: Default::default(),
-        };
+        let blank = Entry::default();
         assert_eq!(arena.builder().push_entry(blank), Err("no room for entry"));
         assert!(arena.completed().is_some());
         assert_eq!(0, arena.item_slots());

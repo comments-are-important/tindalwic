@@ -86,6 +86,7 @@ pub trait Build<'a> {
         self.push_entry(Entry {
             name: key.into(),
             item,
+            ..Default::default()
         })
     }
     /// default is an Err because intern needs alloc
@@ -139,15 +140,15 @@ enum CommentMark {
 }
 
 struct Input<'a, 'b, 'r> {
-    utf8: &'a str, // entire tindalwic encoded content
-    arena: &'b mut dyn Build<'a>,
     line: usize,
-    pending: Option<SplitInclusive<'a, char>>,
+    empties: usize,
+    tabs: usize, // indentation on this line, unless gap, then peek from next line
+    current: Option<&'a str>,
     good: bool,
     report: &'r mut dyn FnMut(ParseError) -> Reported,
-    current: Option<&'a str>,
-    tabs: usize, // indentation on this line, unless gap, then peek from next line
-    empties: usize,
+    pending: Option<SplitInclusive<'a, char>>,
+    arena: &'b mut dyn Build<'a>,
+    utf8: &'a str, // entire tindalwic encoded content
 }
 impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
     /// None means the arena is too small (or the UTF-8 is way too big).
@@ -191,6 +192,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
                 "input was not completely consumed",
             ))?;
         }
+        let _cell = core::cell::Cell::new("hi");
         // TODO do something with empties at EOF
         if !self.good {
             Err("parse.file: something was reported")
@@ -239,7 +241,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
         let Some(line) = self.current else {
             return None;
         };
-        if self.tabs != indent {
+        if self.tabs < indent {
             None
         } else {
             Some(&line[indent..].trim_end_matches('\n'))
@@ -328,12 +330,20 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
     fn text(&mut self, indent: usize, from: &'a str) -> Result<Item<'a>, &'static str> {
         let value = self.stretch(indent, from)?;
         let epilog = self.comment(indent, false, CommentMark::DoubleSlash)?.value;
-        Ok(Item::Text(Text { value, epilog }))
+        Ok(Item::Text(Text {
+            value,
+            longer: false,
+            epilog,
+        }))
     }
     fn text_block(&mut self, indent: usize) -> Result<Item<'a>, &'static str> {
         let value = self.block(indent)?;
         let epilog = self.comment(indent, false, CommentMark::DoubleSlash)?.value;
-        Ok(Item::Text(Text { value, epilog }))
+        Ok(Item::Text(Text {
+            value,
+            longer: true,
+            epilog,
+        }))
     }
     /// a block (optionally) follows current line (at indent+1).
     /// always need some value, use end of current if no block follows
@@ -436,31 +446,63 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
             let message = if scan.starts_with('<') && scan.ends_with('>') {
                 let key = Value::from(&scan[1..scan.len() - 1]);
                 let item = self.text_block(indent)?;
-                let name = Name { comment, key };
-                return Ok(Some(Entry { name, item }));
+                let name = Name {
+                    comment,
+                    key,
+                    longer: true,
+                };
+                return Ok(Some(Entry {
+                    name,
+                    item,
+                    longer: false,
+                }));
             } else if scan.starts_with('<') {
                 "malformed `<key>` in dict"
             } else if scan.starts_with('[') && scan.ends_with(']') {
                 let key = Value::from(&scan[1..scan.len() - 1]);
                 self.next(indent + 1, true)?;
                 let item = self.list(indent)?;
-                let name = Name { comment, key };
-                return Ok(Some(Entry { name, item }));
+                let name = Name {
+                    comment,
+                    key,
+                    longer: true,
+                };
+                return Ok(Some(Entry {
+                    name,
+                    item,
+                    longer: false,
+                }));
             } else if scan.starts_with('[') {
                 "malformed `[key]` in dict"
             } else if scan.starts_with('{') && scan.ends_with('}') {
                 let key = Value::from(&scan[1..scan.len() - 1]);
                 self.next(indent + 1, true)?;
                 let item = self.dict(indent)?;
-                let name = Name { comment, key };
-                return Ok(Some(Entry { name, item }));
+                let name = Name {
+                    comment,
+                    key,
+                    longer: true,
+                };
+                return Ok(Some(Entry {
+                    name,
+                    item,
+                    longer: false,
+                }));
             } else if scan.starts_with('{') {
                 "malformed `{key}` in dict"
             } else if scan == "@" {
                 let key = self.block(indent)?;
                 if let Some(item) = self.one_item(indent)? {
-                    let name = Name { comment, key };
-                    return Ok(Some(Entry { name, item }));
+                    let name = Name {
+                        comment,
+                        key,
+                        longer: true,
+                    };
+                    return Ok(Some(Entry {
+                        name,
+                        item,
+                        longer: true,
+                    }));
                 }
                 "long `@` key needs a value"
             } else if scan.starts_with('@') {
@@ -470,8 +512,16 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
             } else if let Some((before, after)) = scan.split_once('=') {
                 let key = Value::from(before);
                 let item = self.text(indent, after)?;
-                let name = Name { comment, key };
-                return Ok(Some(Entry { name, item }));
+                let name = Name {
+                    comment,
+                    key,
+                    longer: false,
+                };
+                return Ok(Some(Entry {
+                    name,
+                    item,
+                    longer: false,
+                }));
             } else {
                 "missing `=` in dict"
             };

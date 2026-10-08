@@ -293,7 +293,7 @@ impl<'a> Serialize for EntrySer<'a> {
         let should = EntryFields::assign(|field| match field {
             EntryFields::Name => !this.name.key.is_empty() || this.name.comment.value.is_some(),
             EntryFields::Item => match this.item {
-                Item::Text(Text { value, epilog }) => epilog.is_some() || !value.is_empty(),
+                Item::Text(Text { value, epilog, .. }) => epilog.is_some() || !value.is_empty(),
                 _ => true,
             },
         });

@@ -59,7 +59,7 @@ struct StackBuilder<'a> {
     entries: LowToHigh<'a, Entry<'a>>,
 }
 impl<'a> StackBuilder<'a> {
-    pub fn wrap(items: Items<'a>, entries: Entries<'a>) -> Self {
+    pub fn wrap(items: &'a [Cell<Item<'a>>], entries: &'a [Cell<Entry<'a>>]) -> Self {
         let items = LowToHigh::wrap(items);
         let entries = LowToHigh::wrap(entries);
         StackBuilder { items, entries }
@@ -102,11 +102,13 @@ impl<'a> Build<'a> for StackBuilder<'a> {
     fn finish_items(&mut self, count: usize) -> Result<Items<'a>, &'static str> {
         self.items
             .finish(count)
+            .map(|it| it.into())
             .ok_or_else(|| "not enough items to make that list")
     }
     fn finish_entries(&mut self, count: usize) -> Result<Entries<'a>, &'static str> {
         self.entries
             .finish(count)
+            .map(|it| it.into())
             .ok_or_else(|| "not enough entries to make that dict")
     }
     fn push_item(&mut self, item: Item<'a>) -> Result<(), &'static str> {

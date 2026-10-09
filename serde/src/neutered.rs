@@ -3,19 +3,17 @@ use serde::de::{DeserializeSeed, Deserializer, Error, MapAccess, SeqAccess, Visi
 use serde::ser::{Serialize, Serializer};
 use serde::ser::{SerializeMap as _, SerializeSeq as _};
 use std::fmt;
-use tindalwic::{
-    Dict, Entries, Entry, File, Item, Items, List, Text,
-    parse::{Build, Parse},
-};
+use tindalwic::parse::{Build, Parse};
+use tindalwic::{Entries, Entry, File, Item, Items};
 
 struct ItemSer<'a>(Item<'a>);
 impl<'a> Serialize for ItemSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let ItemSer(this) = self;
         match this {
-            Item::Text(Text { value, .. }) => ValueSer(*value).serialize(s),
-            Item::List(List { items: cells, .. }) => ItemsSer(cells).serialize(s),
-            Item::Dict(Dict { entries: cells, .. }) => EntriesSer(cells).serialize(s),
+            Item::Text(text) => ValueSer(text.value.clone()).serialize(s),
+            Item::List(list) => ItemsSer(list.items.clone()).serialize(s),
+            Item::Dict(dict) => EntriesSer(dict.entries.clone()).serialize(s),
         }
     }
 }
@@ -104,8 +102,8 @@ impl<'a> Serialize for ItemsSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let ItemsSer(this) = self;
         let mut seq = s.serialize_seq(Some(this.len()))?;
-        for cell in this.iter() {
-            seq.serialize_element(&ItemSer(cell.get()))?;
+        for item in this {
+            seq.serialize_element(&ItemSer(item))?;
         }
         seq.end()
     }
@@ -138,12 +136,11 @@ impl<'a> Serialize for EntriesSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let EntriesSer(this) = self;
         let mut map = s.serialize_map(Some(this.len()))?;
-        for cell in this.iter() {
-            let Entry { name, item, .. } = cell.get();
-            if let Some(verbatim) = name.key.verbatim(0) {
-                map.serialize_entry(verbatim, &ItemSer(item))?;
+        for entry in this {
+            if let Some(verbatim) = entry.name.key.verbatim(0) {
+                map.serialize_entry(verbatim, &ItemSer(entry.item))?;
             } else {
-                map.serialize_entry(&name.key.joined(), &ItemSer(item))?;
+                map.serialize_entry(&entry.name.key.joined(), &ItemSer(entry.item))?;
             }
         }
         map.end()
@@ -185,7 +182,7 @@ struct FileSer<'a>(File<'a>);
 impl<'a> Serialize for FileSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let FileSer(this) = self;
-        EntriesSer(this.entries).serialize(s)
+        EntriesSer(this.entries.clone()).serialize(s)
     }
 }
 struct FileDe<'a, 'b>(&'b mut dyn Build<'a>);
@@ -215,7 +212,7 @@ pub struct Neutered<'a>(pub File<'a>);
 impl<'a> Serialize for Neutered<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let Neutered(this) = self;
-        FileSer(*this).serialize(s)
+        FileSer(this.clone()).serialize(s)
     }
 }
 impl<'a> Neutered<'a> {

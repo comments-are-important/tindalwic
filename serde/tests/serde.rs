@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::fmt::Debug;
 use tindalwic::bumpalo::Arena;
 use tindalwic::parse::Parse as _;
-use tindalwic::{File, json};
+use tindalwic::{File, Item};
 use tindalwic_serde::Neutered;
 use tindalwic_serde::de::from_tindalwic;
 use tindalwic_serde::ser::to_tindalwic;
@@ -20,10 +20,13 @@ fn deserialize_file_from_json() {
     let mut file = serde_json::Deserializer::from_str(r#"{ "key":"one\ntwo" }"#);
     let file: File = Neutered::seed(&mut arena).deserialize(&mut file).unwrap();
 
-    json! {
-        let entries = {"key":"one\ntwo"}.unwrap();
-    }
-    assert_eq!(file.entries, entries);
+    assert_eq!(file.entries.len(), 1);
+    let only = file.entries.get(0).unwrap();
+    assert_eq!(only.name.key, "key".into());
+    let Item::Text(text) = only.item else {
+        panic!("not text")
+    };
+    assert_eq!(text.value, "one\ntwo".into());
 }
 
 struct Check(bumpalo::Bump);

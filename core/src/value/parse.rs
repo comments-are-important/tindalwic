@@ -2,7 +2,7 @@
 
 use core::str::SplitInclusive;
 
-use crate::{Comment, Dict, Entries, Entry, File, Item, Items, List, Text, Value};
+use crate::{Comment, CommentMarker, Dict, Entries, Entry, File, Item, Items, List, Text, Value};
 
 // there are some lines/branches here that are impossible to get coverage for,
 // and the mechanisms for suppressing the report are inadequate ... until:
@@ -132,12 +132,6 @@ pub enum Reported {
     Continue,
 }
 
-enum CommentMark {
-    Shebang,
-    DoubleSlash,
-    TripleSlash,
-}
-
 struct Input<'a, 'b, 'r> {
     line: usize,
     empties: usize,
@@ -182,18 +176,19 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
             return Err("parse.file: can't even start");
         }
         let mut file = File::default();
-        file.hashbang = self.comment(0, false, CommentMark::Shebang)?.value;
-        file.prolog = self.comment(0, true, CommentMark::DoubleSlash)?;
+        file.hashbang = self.comment(0, false, CommentMarker::Shebang)?.value;
+        file.prolog = self.comment(0, true, CommentMarker::Prolog)?;
         file.entries = self.entries(0)?;
         file.trailing = self.claim_empties();
         if self.utf8.ends_with('\n') {
             file.trailing += 1;
         }
-        if file.prolog.gap != 0 && file.prolog.value.is_none() && !file.entries.is_empty() {
-            let mut entry = file.entries[0].get();
-            entry.name.comment.gap += file.prolog.gap;
-            file.entries[0].set(entry);
-            file.prolog.gap = 0;
+        if file.prolog.gap != 0 && file.prolog.value.is_none() {
+            if let Some(mut entry) = file.entries.get(0) {
+                entry.name.comment.gap += file.prolog.gap;
+                file.entries.set(0, &entry);
+                file.prolog.gap = 0;
+            }
         }
         if self.current.is_some() {
             self.report(ParseError::at(
@@ -303,13 +298,11 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
         &mut self,
         indent: usize,
         gap: bool,
-        mark: CommentMark,
+        mark: CommentMarker,
     ) -> Result<Comment<'a>, &'static str> {
-        let line = self.after_indent(indent).and_then(|line| match mark {
-            CommentMark::Shebang => line.strip_prefix("#!"),
-            CommentMark::DoubleSlash => line.strip_prefix("//"), // TODO reject triple?
-            CommentMark::TripleSlash => line.strip_prefix("///"),
-        });
+        let line = self
+            .after_indent(indent)
+            .and_then(|line| line.strip_prefix(mark.token()));
         let mut comment = Comment::default();
         if gap {
             comment.gap = self.claim_empties();
@@ -325,7 +318,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
     /// lenient - one-liners can stretch.
     fn text(&mut self, indent: usize, from: &'a str) -> Result<Item<'a>, &'static str> {
         let value = self.stretch(indent, from)?;
-        let epilog = self.comment(indent, false, CommentMark::DoubleSlash)?.value;
+        let epilog = self.comment(indent, false, CommentMarker::Epilog)?.value;
         Ok(Item::Text(Text {
             value,
             longer: false,
@@ -334,7 +327,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
     }
     fn text_block(&mut self, indent: usize) -> Result<Item<'a>, &'static str> {
         let value = self.block(indent)?;
-        let epilog = self.comment(indent, false, CommentMark::DoubleSlash)?.value;
+        let epilog = self.comment(indent, false, CommentMarker::Epilog)?.value;
         Ok(Item::Text(Text {
             value,
             longer: true,
@@ -354,9 +347,9 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
     /// previous line opened a list context, so parse all the lines in it.
     fn list(&mut self, indent: usize) -> Result<Item<'a>, &'static str> {
         let mut list = List::default();
-        list.prolog = self.comment(indent + 1, true, CommentMark::DoubleSlash)?;
+        list.prolog = self.comment(indent + 1, true, CommentMarker::Prolog)?;
         list.items = self.items(indent + 1)?;
-        list.epilog = self.comment(indent, true, CommentMark::DoubleSlash)?;
+        list.epilog = self.comment(indent, true, CommentMarker::Epilog)?;
         Ok(Item::List(list))
     }
 
@@ -382,7 +375,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
                 return Ok(Some(self.dict(indent)?));
             } else if scan.starts_with('{') {
                 "malformed `{}` in list"
-            } else if scan.starts_with("//") {
+            } else if scan.starts_with(&CommentMarker::FIRST_CHAR) {
                 "stray comment"
             } else {
                 return Ok(Some(self.text(indent, scan)?));
@@ -405,7 +398,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
             count += 1;
         }
         if count == 0 {
-            Ok(&[])
+            Ok(Items::default())
         } else {
             match self.arena.finish_items(count) {
                 Ok(cells) => Ok(cells),
@@ -421,14 +414,15 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
     /// previous line opened a dict context, so parse all the lines in it.
     fn dict(&mut self, indent: usize) -> Result<Item<'a>, &'static str> {
         let mut dict = Dict::default();
-        dict.prolog = self.comment(indent + 1, true, CommentMark::DoubleSlash)?;
+        dict.prolog = self.comment(indent + 1, true, CommentMarker::Prolog)?;
         dict.entries = self.entries(indent + 1)?;
-        dict.epilog = self.comment(indent, true, CommentMark::DoubleSlash)?;
-        if dict.prolog.gap != 0 && dict.prolog.value.is_none() && !dict.entries.is_empty() {
-            let mut entry = dict.entries[0].get();
-            entry.name.comment.gap += dict.prolog.gap;
-            dict.entries[0].set(entry);
-            dict.prolog.gap = 0;
+        dict.epilog = self.comment(indent, true, CommentMarker::Epilog)?;
+        if dict.prolog.gap != 0 && dict.prolog.value.is_none() {
+            if let Some(mut entry) = dict.entries.get(0) {
+                entry.name.comment.gap += dict.prolog.gap;
+                dict.entries.set(0, &entry);
+                dict.prolog.gap = 0;
+            }
         }
         Ok(Item::Dict(dict))
     }
@@ -437,7 +431,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
             if self.current.is_none() || self.tabs != indent {
                 return Ok(None);
             }
-            let comment = self.comment(indent, true, CommentMark::TripleSlash)?;
+            let comment = self.comment(indent, true, CommentMarker::NameTag)?;
             let Some(scan) = self.after_indent(indent) else {
                 if comment.gap > 0 || comment.value.is_some() {
                     self.report(ParseError::at(self.line, "gap/comment but no key"))?;
@@ -486,7 +480,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
                 "long `@` key needs a value"
             } else if scan.starts_with('@') {
                 "`@` has trailing char"
-            } else if scan.starts_with("//") {
+            } else if scan.starts_with(&CommentMarker::FIRST_CHAR) {
                 "stray comment"
             } else if let Some((before, after)) = scan.split_once('=') {
                 let mut entry = Entry::default();
@@ -515,7 +509,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
             count += 1;
         }
         if count == 0 {
-            Ok(&[])
+            Ok(Entries::default())
         } else {
             match self.arena.finish_entries(count) {
                 Ok(cells) => Ok(cells),

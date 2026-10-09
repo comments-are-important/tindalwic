@@ -344,10 +344,9 @@ impl ToTokens for Arena {
         let tindalwic = tindalwic();
         let ia = name.derive("items");
         let ea = name.derive("entries");
-        // https://doc.rust-lang.org/reference/items/use-declarations.html#underscore-imports
         tokens.extend(quote! {
-            let #ia = #tindalwic::Item::array::<#items>();
-            let #ea = #tindalwic::Entry::array::<#entries>();
+            let #ia: [core::cell::Cell<#tindalwic::Item>; #items] = core::default::Default::default();
+            let #ea: [core::cell::Cell<#tindalwic::Entry>; #entries] = core::default::Default::default();
             let #name = #tindalwic::capped::Arena::wrap(&#ia, &#ea);
         });
     }

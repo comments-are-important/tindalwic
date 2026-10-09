@@ -104,7 +104,7 @@ impl<'a> Serialize for MaybeSer<'a> {
         let MaybeSer(this) = self;
         match this {
             None => s.serialize_none(),
-            Some(value) => s.serialize_some(&ValueSer(*value)),
+            Some(value) => s.serialize_some(&ValueSer(value.clone())),
         }
     }
 }

@@ -1,13 +1,34 @@
 //! code for encoding data into the Tindalwic format.
 
-use crate::Value;
 use crate::parse::ParseError;
-use crate::walk::PathError;
-use crate::{Comment, Entry, File, Item, Text};
+use crate::{Comment, CommentMarker, Entries, Entry, File, Item, Items, Text, Value};
 
-use core::cell::Cell;
-use core::fmt::{Display, Formatter, Result, Write};
+use core::fmt::{Debug, Display, Formatter, Result, Write};
 use core::write;
+
+impl<'a> Debug for Value<'a> {
+    fn fmt(&self, out: &mut Formatter<'_>) -> Result {
+        out.debug_list().entries(self.lines()).finish()
+    }
+}
+impl<'a> Debug for Items<'a> {
+    fn fmt(&self, out: &mut Formatter<'_>) -> Result {
+        let mut items = out.debug_struct("Items");
+        for item in self {
+            items.field("cells", &item);
+        }
+        items.finish()
+    }
+}
+impl<'a> Debug for Entries<'a> {
+    fn fmt(&self, out: &mut Formatter<'_>) -> Result {
+        let mut entries = out.debug_struct("Entries");
+        for entry in self {
+            entries.field("cells", &entry);
+        }
+        entries.finish()
+    }
+}
 
 impl Display for ParseError {
     fn fmt(&self, out: &mut Formatter<'_>) -> Result {
@@ -26,23 +47,6 @@ impl Display for ParseError {
                 }
             }
         }
-    }
-}
-impl<'p> Display for PathError<'p> {
-    fn fmt(&self, out: &mut Formatter<'_>) -> Result {
-        out.write_str("walk (")?;
-        for branch in self.failed {
-            match branch {
-                crate::walk::Branch::Item(at) => write!(out, "[{}]", at)?,
-                crate::walk::Branch::Entry(key) => write!(out, "{{{}}}", key)?,
-                crate::walk::Branch::Text => out.write_str("Text")?,
-                crate::walk::Branch::List => out.write_str("List")?,
-                crate::walk::Branch::Dict => out.write_str("Dict")?,
-            }
-        }
-        out.write_str("): ")?;
-        out.write_str(self.message)?;
-        Ok(())
     }
 }
 
@@ -118,7 +122,7 @@ impl<'o, 'f> Output<'o, 'f> {
     const fn special_first(byte: u8) -> bool {
         matches!(
             byte,
-            b'\t' | b'#' | b'<' | b'>' | b'@' | b'[' | b']' | b'{' | b'}' | b'/' | b'='
+            b'\t' | b'#' | b'%' | b'<' | b'>' | b'@' | b'[' | b']' | b'{' | b'}' | b'='
         )
     }
     fn string<'a>(&mut self, value: &Value<'a>) -> Result {
@@ -135,6 +139,12 @@ impl<'o, 'f> Output<'o, 'f> {
             }
         }
         Ok(())
+    }
+    fn prolog<'a>(&mut self, comment: &Comment<'a>) -> Result {
+        self.comment(CommentMarker::Prolog.token(), comment)
+    }
+    fn epilog<'a>(&mut self, comment: &Comment<'a>) -> Result {
+        self.comment(CommentMarker::Epilog.token(), comment)
     }
     fn comment<'a>(&mut self, marker: &'a str, comment: &Comment<'a>) -> Result {
         self.gap(comment.gap)?;
@@ -190,9 +200,8 @@ impl<'o, 'f> Output<'o, 'f> {
         }
     }
 
-    fn item_in_list<'a>(&mut self, cell: &Cell<Item<'a>>) -> Result {
-        let item = cell.get();
-        match &item {
+    fn item_in_list<'a>(&mut self, item: &Item<'a>) -> Result {
+        match item {
             Item::Text(text) => {
                 self.indent()?;
                 if let Some(slice) = Output::one_liner_in_list(&text) {
@@ -204,35 +213,34 @@ impl<'o, 'f> Output<'o, 'f> {
                     self.string(&text.value)?;
                     self.indent -= 1;
                 }
-                self.maybe("//", &text.epilog)
+                self.maybe(CommentMarker::Epilog.token(), &text.epilog)
             }
             Item::List(list) => {
                 self.indent()?;
                 self.out.write_str("[]")?;
                 self.indent += 1;
-                self.comment("//", &list.prolog)?;
-                for cell in list.items {
-                    self.item_in_list(cell)?;
+                self.prolog(&list.prolog)?;
+                for item in &list.items {
+                    self.item_in_list(&item)?;
                 }
                 self.indent -= 1;
-                self.comment("//", &list.epilog)
+                self.epilog(&list.epilog)
             }
             Item::Dict(dict) => {
                 self.indent()?;
                 self.out.write_str("{}")?;
                 self.indent += 1;
-                self.comment("//", &dict.prolog)?;
-                for cell in dict.entries {
-                    self.entry_in_dict(cell)?;
+                self.prolog(&dict.prolog)?;
+                for entry in &dict.entries {
+                    self.entry_in_dict(&entry)?;
                 }
                 self.indent -= 1;
-                self.comment("//", &dict.epilog)
+                self.epilog(&dict.epilog)
             }
         }
     }
-    fn entry_in_dict<'a>(&mut self, cell: &Cell<Entry<'a>>) -> Result {
-        let entry = cell.get();
-        self.comment("///", &entry.name.comment)?;
+    fn entry_in_dict<'a>(&mut self, entry: &Entry<'a>) -> Result {
+        self.comment(CommentMarker::NameTag.token(), &entry.name.comment)?;
         match &entry.item {
             Item::Text(text) => {
                 self.indent()?;
@@ -262,7 +270,7 @@ impl<'o, 'f> Output<'o, 'f> {
                     self.string(&text.value)?;
                     self.indent -= 1;
                 }
-                self.maybe("//", &text.epilog)
+                self.maybe(CommentMarker::Epilog.token(), &text.epilog)
             }
             Item::List(list) => {
                 self.indent()?;
@@ -281,12 +289,12 @@ impl<'o, 'f> Output<'o, 'f> {
                     self.out.write_str("[]")?;
                 }
                 self.indent += 1;
-                self.comment("//", &list.prolog)?;
-                for cell in list.items {
-                    self.item_in_list(cell)?;
+                self.prolog(&list.prolog)?;
+                for item in &list.items {
+                    self.item_in_list(&item)?;
                 }
                 self.indent -= 1;
-                self.comment("//", &list.epilog)
+                self.epilog(&list.epilog)
             }
             Item::Dict(dict) => {
                 self.indent()?;
@@ -305,20 +313,20 @@ impl<'o, 'f> Output<'o, 'f> {
                     self.out.write_str("{}")?;
                 }
                 self.indent += 1;
-                self.comment("//", &dict.prolog)?;
-                for cell in dict.entries {
-                    self.entry_in_dict(cell)?;
+                self.prolog(&dict.prolog)?;
+                for entry in &dict.entries {
+                    self.entry_in_dict(&entry)?;
                 }
                 self.indent -= 1;
-                self.comment("//", &dict.epilog)
+                self.epilog(&dict.epilog)
             }
         }
     }
     fn file<'a>(&mut self, file: &File<'a>) -> Result {
-        self.maybe("#!", &file.hashbang)?;
-        self.comment("//", &file.prolog)?;
-        for cell in file.entries {
-            self.entry_in_dict(cell)?;
+        self.maybe(CommentMarker::Shebang.token(), &file.hashbang)?;
+        self.prolog(&file.prolog)?;
+        for entry in &file.entries {
+            self.entry_in_dict(&entry)?;
         }
         for _ in 0..file.trailing {
             self.out.write_char('\n')?;

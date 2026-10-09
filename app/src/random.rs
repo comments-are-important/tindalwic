@@ -69,6 +69,7 @@ impl Args {
                     fs::write("target/chk.parse.errors", &errors)?;
                     fs::write("target/chk.parsed.debug_api", format!("{parsed:#?}"))?;
                     fs::write("target/chk.parsed.tindalwic", &actually)?;
+                    eprintln!("wrote to ./target/chk.*");
                 }
                 anyhow::bail! {
                     if !good { "parse error"}

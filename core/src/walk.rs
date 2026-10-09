@@ -3,7 +3,7 @@
 //! but using these directly is not recommended.
 //! using path! is much easier.
 
-use crate::{Dict, Entry, File, Item, List, Value};
+use crate::{Entry, File, Item, Value};
 use core::cell::Cell;
 
 /// a decision along a walk.
@@ -77,20 +77,24 @@ impl<'p> Path<'p, false> {
     pub fn walk_item<'a>(&self, mut item: Item<'a>) -> Result<&'a Cell<Item<'a>>, PathError<'p>> {
         let mut cell: Option<&'a Cell<Item<'a>>> = None;
         for (step, branch) in self.branches.iter().enumerate() {
-            match (branch, item) {
-                (Branch::Item(at), Item::List(List { items: cells, .. })) => {
-                    let Some(found) = cells.get(*at) else {
+            match (branch, item.clone()) {
+                (Branch::Item(at), Item::List(list)) => {
+                    let Some(found) = list.items.cells.get(*at) else {
                         return Err(self.error_at(step, "index out of bounds"));
                     };
                     cell = Some(found);
-                    item = found.get();
+                    item = found.take();
+                    found.set(item.clone());
                 }
-                (Branch::Entry(key), Item::Dict(Dict { entries: cells, .. })) => {
-                    let Some(found) = key.find_linearly_in(cells) else {
-                        return Err(self.error_at(step, "key not found"));
-                    };
+                (Branch::Entry(key), Item::Dict(dict)) => {
                     cell = None;
-                    item = cells[found].get().item;
+                    for entry in &dict.entries {
+                        if key != &entry.name.key {
+                            continue;
+                        }
+                        item = entry.item;
+                        break;
+                    }
                 }
                 (Branch::Text, Item::Text(_))
                 | (Branch::List, Item::List(_))
@@ -140,21 +144,24 @@ impl<'p> Path<'p, true> {
     pub fn walk_item<'a>(&self, mut item: Item<'a>) -> Result<&'a Cell<Entry<'a>>, PathError<'p>> {
         let mut cell: Option<&'a Cell<Entry<'a>>> = None;
         for (step, branch) in self.branches.iter().enumerate() {
-            match (branch, item) {
-                (Branch::Item(at), Item::List(List { items: cells, .. })) => {
-                    let Some(found) = cells.get(*at) else {
+            match (branch, item.clone()) {
+                (Branch::Entry(key), Item::Dict(dict)) => {
+                    for found in dict.entries.cells {
+                        let entry = found.take();
+                        found.set(entry.clone());
+                        if key != &entry.name.key {
+                            continue;
+                        }
+                        cell = Some(found);
+                        item = entry.item;
+                    }
+                }
+                (Branch::Item(at), Item::List(list)) => {
+                    cell = None;
+                    let Some(found) = list.items.get(*at) else {
                         return Err(self.error_at(step, "index out of bounds"));
                     };
-                    cell = None;
-                    item = found.get();
-                }
-                (Branch::Entry(key), Item::Dict(Dict { entries: cells, .. })) => {
-                    let Some(found) = key.find_linearly_in(cells) else {
-                        return Err(self.error_at(step, "key not found"));
-                    };
-                    let found = &cells[found];
-                    cell = Some(found);
-                    item = found.get().item;
+                    item = found;
                 }
                 (Branch::Text, Item::Text(_))
                 | (Branch::List, Item::List(_))

@@ -14,7 +14,7 @@ use core::writeln;
 /// this pattern is typically implemented atop RefCell, but because this is in a
 /// critical path, small unsafe blocks avoid the cost of those runtime checks.
 struct CellVec<T>(Cell<Vec<T>>);
-impl<T: Copy> CellVec<T> {
+impl<T: Clone> CellVec<T> {
     fn new() -> Self {
         CellVec(Cell::new(Vec::new()))
     }
@@ -32,7 +32,7 @@ impl<T: Copy> CellVec<T> {
         // impl, except via this let, only as receiver in Vec methods, which are safe.
         let vec = unsafe { &mut *cell.as_ptr() };
         let start = vec.len().checked_sub(count)?;
-        let cells = bump.alloc_slice_fill_with(count, |i| Cell::new(vec[start + i]));
+        let cells = bump.alloc_slice_fill_with(count, |i| Cell::new(vec[start + i].clone()));
         vec.truncate(start);
         Some(cells)
     }
@@ -47,11 +47,13 @@ impl<'a> Build<'a> for HeapBuilder<'a> {
     fn finish_items(&mut self, count: usize) -> Result<Items<'a>, &'static str> {
         self.items
             .finish(count, self.bump)
+            .map(|it| it.into())
             .ok_or("not enough items to make that list")
     }
     fn finish_entries(&mut self, count: usize) -> Result<Entries<'a>, &'static str> {
         self.entries
             .finish(count, self.bump)
+            .map(|it| it.into())
             .ok_or("not enough entries to make that dict")
     }
     fn push_item(&mut self, item: Item<'a>) -> Result<(), &'static str> {

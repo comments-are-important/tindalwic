@@ -4,26 +4,9 @@
 
 use core::cell::Cell;
 
-#[doc(inline)]
-/// build a [walk::Path]
-pub use tindalwic_macros::path;
-
-#[doc(inline)]
-/// build an [Item] using a subset of the JSON syntax.
-///
-/// this helps to write code snippets that make a structural change to a [File].
-/// a typical snippet would:
-///  + [path!].walk([File].entries) to the place to be changed,
-///  + use [json!] to build a new [Item],
-///  + then use [core::cell::Cell::set] to affect the change.
-pub use tindalwic_macros::json;
-
-#[doc(inline)]
-pub use tindalwic_macros::arena;
-
 pub mod capped;
 pub mod fmt;
-pub mod walk;
+pub mod iter;
 
 #[cfg(feature = "alloc")]
 pub mod alloc;
@@ -45,22 +28,34 @@ pub const VERSION: &str = env!("TINDALWIC_VERSION");
 
 #[doc(inline)]
 pub use value::Value;
-impl<'a> Value<'a> {
-    /// linear `O(n)` scan.
-    // TODO: add link to `alloc` map view, say it "offers `O(1)`."
-    pub fn find_linearly_in(self, entries: Entries<'_>) -> Option<usize> {
-        entries.iter().position(|cell| cell.get().name.key == self)
+
+/// the four tokens that start a comment
+pub enum CommentMarker {
+    /// `#!`
+    Shebang,
+    /// `%!`
+    Prolog,
+    /// `%%`
+    Epilog,
+    /// `%@`
+    NameTag,
+}
+impl CommentMarker {
+    const FIRST_CHAR: [char;2] = ['%','#'];
+    /// return the two-ASCII-char-long marker
+    pub const fn token(&self) -> &'static str {
+        match self {
+            CommentMarker::Shebang => "#!",
+            CommentMarker::Prolog => "%!",
+            CommentMarker::Epilog => "%%",
+            CommentMarker::NameTag => "%@",
+        }
     }
 }
 
 /// Metadata about an [Item], [Entry] or [File].
 ///
-/// A serialized [Comment] will start with one of three possible markers, depending
-/// on its position:
-///  + `#!` for [File::hashbang],
-///  + `//` for [Name::comment].
-///  + `#` for the various `prolog` and `epilog` fields,
-///
+/// A serialized [Comment] will start with one of [CommentMarker].
 /// The content is UTF-8 Github Flavored Markdown.
 ///
 /// A field within the [Item] or File will hold the Comment, there is no mechanism to
@@ -84,7 +79,7 @@ impl<'a> Value<'a> {
 /// assert_eq!(html, "<p>with <del>strikethrough</del> extension</p>");
 /// # }
 /// ```
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Comment<'a> {
     /// number of empty lines preceding
     pub gap: usize,
@@ -104,7 +99,7 @@ where
 }
 
 /// a [Value]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Text<'a> {
     /// the string value
     pub value: Value<'a>,
@@ -126,9 +121,13 @@ where
 }
 
 /// the slice type for [List::items]
-pub type Items<'a> = &'a [Cell<Item<'a>>];
+#[derive(Clone, Default)]
+pub struct Items<'a> {
+    cells: &'a [Cell<Item<'a>>],
+}
+
 /// a linear array of [Item]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct List<'a> {
     /// A List can have an introductory Comment.
     pub prolog: Comment<'a>,
@@ -147,9 +146,13 @@ impl<'a> From<Items<'a>> for List<'a> {
 }
 
 /// the slice type for [Dict::entries]
-pub type Entries<'a> = &'a [Cell<Entry<'a>>];
+#[derive(Clone, Default)]
+pub struct Entries<'a> {
+    cells: &'a [Cell<Entry<'a>>],
+}
+
 /// an associative array of [Entry]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Dict<'a> {
     /// A Dict can have an introductory Comment.
     pub prolog: Comment<'a>,
@@ -170,7 +173,7 @@ impl<'a> From<Entries<'a>> for Dict<'a> {
 // ------------------------------------------------------------------------------------
 
 /// the key in an association.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Name<'a> {
     /// a key can have a comment before it (below its blank line).
     pub comment: Comment<'a>,
@@ -194,7 +197,7 @@ where
 /// an association (from name to item).
 ///
 /// at the lowest level, these are stored in an array.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Entry<'a> {
     /// the key half
     pub name: Name<'a>,
@@ -203,17 +206,11 @@ pub struct Entry<'a> {
     /// the value half
     pub item: Item<'a>,
 }
-impl<'a> Entry<'a> {
-    /// Make a fixed-size array of cells on the stack.
-    pub fn array<const N: usize>() -> [Cell<Entry<'a>>; N] {
-        ::core::array::from_fn::<_, N, _>(|_| Cell::default())
-    }
-}
 
 // ------------------------------------------------------------------------------------
 
 /// the three Item variants
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Item<'a> {
     /// a [Value]
     Text(Text<'a>),
@@ -225,12 +222,6 @@ pub enum Item<'a> {
 impl<'a> Default for Item<'a> {
     fn default() -> Self {
         Item::Text(Text::default())
-    }
-}
-impl<'a> Item<'a> {
-    /// Make a fixed-size array of cells on the stack.
-    pub fn array<const N: usize>() -> [Cell<Item<'a>>; N] {
-        ::core::array::from_fn::<_, N, _>(|_| Cell::default())
     }
 }
 impl<'a, T> From<T> for Item<'a>
@@ -257,7 +248,7 @@ impl<'a> From<Entries<'a>> for Item<'a> {
 /// the outermost context.
 ///
 /// similar to a [Item::Dict], but with different comments.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct File<'a> {
     /// A File can start with a Unix `#!` Comment.
     pub hashbang: Option<Value<'a>>,
@@ -272,16 +263,16 @@ impl<'a> File<'a> {
     /// make an [Item::Dict] from self.prolog and self.entries
     pub fn embed_without_hashbang(&self) -> Item<'a> {
         Item::Dict(Dict {
-            prolog: self.prolog,
-            entries: self.entries,
+            prolog: self.prolog.clone(),
+            entries: self.entries.clone(),
             ..Default::default()
         })
     }
     /// take prolog and entries from an [Dict] to make a new File.
     pub fn from_dict_without_epilog(dict: &Dict<'a>) -> Self {
         File {
-            prolog: dict.prolog,
-            entries: dict.entries,
+            prolog: dict.prolog.clone(),
+            entries: dict.entries.clone(),
             ..Default::default()
         }
     }

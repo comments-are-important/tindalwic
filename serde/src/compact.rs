@@ -11,9 +11,9 @@ impl<'a> Serialize for ItemSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let ItemSer(this) = self;
         match this {
-            Item::Text(text) => ItemVariants::Text.serialize(s, &TextSer(*text)),
-            Item::List(list) => ItemVariants::List.serialize(s, &ListSer(*list)),
-            Item::Dict(dict) => ItemVariants::Dict.serialize(s, &DictSer(*dict)),
+            Item::Text(text) => ItemVariants::Text.serialize(s, &TextSer(text.clone())),
+            Item::List(list) => ItemVariants::List.serialize(s, &ListSer(list.clone())),
+            Item::Dict(dict) => ItemVariants::Dict.serialize(s, &DictSer(dict.clone())),
         }
     }
 }
@@ -55,7 +55,7 @@ impl<'a> Serialize for CommentSer<'a> {
             match field {
                 CommentFields::Gap => fields.serialize_field(field.into(), &this.gap)?,
                 CommentFields::Value => {
-                    fields.serialize_field(field.into(), &MaybeSer(this.value))?
+                    fields.serialize_field(field.into(), &MaybeSer(this.value.clone()))?
                 }
             }
         }
@@ -104,9 +104,11 @@ impl<'a> Serialize for TextSer<'a> {
         let mut fields = s.serialize_struct(TextFields::KIND, should.count())?;
         for field in should.selected() {
             match field {
-                TextFields::Value => fields.serialize_field(field.into(), &ValueSer(this.value))?,
+                TextFields::Value => {
+                    fields.serialize_field(field.into(), &ValueSer(this.value.clone()))?
+                }
                 TextFields::Epilog => {
-                    fields.serialize_field(field.into(), &MaybeSer(this.epilog))?
+                    fields.serialize_field(field.into(), &MaybeSer(this.epilog.clone()))?
                 }
             }
         }
@@ -149,8 +151,8 @@ impl<'a> Serialize for ItemsSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let ItemsSer(this) = self;
         let mut seq = s.serialize_seq(Some(this.len()))?;
-        for cell in this.iter() {
-            seq.serialize_element(&ItemSer(cell.get()))?;
+        for item in this {
+            seq.serialize_element(&ItemSer(item.clone()))?;
         }
         seq.end()
     }
@@ -192,11 +194,13 @@ impl<'a> Serialize for ListSer<'a> {
         for field in should.selected() {
             match field {
                 ListFields::Prolog => {
-                    fields.serialize_field(field.into(), &CommentSer(this.prolog))?
+                    fields.serialize_field(field.into(), &CommentSer(this.prolog.clone()))?
                 }
-                ListFields::Items => fields.serialize_field(field.into(), &ItemsSer(this.items))?,
+                ListFields::Items => {
+                    fields.serialize_field(field.into(), &ItemsSer(this.items.clone()))?
+                }
                 ListFields::Epilog => {
-                    fields.serialize_field(field.into(), &CommentSer(this.epilog))?
+                    fields.serialize_field(field.into(), &CommentSer(this.epilog.clone()))?
                 }
             }
         }
@@ -247,9 +251,11 @@ impl<'a> Serialize for NameSer<'a> {
         for field in should.selected() {
             match field {
                 NameFields::Comment => {
-                    fields.serialize_field(field.into(), &CommentSer(this.comment))?
+                    fields.serialize_field(field.into(), &CommentSer(this.comment.clone()))?
                 }
-                NameFields::Key => fields.serialize_field(field.into(), &ValueSer(this.key))?,
+                NameFields::Key => {
+                    fields.serialize_field(field.into(), &ValueSer(this.key.clone()))?
+                }
             }
         }
         fields.end()
@@ -292,7 +298,7 @@ impl<'a> Serialize for EntrySer<'a> {
         let EntrySer(this) = self;
         let should = EntryFields::assign(|field| match field {
             EntryFields::Name => !this.name.key.is_empty() || this.name.comment.value.is_some(),
-            EntryFields::Item => match this.item {
+            EntryFields::Item => match this.item.clone() {
                 Item::Text(Text { value, epilog, .. }) => epilog.is_some() || !value.is_empty(),
                 _ => true,
             },
@@ -300,8 +306,12 @@ impl<'a> Serialize for EntrySer<'a> {
         let mut fields = s.serialize_struct(EntryFields::KIND, should.count())?;
         for field in should.selected() {
             match field {
-                EntryFields::Name => fields.serialize_field(field.into(), &NameSer(this.name))?,
-                EntryFields::Item => fields.serialize_field(field.into(), &ItemSer(this.item))?,
+                EntryFields::Name => {
+                    fields.serialize_field(field.into(), &NameSer(this.name.clone()))?
+                }
+                EntryFields::Item => {
+                    fields.serialize_field(field.into(), &ItemSer(this.item.clone()))?
+                }
             }
         }
         fields.end()
@@ -347,8 +357,8 @@ impl<'a> Serialize for EntriesSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let EntriesSer(this) = self;
         let mut seq = s.serialize_seq(Some(this.len()))?;
-        for cell in this.iter() {
-            seq.serialize_element(&EntrySer(cell.get()))?;
+        for entry in this {
+            seq.serialize_element(&EntrySer(entry.clone()))?;
         }
         seq.end()
     }
@@ -390,13 +400,13 @@ impl<'a> Serialize for DictSer<'a> {
         for field in should.selected() {
             match field {
                 DictFields::Prolog => {
-                    fields.serialize_field(field.into(), &MaybeSer(dict.prolog.value))?
+                    fields.serialize_field(field.into(), &MaybeSer(dict.prolog.value.clone()))?
                 }
                 DictFields::Entries => {
-                    fields.serialize_field(field.into(), &EntriesSer(dict.entries))?
+                    fields.serialize_field(field.into(), &EntriesSer(dict.entries.clone()))?
                 }
                 DictFields::Epilog => {
-                    fields.serialize_field(field.into(), &MaybeSer(dict.epilog.value))?
+                    fields.serialize_field(field.into(), &MaybeSer(dict.epilog.value.clone()))?
                 }
             }
         }
@@ -448,13 +458,13 @@ impl<'a> Serialize for FileSer<'a> {
         for field in should.selected() {
             match field {
                 FileFields::Hashbang => {
-                    fields.serialize_field(field.into(), &MaybeSer(this.hashbang))?
+                    fields.serialize_field(field.into(), &MaybeSer(this.hashbang.clone()))?
                 }
                 FileFields::Prolog => {
-                    fields.serialize_field(field.into(), &MaybeSer(this.prolog.value))?
+                    fields.serialize_field(field.into(), &MaybeSer(this.prolog.value.clone()))?
                 }
                 FileFields::Entries => {
-                    fields.serialize_field(field.into(), &EntriesSer(this.entries))?
+                    fields.serialize_field(field.into(), &EntriesSer(this.entries.clone()))?
                 }
             }
         }
@@ -498,7 +508,7 @@ pub struct Compact<'a>(pub File<'a>);
 impl<'a> Serialize for Compact<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let Compact(this) = self;
-        FileSer(*this).serialize(s)
+        FileSer(this.clone()).serialize(s)
     }
 }
 impl<'a> Compact<'a> {

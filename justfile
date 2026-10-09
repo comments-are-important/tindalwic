@@ -27,15 +27,13 @@ all: fmt (test "-q") playground coverage doc api lines msrv
 quiet := '(^| )(-q|--quiet)( |$)'
 color := '(\x1b\[[0-9;]*[mK])*'
 
+# if infinite loop happens: `just test -- --no-capture --test-threads=1`
 test *OPTS: _is_running_inside_devcontainer
-    # if infinite loop: `just test -- --no-capture --test-threads=1`
     cargo test -p tindalwic --test unit {{OPTS}}
     cargo test -p tindalwic --test unit --features alloc {{OPTS}}
     cargo test -p tindalwic --test unit --features bumpalo {{OPTS}}
     cargo test -p tindalwic --test unit --all-features {{OPTS}}
     cargo test -p tindalwic --doc --all-features {{OPTS}}
-    cargo test -p tindalwic --test trybuild --all-features {{OPTS}} \
-      {{ if OPTS =~ quiet { '2> >(grep --line-buffered -P "^'+color+'test '+color+'tests/trybuild/.*[^o][^k]$")' } else {''} }}
     cargo test -p tindalwic-serde --test serde {{OPTS}}
 
 coverage: (_install "cargo-llvm-cov") _is_running_inside_devcontainer

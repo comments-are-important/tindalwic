@@ -1,0 +1,11 @@
+lints = { workspace = true }
+
+[package]
+name = "tindalwic-indent"
+description = "zero copy minimize space char indentation"
+version = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+repository = { workspace = true }
+license = { workspace = true }

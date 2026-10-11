@@ -29,12 +29,17 @@ color := '(\x1b\[[0-9;]*[mK])*'
 
 # if infinite loop happens: `just test -- --no-capture --test-threads=1`
 test *OPTS: _is_running_inside_devcontainer
+    cargo test -p tindalwic-indent {{OPTS}}
     cargo test -p tindalwic --test unit {{OPTS}}
     cargo test -p tindalwic --test unit --features alloc {{OPTS}}
     cargo test -p tindalwic --test unit --features bumpalo {{OPTS}}
     cargo test -p tindalwic --test unit --all-features {{OPTS}}
     cargo test -p tindalwic --doc --all-features {{OPTS}}
     cargo test -p tindalwic-serde --test serde {{OPTS}}
+
+check_no_std: _is_running_inside_devcontainer
+  # this doesn't achieve the desired effect: need `--tests` but that blows up
+  cargo check -p tindalwic-indent --target x86_64-unknown-none
 
 coverage: (_install "cargo-llvm-cov") _is_running_inside_devcontainer
     yes | LLVM_COV_FLAGS="--show-expansions --show-instantiations" \

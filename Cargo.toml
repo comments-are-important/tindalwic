@@ -1,5 +1,5 @@
 [workspace]
-members = ["macros", "core", "serde", "app", "playground"]
+members = ["indent", "macros", "core", "serde", "app", "playground"]
 resolver = "2"
 
 [workspace.package]

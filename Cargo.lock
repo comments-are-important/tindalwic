@@ -757,12 +757,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tindalwic-indent"
+version = "0.6.0-alpha"
+
+[[package]]
 name = "tindalwic-macros"
 version = "0.6.0-alpha"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+ "tindalwic-indent",
 ]
 
 [[package]]

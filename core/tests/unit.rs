@@ -24,11 +24,11 @@ fn file_from_dict() {
 fn margin_modified() {
     let expected = "\t\ttwo\nzero        spaces\n\tone";
     let source = indent!(
-        "
-                    two
+        r#"
+                   two
             zero        spaces
-                one
-        "
+                 one
+        "#
     );
     assert_eq!(expected, source);
 }

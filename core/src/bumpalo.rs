@@ -47,13 +47,13 @@ impl<'a> Build<'a> for HeapBuilder<'a> {
     fn finish_items(&mut self, count: usize) -> Result<Items<'a>, &'static str> {
         self.items
             .finish(count, self.bump)
-            .map(|it| it.into())
+            .map(|cells| Items { cells })
             .ok_or("not enough items to make that list")
     }
     fn finish_entries(&mut self, count: usize) -> Result<Entries<'a>, &'static str> {
         self.entries
             .finish(count, self.bump)
-            .map(|it| it.into())
+            .map(|cells| Entries { cells })
             .ok_or("not enough entries to make that dict")
     }
     fn push_item(&mut self, item: Item<'a>) -> Result<(), &'static str> {

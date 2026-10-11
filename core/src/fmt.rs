@@ -313,9 +313,9 @@ impl<'o, 'f> Output<'o, 'f> {
         for entry in &file.entries {
             self.entry_in_dict(&entry)?;
         }
-        for _ in 0..file.trailing {
-            self.out.write_char('\n')?;
-        }
+        // for _ in 0..file.trailing {
+        //     self.out.write_char('\n')?;
+        // }
         Ok(())
     }
 }

@@ -10,7 +10,7 @@
             "sourceLanguages": ["rust"],
             "cwd": "${workspaceFolder}",
             "program": "${workspaceFolder}/target/debug/tindalwic-cli",
-            "args": ["random", "--check=10"],
+            "args": ["same", "example.tindalwic"],
             "preLaunchTask": "just: cli",
             "request": "launch",
         },

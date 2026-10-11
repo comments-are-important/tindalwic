@@ -1,9 +1,8 @@
-#![allow(missing_docs)]
+//! unit tests are outside the crate modules to stand as examples of API usage
 
-// use std::collections::HashMap;
-// #[cfg(feature = "alloc")]
-// use tindalwic::alloc::from_literal;
-// use tindalwic::parse::Parse as _;
+use ::bumpalo::Bump;
+use std::{fs, io};
+use tindalwic::parse::Parse as _;
 use tindalwic::*;
 
 #[test]
@@ -13,50 +12,55 @@ fn file_from_dict() {
     let mut entries = [Entry::default()];
     entries[0].name.key = "key".into();
     entries[0].item = "value".into();
-    let mut dict: Dict = Entries::new(&mut entries).into();
+    let mut dict: Dict = (&mut entries[..]).into();
     dict.prolog = Some("prolog".into());
     let file = File::try_from_dict_without_epilog(&Item::Dict(dict.clone())).unwrap();
-    assert_eq!(dict.prolog, file.prolog);
-    assert_eq!(dict.entries, file.entries);
+    assert_eq!(
+        file.to_string(),
+        indent!(
+            r#"
+                %!prolog
+                key=value
+            "#
+        )
+    );
 }
 
 #[test]
-fn margin_modified() {
-    let expected = "\t\ttwo\nzero        spaces\n\tone";
-    let source = indent!(
-        r#"
-                   two
-            zero        spaces
-                 one
-        "#
+fn three_blank_comments() {
+    let mut entries = [Entry::default()];
+    entries[0].name.comment = Some("".into());
+    entries[0].item = Item::Dict(Dict::default());
+    let mut file = File::default();
+    file.shebang = Some("".into());
+    file.prolog = Some("".into());
+    file.entries = (&mut entries[..]).into();
+    // file.trailing = 1; // and a bonus blank line
+    assert_eq!(
+        file.to_string(),
+        indent!(
+            r#"
+                #!
+                %!
+                %@
+                {}
+            "#
+        )
     );
-    assert_eq!(expected, source);
+}
+
+#[test]
+#[cfg(feature = "bumpalo")]
+fn example() -> io::Result<()> {
+    let example = fs::read_to_string("../example.tindalwic")?;
+    let bump = Bump::new();
+    let mut arena = tindalwic::bumpalo::Arena::new(&bump);
+    let file = arena.panic_first_error(&example);
+    assert_eq!(example, file.to_string());
+    Ok(())
 }
 
 /*
-#[test]
-#[cfg(feature = "alloc")]
-fn three_blank_comments() {
-    let mut entry = Entry::default();
-    entry.name.comment = "".into();
-    entry.item = Item::Dict(Dict::default());
-    let entries = [core::cell::Cell::new(entry)];
-    let file = File {
-        hashbang: Some("".into()),
-        prolog: "".into(),
-        entries: entries[..].into(),
-        trailing: 1,
-    };
-    let encoded = file.to_string();
-    let expect = "
-        #!
-        //
-        ///
-        {}
-
-    ";
-    assert_eq!(encoded, from_literal(expect));
-}
 #[test]
 #[cfg(feature = "alloc")]
 fn text_stretch_bug() {

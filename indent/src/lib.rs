@@ -53,7 +53,7 @@ impl<'a> Line<'a> {
         while let Some(shrink) = found {
             for line in lines.iter_mut() {
                 let indent = line.indentation();
-                if indent >= level {
+                if indent > level {
                     line.margin = &line.margin[shrink..];
                 }
             }
@@ -316,5 +316,47 @@ mod tests {
         // it would be preferable to recognize this and correct it, but not sure there
         // is enough information provided to pull that off. the simplicity of the
         // current algorithm is great, probably better to keep it that way.
+    }
+
+    #[test]
+    fn empty_lines() {
+        check(
+            &[0, 0],
+            r#"
+                typical
+
+            "#,
+        );
+        check(
+            &[0, 0],
+            r#"
+
+                typical
+            "#,
+        );
+        check(
+            &[0, 0, 0],
+            r#"
+                typical
+
+
+            "#,
+        );
+        check(
+            &[0, 0, 0],
+            r#"
+
+                typical
+
+            "#,
+        );
+        check(
+            &[0, 0, 0],
+            r#"
+
+
+                typical
+            "#,
+        );
     }
 }

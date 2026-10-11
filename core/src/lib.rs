@@ -87,10 +87,9 @@ where
 pub struct Items<'a> {
     cells: &'a [Cell<Item<'a>>],
 }
-impl<'a> Items<'a> {
-    /// turn a slice of Item into an Items struct
-    pub fn new(exclusive: &'a mut [Item<'a>]) -> Self {
-        let cells = Cell::from_mut(exclusive).as_slice_of_cells();
+impl<'a> From<&'a mut [Item<'a>]> for Items<'a> {
+    fn from(value: &'a mut [Item<'a>]) -> Self {
+        let cells = Cell::from_mut(value).as_slice_of_cells();
         Items { cells }
     }
 }
@@ -105,10 +104,13 @@ pub struct List<'a> {
     /// A List can have a comment after it.
     pub epilog: Option<Value<'a>>,
 }
-impl<'a> From<Items<'a>> for List<'a> {
-    fn from(value: Items<'a>) -> Self {
+impl<'a, T> From<T> for List<'a>
+where
+    Items<'a>: From<T>,
+{
+    fn from(value: T) -> Self {
         List {
-            items: value,
+            items: value.into(),
             ..Default::default()
         }
     }
@@ -119,10 +121,9 @@ impl<'a> From<Items<'a>> for List<'a> {
 pub struct Entries<'a> {
     cells: &'a [Cell<Entry<'a>>],
 }
-impl<'a> Entries<'a> {
-    /// turn a slice of Entry into an Entries struct
-    pub fn new(exclusive: &'a mut [Entry<'a>]) -> Self {
-        let cells = Cell::from_mut(exclusive).as_slice_of_cells();
+impl<'a> From<&'a mut [Entry<'a>]> for Entries<'a> {
+    fn from(value: &'a mut [Entry<'a>]) -> Self {
+        let cells = Cell::from_mut(value).as_slice_of_cells();
         Entries { cells }
     }
 }
@@ -137,10 +138,13 @@ pub struct Dict<'a> {
     /// A Dict can have a comment after it.
     pub epilog: Option<Value<'a>>,
 }
-impl<'a> From<Entries<'a>> for Dict<'a> {
-    fn from(value: Entries<'a>) -> Self {
+impl<'a, T> From<T> for Dict<'a>
+where
+    Entries<'a>: From<T>,
+{
+    fn from(value: T) -> Self {
         Dict {
-            entries: value,
+            entries: value.into(),
             ..Default::default()
         }
     }
@@ -232,8 +236,8 @@ pub struct File<'a> {
     pub prolog: Option<Value<'a>>,
     /// The contents of the Item::File.
     pub entries: Entries<'a>,
-    /// number of trailing empty lines
-    pub trailing: usize,
+    // /// number of trailing empty lines
+    // pub trailing: usize,
 }
 impl<'a> File<'a> {
     /// make an [Item::Dict] from self.prolog and self.entries

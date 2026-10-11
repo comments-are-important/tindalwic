@@ -33,11 +33,6 @@ impl<'a> PartialEq for Items<'a> {
         self.len() == other.len() && self.into_iter().eq(other.into_iter())
     }
 }
-impl<'a> From<&'a [Cell<Item<'a>>]> for Items<'a> {
-    fn from(cells: &'a [Cell<Item<'a>>]) -> Self {
-        Items { cells }
-    }
-}
 impl<'a> Items<'a> {
     /// are there no items?
     pub fn is_empty(&self) -> bool {
@@ -90,11 +85,6 @@ impl<'a> Eq for Entries<'a> {}
 impl<'a> PartialEq for Entries<'a> {
     fn eq(&self, other: &Self) -> bool {
         self.len() == other.len() && self.into_iter().eq(other.into_iter())
-    }
-}
-impl<'a> From<&'a [Cell<Entry<'a>>]> for Entries<'a> {
-    fn from(cells: &'a [Cell<Entry<'a>>]) -> Self {
-        Entries { cells }
     }
 }
 impl<'a> Entries<'a> {

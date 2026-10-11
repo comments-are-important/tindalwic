@@ -224,7 +224,15 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
         file.shebang = self.comment(0, CommentMarker::Shebang)?;
         file.prolog = self.comment(0, CommentMarker::Prolog)?;
         file.entries = self.entries(0)?;
-        file.trailing = self.lines.finish()?;
+        // file.trailing = self.lines.finish()?;
+        let end = self.lines.number;
+        if 0 != self.lines.finish()? {
+            self.report(ParseError::new(
+                end,
+                self.lines.number,
+                "blank lines at EOF",
+            ))?;
+        }
         Ok(file)
     }
 
@@ -260,7 +268,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
         }
     }
     fn excess(&mut self, indent: usize) -> Result<(), &'static str> {
-        let first = self.lines.number;
+        let first = self.lines.number + 1;
         if self.next(indent)? {
             self.report(ParseError::new(
                 first,
@@ -285,7 +293,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
         }
         let last = match self.lines.dedent(0) {
             None => limit,
-            Some(line) => line.as_ptr() as usize,
+            Some(line) => line.as_ptr() as usize - 1,
         };
         if last < base || limit < last {
             return Err("flow current line isn't from self.source");
@@ -294,7 +302,10 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
             return Err("flow `from` comes after current line");
         }
         let slice = &self.source[first - base..last - base];
-        Ok(Value { slice, indent })
+        Ok(Value {
+            slice,
+            indent: indent + 1,
+        })
     }
 
     /// parse a comment if one starts on this line.

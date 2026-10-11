@@ -13,7 +13,7 @@ pub fn from_tindalwic<'de, T: ::serde::Deserialize<'de>>(
         .first_error(encoded)
         .map_err(Error::custom)?
         // terrible - keep file around so comments can be serialized later...
-        .embed_without_hashbang();
+        .embed_without_shebang();
     let value = T::deserialize(ItemDe { encoded, item })?;
     Ok(value)
 }

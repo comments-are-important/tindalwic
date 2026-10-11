@@ -4,9 +4,9 @@ pub mod parse;
 
 /// All primitive values in Tindalwic are string slice references.
 ///
-///  + [Comment::value](super::Comment::value)
 ///  + [Text::value](super::Text::value)
 ///  + [Name::key](super::Name::key)
+///  + all comments
 ///
 /// They often contain embedded indentation because the parser is zero-copy from
 /// the encoded data. The methods here will strip indentation as necessary.
@@ -76,33 +76,6 @@ impl<'a> Value<'a> {
                 &s[d..]
             }
         })
-    }
-    fn stretched(
-        &self,
-        indent: usize,
-        concat: &'a str,
-        source: &'a str,
-    ) -> Result<Self, &'static str> {
-        if indent == usize::MAX {
-            return Err("value.stretched: sentinel value passed as indent");
-        }
-        if self.indent != usize::MAX && self.indent != indent {
-            return Err("value.stretched: incompatible indents");
-        }
-        let base = source.as_ptr() as usize;
-        let first = self.slice.as_ptr() as usize;
-        if first < base || base + source.len() <= first {
-            return Err("value.stretched: self did not come from that source");
-        }
-        let second = concat.as_ptr() as usize;
-        if second < base || base + source.len() <= second {
-            return Err("value.stretched: concat isn't from that source");
-        }
-        if second < first + self.slice.len() {
-            return Err("value.stretched: concat must follow this value");
-        }
-        let slice = &source[first - base..second - base + concat.len()];
-        Ok(Value { slice, indent })
     }
 }
 impl<'a> Default for Value<'a> {

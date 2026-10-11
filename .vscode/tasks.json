@@ -10,6 +10,12 @@
             "command": "clear ; just all"
         },
         {
+            "label": "just: test",
+            "group": "build",
+            "type": "shell",
+            "command": "clear ; just test"
+        },
+        {
             "label": "just: cli",
             "group": "build",
             "type": "shell",

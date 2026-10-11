@@ -4,9 +4,7 @@ use anyhow::{Error, Result};
 use bumpalo::Bump;
 use std::path::PathBuf;
 use tindalwic::bumpalo::Arena;
-use tindalwic::{
-    Comment, CommentMarker, Dict, Entries, Entry, File, Item, Items, List, Text, Value,
-};
+use tindalwic::{CommentMarker, Dict, Entries, Entry, File, Item, Items, List, Text, Value};
 
 /// read tindalwic, print expected lezer tree to stdout
 /// the core crate is authoritative so the lezer needs to conform.
@@ -23,14 +21,14 @@ pub fn run(input: &PathBuf) -> Result<()> {
 
 fn file(file: &File) -> String {
     let mut kids = Vec::new();
-    if let Some(shebang) = &file.hashbang {
+    if let Some(shebang) = &file.shebang {
         kids.push(format!(
             "Shebang(\"{}\",{})",
             CommentMarker::Shebang.token(),
             lines(&shebang, Some("Interpreter"))
         ))
     }
-    kids.extend(comment(CommentMarker::Prolog, &file.prolog.value));
+    kids.extend(comment(CommentMarker::Prolog, &file.prolog));
     for kid in &file.entries {
         kids.push(entry(&kid))
     }
@@ -43,7 +41,7 @@ fn file(file: &File) -> String {
 
 fn entry(entry: &Entry) -> String {
     let mut parts = Vec::new();
-    parts.extend(comment(CommentMarker::NameTag, &entry.name.comment.value));
+    parts.extend(comment(CommentMarker::NameTag, &entry.name.comment));
     let (bra, ket) = match &entry.item {
         Item::Text(_) => ("\"<\"", "\">\""),
         Item::List(_) => ("\"[\"", "\"]\""),
@@ -65,9 +63,9 @@ fn item(item: &Item) -> String {
     }
 }
 
-fn dict(prolog: &Comment, entries: &Entries) -> String {
+fn dict<'a>(prolog: &Option<Value<'a>>, entries: &Entries) -> String {
     let mut kids = Vec::new();
-    kids.extend(comment(CommentMarker::Prolog, &prolog.value));
+    kids.extend(comment(CommentMarker::Prolog, &prolog));
     for kid in entries {
         kids.push(entry(&kid))
     }
@@ -78,9 +76,9 @@ fn dict(prolog: &Comment, entries: &Entries) -> String {
     }
 }
 
-fn list(prolog: &Comment, items: &Items) -> String {
+fn list<'a>(prolog: &Option<Value<'a>>, items: &Items) -> String {
     let mut kids = Vec::new();
-    kids.extend(comment(CommentMarker::Prolog, &prolog.value));
+    kids.extend(comment(CommentMarker::Prolog, &prolog));
     for kid in items {
         let mut parts = Vec::new();
         let bracket = match &kid {
@@ -111,9 +109,9 @@ fn epilog(item: &Item) -> Option<String> {
     comment(
         CommentMarker::Epilog,
         match item {
-            Item::Text(Text { epilog, .. }) => epilog,
-            Item::List(List { epilog, .. }) => &epilog.value,
-            Item::Dict(Dict { epilog, .. }) => &epilog.value,
+            Item::Text(Text { epilog, .. }) => &epilog,
+            Item::List(List { epilog, .. }) => &epilog,
+            Item::Dict(Dict { epilog, .. }) => &epilog,
         },
     )
 }

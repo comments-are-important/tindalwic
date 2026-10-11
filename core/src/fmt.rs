@@ -1,7 +1,7 @@
 //! code for encoding data into the Tindalwic format.
 
 use crate::parse::ParseError;
-use crate::{Comment, CommentMarker, Entries, Entry, File, Item, Items, Text, Value};
+use crate::{CommentMarker, Entries, Entry, File, Item, Items, Text, Value};
 
 use core::fmt::{Debug, Display, Formatter, Result, Write};
 use core::write;
@@ -113,12 +113,6 @@ impl<'o, 'f> Output<'o, 'f> {
         }
         Ok(())
     }
-    fn gap(&mut self, len: usize) -> Result {
-        for _ in 0..len {
-            self.out.write_char('\n')?;
-        }
-        Ok(())
-    }
     const fn special_first(byte: u8) -> bool {
         matches!(
             byte,
@@ -140,15 +134,14 @@ impl<'o, 'f> Output<'o, 'f> {
         }
         Ok(())
     }
-    fn prolog<'a>(&mut self, comment: &Comment<'a>) -> Result {
+    fn prolog<'a>(&mut self, comment: &Option<Value<'a>>) -> Result {
         self.comment(CommentMarker::Prolog.token(), comment)
     }
-    fn epilog<'a>(&mut self, comment: &Comment<'a>) -> Result {
+    fn epilog<'a>(&mut self, comment: &Option<Value<'a>>) -> Result {
         self.comment(CommentMarker::Epilog.token(), comment)
     }
-    fn comment<'a>(&mut self, marker: &'a str, comment: &Comment<'a>) -> Result {
-        self.gap(comment.gap)?;
-        self.maybe(marker, &comment.value)?;
+    fn comment<'a>(&mut self, marker: &'a str, comment: &Option<Value<'a>>) -> Result {
+        self.maybe(marker, &comment)?;
         Ok(())
     }
     fn maybe<'a>(&mut self, marker: &'a str, option: &Option<Value<'a>>) -> Result {
@@ -163,13 +156,8 @@ impl<'o, 'f> Output<'o, 'f> {
     }
 
     fn one_liner_in_list<'a>(text: &Text<'a>) -> Option<&'a str> {
-        if text.longer {
-            return None;
-        }
         let value = text.value.only_line()?;
-        if value.is_empty() {
-            Some(value)
-        } else if Output::special_first(value.as_bytes()[0]) {
+        if text.longer || value.is_empty() || Output::special_first(value.as_bytes()[0]) {
             None
         } else {
             Some(value)
@@ -184,16 +172,13 @@ impl<'o, 'f> Output<'o, 'f> {
     }
 
     fn one_liner_in_dict<'a>(entry: &Entry<'a>, text: &Text<'a>) -> Option<(&'a str, &'a str)> {
-        if entry.longer || entry.name.longer || text.longer {
-            return None;
-        }
         let value = text.value.only_line()?;
         let key = entry.name.key.only_line()?;
-        if key.is_empty() {
-            Some((key, value))
-        } else if key.contains('=') {
+        if entry.longer || entry.name.longer || text.longer {
             None
-        } else if Output::special_first(key.as_bytes()[0]) {
+        } else if key.is_empty() {
+            Some((key, value))
+        } else if Output::special_first(key.as_bytes()[0]) || key.contains('=') {
             None
         } else {
             Some((key, value))
@@ -213,7 +198,7 @@ impl<'o, 'f> Output<'o, 'f> {
                     self.string(&text.value)?;
                     self.indent -= 1;
                 }
-                self.maybe(CommentMarker::Epilog.token(), &text.epilog)
+                self.comment(CommentMarker::Epilog.token(), &text.epilog)
             }
             Item::List(list) => {
                 self.indent()?;
@@ -270,7 +255,7 @@ impl<'o, 'f> Output<'o, 'f> {
                     self.string(&text.value)?;
                     self.indent -= 1;
                 }
-                self.maybe(CommentMarker::Epilog.token(), &text.epilog)
+                self.comment(CommentMarker::Epilog.token(), &text.epilog)
             }
             Item::List(list) => {
                 self.indent()?;
@@ -323,7 +308,7 @@ impl<'o, 'f> Output<'o, 'f> {
         }
     }
     fn file<'a>(&mut self, file: &File<'a>) -> Result {
-        self.maybe(CommentMarker::Shebang.token(), &file.hashbang)?;
+        self.maybe(CommentMarker::Shebang.token(), &file.shebang)?;
         self.prolog(&file.prolog)?;
         for entry in &file.entries {
             self.entry_in_dict(&entry)?;

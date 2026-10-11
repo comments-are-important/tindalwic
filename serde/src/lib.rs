@@ -227,15 +227,6 @@ macro_rules! fieldHelp {
 #[derive(Clone, Copy, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
 #[serde(field_identifier, rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
-enum CommentFields {
-    Gap,
-    Value,
-}
-fieldHelp!(CommentFields<Comment>);
-
-#[derive(Clone, Copy, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
-#[serde(field_identifier, rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
 enum TextFields {
     Value,
     Epilog,
@@ -284,7 +275,7 @@ fieldHelp!(DictFields<Dict>);
 #[serde(field_identifier, rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 enum FileFields {
-    Hashbang,
+    Shebang,
     Prolog,
     Entries,
 }

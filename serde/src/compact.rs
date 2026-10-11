@@ -42,57 +42,6 @@ impl<'de, 'a, 'b> Visitor<'de> for ItemDe<'a, 'b> {
     }
 }
 
-struct CommentSer<'a>(Comment<'a>);
-impl<'a> Serialize for CommentSer<'a> {
-    fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
-        let CommentSer(this) = self;
-        let should = CommentFields::assign(|field| match field {
-            CommentFields::Gap => this.gap != 0,
-            CommentFields::Value => this.value.is_some(),
-        });
-        let mut fields = s.serialize_struct(CommentFields::KIND, should.count())?;
-        for field in should.selected() {
-            match field {
-                CommentFields::Gap => fields.serialize_field(field.into(), &this.gap)?,
-                CommentFields::Value => {
-                    fields.serialize_field(field.into(), &MaybeSer(this.value.clone()))?
-                }
-            }
-        }
-        fields.end()
-    }
-}
-struct CommentDe<'a, 'b>(&'b mut dyn Build<'a>);
-impl<'de, 'a, 'b> DeserializeSeed<'de> for CommentDe<'a, 'b> {
-    type Value = Comment<'a>;
-    fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
-        d.deserialize_struct(CommentFields::KIND, CommentFields::NAMES, self)
-    }
-}
-impl<'de, 'a, 'b> Visitor<'de> for CommentDe<'a, 'b> {
-    type Value = Comment<'a>;
-    fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-        let kind = CommentFields::KIND;
-        let names = CommentFields::NAMES.join(", ");
-        write!(out, "{STYLE} {kind}: {names}")
-    }
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> StdResult<Self::Value, A::Error> {
-        let CommentDe(build) = self;
-        let mut result = Comment::default();
-        let mut seen = CommentFields::each(false);
-        while let Some(field) = map.next_key()? {
-            match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
-                CommentFields::Gap => result.gap = map.next_value()?,
-                CommentFields::Value => result.value = map.next_value_seed(MaybeDe(build))?,
-            }
-        }
-        Ok(result)
-    }
-    fn visit_seq<A: SeqAccess<'de>>(self, _seq: A) -> StdResult<Self::Value, A::Error> {
-        Err(A::Error::custom("visitor wants seq of fields, use Verbose"))
-    }
-}
-
 struct TextSer<'a>(Text<'a>);
 impl<'a> Serialize for TextSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
@@ -186,21 +135,21 @@ impl<'a> Serialize for ListSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let ListSer(this) = self;
         let should = ListFields::assign(|field| match field {
-            ListFields::Prolog => this.prolog.value.is_some(),
+            ListFields::Prolog => this.prolog.is_some(),
             ListFields::Items => !this.items.is_empty(),
-            ListFields::Epilog => this.epilog.value.is_some(),
+            ListFields::Epilog => this.epilog.is_some(),
         });
         let mut fields = s.serialize_struct(ListFields::KIND, should.count())?;
         for field in should.selected() {
             match field {
                 ListFields::Prolog => {
-                    fields.serialize_field(field.into(), &CommentSer(this.prolog.clone()))?
+                    fields.serialize_field(field.into(), &MaybeSer(this.prolog.clone()))?
                 }
                 ListFields::Items => {
                     fields.serialize_field(field.into(), &ItemsSer(this.items.clone()))?
                 }
                 ListFields::Epilog => {
-                    fields.serialize_field(field.into(), &CommentSer(this.epilog.clone()))?
+                    fields.serialize_field(field.into(), &MaybeSer(this.epilog.clone()))?
                 }
             }
         }
@@ -227,9 +176,9 @@ impl<'de, 'a, 'b> Visitor<'de> for ListDe<'a, 'b> {
         let mut seen = ListFields::each(false);
         while let Some(field) = map.next_key()? {
             match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
-                ListFields::Prolog => result.prolog = map.next_value_seed(CommentDe(build))?,
+                ListFields::Prolog => result.prolog = map.next_value_seed(MaybeDe(build))?,
                 ListFields::Items => result.items = map.next_value_seed(ItemsDe(build))?,
-                ListFields::Epilog => result.epilog = map.next_value_seed(CommentDe(build))?,
+                ListFields::Epilog => result.epilog = map.next_value_seed(MaybeDe(build))?,
             }
         }
         Ok(result)
@@ -244,14 +193,14 @@ impl<'a> Serialize for NameSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let NameSer(this) = self;
         let should = NameFields::assign(|field| match field {
-            NameFields::Comment => this.comment.value.is_some() || this.comment.gap != 0,
+            NameFields::Comment => this.comment.is_some(),
             NameFields::Key => !this.key.is_empty(),
         });
         let mut fields = s.serialize_struct(NameFields::KIND, should.count())?;
         for field in should.selected() {
             match field {
                 NameFields::Comment => {
-                    fields.serialize_field(field.into(), &CommentSer(this.comment.clone()))?
+                    fields.serialize_field(field.into(), &MaybeSer(this.comment.clone()))?
                 }
                 NameFields::Key => {
                     fields.serialize_field(field.into(), &ValueSer(this.key.clone()))?
@@ -281,7 +230,7 @@ impl<'de, 'a, 'b> Visitor<'de> for NameDe<'a, 'b> {
         let mut seen = NameFields::each(false);
         while let Some(field) = map.next_key()? {
             match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
-                NameFields::Comment => result.comment = map.next_value_seed(CommentDe(build))?,
+                NameFields::Comment => result.comment = map.next_value_seed(MaybeDe(build))?,
                 NameFields::Key => result.key = map.next_value_seed(ValueDe(build))?,
             }
         }
@@ -297,7 +246,7 @@ impl<'a> Serialize for EntrySer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let EntrySer(this) = self;
         let should = EntryFields::assign(|field| match field {
-            EntryFields::Name => !this.name.key.is_empty() || this.name.comment.value.is_some(),
+            EntryFields::Name => !this.name.key.is_empty() || this.name.comment.is_some(),
             EntryFields::Item => match this.item.clone() {
                 Item::Text(Text { value, epilog, .. }) => epilog.is_some() || !value.is_empty(),
                 _ => true,
@@ -392,21 +341,21 @@ impl<'a> Serialize for DictSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let DictSer(dict) = self;
         let should = DictFields::assign(|field| match field {
-            DictFields::Prolog => dict.prolog.value.is_some(),
+            DictFields::Prolog => dict.prolog.is_some(),
             DictFields::Entries => !dict.entries.is_empty(),
-            DictFields::Epilog => dict.epilog.value.is_some(),
+            DictFields::Epilog => dict.epilog.is_some(),
         });
         let mut fields = s.serialize_struct(DictFields::KIND, should.count())?;
         for field in should.selected() {
             match field {
                 DictFields::Prolog => {
-                    fields.serialize_field(field.into(), &MaybeSer(dict.prolog.value.clone()))?
+                    fields.serialize_field(field.into(), &MaybeSer(dict.prolog.clone()))?
                 }
                 DictFields::Entries => {
                     fields.serialize_field(field.into(), &EntriesSer(dict.entries.clone()))?
                 }
                 DictFields::Epilog => {
-                    fields.serialize_field(field.into(), &MaybeSer(dict.epilog.value.clone()))?
+                    fields.serialize_field(field.into(), &MaybeSer(dict.epilog.clone()))?
                 }
             }
         }
@@ -433,9 +382,9 @@ impl<'de, 'a, 'b> Visitor<'de> for DictDe<'a, 'b> {
         let mut seen = DictFields::each(false);
         while let Some(field) = map.next_key()? {
             match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
-                DictFields::Prolog => result.prolog = map.next_value_seed(CommentDe(build))?,
+                DictFields::Prolog => result.prolog = map.next_value_seed(MaybeDe(build))?,
                 DictFields::Entries => result.entries = map.next_value_seed(EntriesDe(build))?,
-                DictFields::Epilog => result.epilog = map.next_value_seed(CommentDe(build))?,
+                DictFields::Epilog => result.epilog = map.next_value_seed(MaybeDe(build))?,
             }
         }
         Ok(result)
@@ -450,18 +399,18 @@ impl<'a> Serialize for FileSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let FileSer(this) = self;
         let should = FileFields::assign(|field| match field {
-            FileFields::Hashbang => this.hashbang.is_some(),
-            FileFields::Prolog => this.prolog.value.is_some(),
+            FileFields::Shebang => this.shebang.is_some(),
+            FileFields::Prolog => this.prolog.is_some(),
             FileFields::Entries => !this.entries.is_empty(),
         });
         let mut fields = s.serialize_struct(FileFields::KIND, should.count())?;
         for field in should.selected() {
             match field {
-                FileFields::Hashbang => {
-                    fields.serialize_field(field.into(), &MaybeSer(this.hashbang.clone()))?
+                FileFields::Shebang => {
+                    fields.serialize_field(field.into(), &MaybeSer(this.shebang.clone()))?
                 }
                 FileFields::Prolog => {
-                    fields.serialize_field(field.into(), &MaybeSer(this.prolog.value.clone()))?
+                    fields.serialize_field(field.into(), &MaybeSer(this.prolog.clone()))?
                 }
                 FileFields::Entries => {
                     fields.serialize_field(field.into(), &EntriesSer(this.entries.clone()))?
@@ -491,8 +440,8 @@ impl<'de, 'a, 'b> Visitor<'de> for FileDe<'a, 'b> {
         let mut seen = FileFields::each(false);
         while let Some(field) = map.next_key()? {
             match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
-                FileFields::Hashbang => result.hashbang = map.next_value_seed(MaybeDe(build))?,
-                FileFields::Prolog => result.prolog = map.next_value_seed(CommentDe(build))?,
+                FileFields::Shebang => result.shebang = map.next_value_seed(MaybeDe(build))?,
+                FileFields::Prolog => result.prolog = map.next_value_seed(MaybeDe(build))?,
                 FileFields::Entries => result.entries = map.next_value_seed(EntriesDe(build))?,
             }
         }

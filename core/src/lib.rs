@@ -4,6 +4,9 @@
 
 use core::cell::Cell;
 
+#[doc(inline)]
+pub use tindalwic_macros::indent;
+
 pub mod capped;
 pub mod fmt;
 pub mod iter;
@@ -29,7 +32,7 @@ pub const VERSION: &str = env!("TINDALWIC_VERSION");
 #[doc(inline)]
 pub use value::Value;
 
-/// the four tokens that start a comment
+/// the tokens that start a comment
 pub enum CommentMarker {
     /// `#!`
     Shebang,
@@ -41,7 +44,7 @@ pub enum CommentMarker {
     NameTag,
 }
 impl CommentMarker {
-    const FIRST_CHAR: [char;2] = ['%','#'];
+    const FIRST_CHAR: [char; 2] = ['%', '#'];
     /// return the two-ASCII-char-long marker
     pub const fn token(&self) -> &'static str {
         match self {
@@ -53,60 +56,19 @@ impl CommentMarker {
     }
 }
 
-/// Metadata about an [Item], [Entry] or [File].
-///
-/// A serialized [Comment] will start with one of [CommentMarker].
-/// The content is UTF-8 Github Flavored Markdown.
-///
-/// A field within the [Item] or File will hold the Comment, there is no mechanism to
-/// navigate from a Comment to the thing it describes.
-///
-/// # Examples
-///
-/// ```
-/// # #[cfg(feature="alloc")]
-/// # {
-/// use tindalwic::*;
-/// let comment: Comment = "with ~strikethrough~ extension".into();
-///
-/// let html =
-///     markdown::to_html_with_options(&comment.value.unwrap().joined(), &markdown::Options::gfm())
-///         .expect(
-///             "should never error, according to:
-///      <https://docs.rs/markdown/latest/markdown/fn.to_html_with_options.html#errors>",
-///         );
-///
-/// assert_eq!(html, "<p>with <del>strikethrough</del> extension</p>");
-/// # }
-/// ```
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Comment<'a> {
-    /// number of empty lines preceding
-    pub gap: usize,
-    /// the string value
-    pub value: Option<Value<'a>>,
-}
-impl<'a, T> From<T> for Comment<'a>
-where
-    Value<'a>: From<T>,
-{
-    fn from(value: T) -> Self {
-        Comment {
-            value: Some(value.into()),
-            ..Default::default()
-        }
-    }
-}
-
-/// a [Value]
+/// a data [Value] and its metadata.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Text<'a> {
-    /// the string value
+    /// the string value. there are two possible forms for encoding: a single line not
+    /// indented, or an indented block. the single line form in a dictionary context
+    /// will follow a (possibly empty) key and an equals sign: `key=value`. in a list
+    /// context it is the entire line, but it must not start with a char (can't be
+    /// empty) that is not reserved.
     pub value: Value<'a>,
-    /// does Text.value prefer a longer encoding? (i.e. `<>`)
-    pub longer: bool,
-    /// A Text can have a Comment after it - but gap is impossible.
+    /// A Text value can have a epilog comment after it,
     pub epilog: Option<Value<'a>>,
+    /// is a longer text encoding preferred? (i.e. `<>` + single line block)
+    pub longer: bool,
 }
 impl<'a, T> From<T> for Text<'a>
 where
@@ -125,16 +87,23 @@ where
 pub struct Items<'a> {
     cells: &'a [Cell<Item<'a>>],
 }
+impl<'a> Items<'a> {
+    /// turn a slice of Item into an Items struct
+    pub fn new(exclusive: &'a mut [Item<'a>]) -> Self {
+        let cells = Cell::from_mut(exclusive).as_slice_of_cells();
+        Items { cells }
+    }
+}
 
 /// a linear array of [Item]
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct List<'a> {
-    /// A List can have an introductory Comment.
-    pub prolog: Comment<'a>,
+    /// A List can have an introductory comment.
+    pub prolog: Option<Value<'a>>,
     /// The contents of the Item::List.
     pub items: Items<'a>,
-    /// A List can have a Comment after it.
-    pub epilog: Comment<'a>,
+    /// A List can have a comment after it.
+    pub epilog: Option<Value<'a>>,
 }
 impl<'a> From<Items<'a>> for List<'a> {
     fn from(value: Items<'a>) -> Self {
@@ -150,16 +119,23 @@ impl<'a> From<Items<'a>> for List<'a> {
 pub struct Entries<'a> {
     cells: &'a [Cell<Entry<'a>>],
 }
+impl<'a> Entries<'a> {
+    /// turn a slice of Entry into an Entries struct
+    pub fn new(exclusive: &'a mut [Entry<'a>]) -> Self {
+        let cells = Cell::from_mut(exclusive).as_slice_of_cells();
+        Entries { cells }
+    }
+}
 
 /// an associative array of [Entry]
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Dict<'a> {
-    /// A Dict can have an introductory Comment.
-    pub prolog: Comment<'a>,
+    /// A Dict can have an introductory comment.
+    pub prolog: Option<Value<'a>>,
     /// The contents of the Item::Dict.
     pub entries: Entries<'a>,
-    /// A Dict can have a Comment after it.
-    pub epilog: Comment<'a>,
+    /// A Dict can have a comment after it.
+    pub epilog: Option<Value<'a>>,
 }
 impl<'a> From<Entries<'a>> for Dict<'a> {
     fn from(value: Entries<'a>) -> Self {
@@ -176,7 +152,7 @@ impl<'a> From<Entries<'a>> for Dict<'a> {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Name<'a> {
     /// a key can have a comment before it (below its blank line).
-    pub comment: Comment<'a>,
+    pub comment: Option<Value<'a>>,
     /// the string value
     pub key: Value<'a>,
     /// does Name.key prefer a longer encoding? (i.e. brackets instead of `=`)
@@ -250,10 +226,10 @@ impl<'a> From<Entries<'a>> for Item<'a> {
 /// similar to a [Item::Dict], but with different comments.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct File<'a> {
-    /// A File can start with a Unix `#!` Comment.
-    pub hashbang: Option<Value<'a>>,
-    /// A File can have an introductory Comment.
-    pub prolog: Comment<'a>,
+    /// A File can start with a Unix `#!` comment.
+    pub shebang: Option<Value<'a>>,
+    /// A File can have an introductory comment.
+    pub prolog: Option<Value<'a>>,
     /// The contents of the Item::File.
     pub entries: Entries<'a>,
     /// number of trailing empty lines
@@ -261,7 +237,7 @@ pub struct File<'a> {
 }
 impl<'a> File<'a> {
     /// make an [Item::Dict] from self.prolog and self.entries
-    pub fn embed_without_hashbang(&self) -> Item<'a> {
+    pub fn embed_without_shebang(&self) -> Item<'a> {
         Item::Dict(Dict {
             prolog: self.prolog.clone(),
             entries: self.entries.clone(),

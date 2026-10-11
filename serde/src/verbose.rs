@@ -42,71 +42,6 @@ impl<'de, 'a, 'b> Visitor<'de> for ItemDe<'a, 'b> {
     }
 }
 
-struct CommentSer<'a>(Comment<'a>);
-impl<'a> Serialize for CommentSer<'a> {
-    fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
-        let CommentSer(this) = self;
-        let should = CommentFields::each(true);
-        let mut fields = s.serialize_struct(CommentFields::KIND, should.count())?;
-        for field in should.selected() {
-            match field {
-                CommentFields::Gap => fields.serialize_field(field.into(), &this.gap)?,
-                CommentFields::Value => {
-                    fields.serialize_field(field.into(), &MaybeSer(this.value.clone()))?
-                }
-            }
-        }
-        fields.end()
-    }
-}
-struct CommentDe<'a, 'b>(&'b mut dyn Build<'a>);
-impl<'de, 'a, 'b> DeserializeSeed<'de> for CommentDe<'a, 'b> {
-    type Value = Comment<'a>;
-    fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
-        d.deserialize_struct(CommentFields::KIND, CommentFields::NAMES, self)
-    }
-}
-impl<'de, 'a, 'b> Visitor<'de> for CommentDe<'a, 'b> {
-    type Value = Comment<'a>;
-    fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-        let kind = CommentFields::KIND;
-        let names = CommentFields::NAMES.join(", ");
-        write!(out, "{STYLE} {kind}: {names}")
-    }
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> StdResult<Self::Value, A::Error> {
-        let CommentDe(build) = self;
-        let mut result = Comment::default();
-        let mut seen = CommentFields::each(false);
-        while let Some(field) = map.next_key()? {
-            match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
-                CommentFields::Gap => result.gap = map.next_value()?,
-                CommentFields::Value => result.value = map.next_value_seed(MaybeDe(build))?,
-            }
-        }
-        Ok(result)
-    }
-    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> StdResult<Self::Value, A::Error> {
-        let CommentDe(build) = self;
-        let mut result = Comment::default();
-        for field in CommentFields::each(true).selected() {
-            match field {
-                CommentFields::Gap => {
-                    result.gap = seq
-                        .next_element::<usize>()?
-                        .ok_or_else(|| A::Error::invalid_length(field.num(), &CommentDe(build)))?;
-                }
-                CommentFields::Value => {
-                    result.value = seq
-                        .next_element_seed(MaybeDe(build))?
-                        .ok_or_else(|| A::Error::invalid_length(field.num(), &CommentDe(build)))?
-                        .into();
-                }
-            }
-        }
-        Ok(result)
-    }
-}
-
 struct TextSer<'a>(Text<'a>);
 impl<'a> Serialize for TextSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
@@ -165,8 +100,7 @@ impl<'de, 'a, 'b> Visitor<'de> for TextDe<'a, 'b> {
                 TextFields::Epilog => {
                     result.epilog = seq
                         .next_element_seed(MaybeDe(build))?
-                        .ok_or_else(|| A::Error::invalid_length(field.num(), &TextDe(build)))?
-                        .into();
+                        .ok_or_else(|| A::Error::invalid_length(field.num(), &TextDe(build)))?;
                 }
             }
         }
@@ -218,13 +152,13 @@ impl<'a> Serialize for ListSer<'a> {
         for field in should.selected() {
             match field {
                 ListFields::Prolog => {
-                    fields.serialize_field(field.into(), &CommentSer(this.prolog.clone()))?
+                    fields.serialize_field(field.into(), &MaybeSer(this.prolog.clone()))?
                 }
                 ListFields::Items => {
                     fields.serialize_field(field.into(), &ItemsSer(this.items.clone()))?
                 }
                 ListFields::Epilog => {
-                    fields.serialize_field(field.into(), &CommentSer(this.epilog.clone()))?
+                    fields.serialize_field(field.into(), &MaybeSer(this.epilog.clone()))?
                 }
             }
         }
@@ -251,9 +185,9 @@ impl<'de, 'a, 'b> Visitor<'de> for ListDe<'a, 'b> {
         let mut seen = ListFields::each(false);
         while let Some(field) = map.next_key()? {
             match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
-                ListFields::Prolog => result.prolog = map.next_value_seed(CommentDe(build))?,
+                ListFields::Prolog => result.prolog = map.next_value_seed(MaybeDe(build))?,
                 ListFields::Items => result.items = map.next_value_seed(ItemsDe(build))?,
-                ListFields::Epilog => result.epilog = map.next_value_seed(CommentDe(build))?,
+                ListFields::Epilog => result.epilog = map.next_value_seed(MaybeDe(build))?,
             }
         }
         Ok(result)
@@ -265,7 +199,7 @@ impl<'de, 'a, 'b> Visitor<'de> for ListDe<'a, 'b> {
             match field {
                 ListFields::Prolog => {
                     result.prolog = seq
-                        .next_element_seed(CommentDe(build))?
+                        .next_element_seed(MaybeDe(build))?
                         .ok_or_else(|| A::Error::invalid_length(field.num(), &ListDe(build)))?
                         .into();
                 }
@@ -276,7 +210,7 @@ impl<'de, 'a, 'b> Visitor<'de> for ListDe<'a, 'b> {
                 }
                 ListFields::Epilog => {
                     result.epilog = seq
-                        .next_element_seed(CommentDe(build))?
+                        .next_element_seed(MaybeDe(build))?
                         .ok_or_else(|| A::Error::invalid_length(field.num(), &ListDe(build)))?
                         .into();
                 }
@@ -295,7 +229,7 @@ impl<'a> Serialize for NameSer<'a> {
         for field in should.selected() {
             match field {
                 NameFields::Comment => {
-                    fields.serialize_field(field.into(), &CommentSer(this.comment.clone()))?
+                    fields.serialize_field(field.into(), &MaybeSer(this.comment.clone()))?
                 }
                 NameFields::Key => {
                     fields.serialize_field(field.into(), &ValueSer(this.key.clone()))?
@@ -325,7 +259,7 @@ impl<'de, 'a, 'b> Visitor<'de> for NameDe<'a, 'b> {
         let mut seen = NameFields::each(false);
         while let Some(field) = map.next_key()? {
             match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
-                NameFields::Comment => result.comment = map.next_value_seed(CommentDe(build))?,
+                NameFields::Comment => result.comment = map.next_value_seed(MaybeDe(build))?,
                 NameFields::Key => result.key = map.next_value_seed(ValueDe(build))?,
             }
         }
@@ -338,7 +272,7 @@ impl<'de, 'a, 'b> Visitor<'de> for NameDe<'a, 'b> {
             match field {
                 NameFields::Comment => {
                     result.comment = seq
-                        .next_element_seed(CommentDe(build))?
+                        .next_element_seed(MaybeDe(build))?
                         .ok_or_else(|| A::Error::invalid_length(field.num(), &ListDe(build)))?;
                 }
                 NameFields::Key => {
@@ -466,13 +400,13 @@ impl<'a> Serialize for DictSer<'a> {
         for field in should.selected() {
             match field {
                 DictFields::Prolog => {
-                    fields.serialize_field(field.into(), &MaybeSer(dict.prolog.value.clone()))?
+                    fields.serialize_field(field.into(), &MaybeSer(dict.prolog.clone()))?
                 }
                 DictFields::Entries => {
                     fields.serialize_field(field.into(), &EntriesSer(dict.entries.clone()))?
                 }
                 DictFields::Epilog => {
-                    fields.serialize_field(field.into(), &MaybeSer(dict.epilog.value.clone()))?
+                    fields.serialize_field(field.into(), &MaybeSer(dict.epilog.clone()))?
                 }
             }
         }
@@ -499,9 +433,9 @@ impl<'de, 'a, 'b> Visitor<'de> for DictDe<'a, 'b> {
         let mut seen = DictFields::each(false);
         while let Some(field) = map.next_key()? {
             match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
-                DictFields::Prolog => result.prolog = map.next_value_seed(CommentDe(build))?,
+                DictFields::Prolog => result.prolog = map.next_value_seed(MaybeDe(build))?,
                 DictFields::Entries => result.entries = map.next_value_seed(EntriesDe(build))?,
-                DictFields::Epilog => result.epilog = map.next_value_seed(CommentDe(build))?,
+                DictFields::Epilog => result.epilog = map.next_value_seed(MaybeDe(build))?,
             }
         }
         Ok(result)
@@ -513,7 +447,7 @@ impl<'de, 'a, 'b> Visitor<'de> for DictDe<'a, 'b> {
             match field {
                 DictFields::Prolog => {
                     result.prolog = seq
-                        .next_element_seed(CommentDe(build))?
+                        .next_element_seed(MaybeDe(build))?
                         .ok_or_else(|| A::Error::invalid_length(field.num(), &EntryDe(build)))?
                         .into();
                 }
@@ -524,7 +458,7 @@ impl<'de, 'a, 'b> Visitor<'de> for DictDe<'a, 'b> {
                 }
                 DictFields::Epilog => {
                     result.epilog = seq
-                        .next_element_seed(CommentDe(build))?
+                        .next_element_seed(MaybeDe(build))?
                         .ok_or_else(|| A::Error::invalid_length(field.num(), &EntryDe(build)))?
                         .into();
                 }
@@ -542,11 +476,11 @@ impl<'a> Serialize for FileSer<'a> {
         let mut fields = s.serialize_struct(FileFields::KIND, should.count())?;
         for field in should.selected() {
             match field {
-                FileFields::Hashbang => {
-                    fields.serialize_field(field.into(), &MaybeSer(this.hashbang.clone()))?
+                FileFields::Shebang => {
+                    fields.serialize_field(field.into(), &MaybeSer(this.shebang.clone()))?
                 }
                 FileFields::Prolog => {
-                    fields.serialize_field(field.into(), &MaybeSer(this.prolog.value.clone()))?
+                    fields.serialize_field(field.into(), &MaybeSer(this.prolog.clone()))?
                 }
                 FileFields::Entries => {
                     fields.serialize_field(field.into(), &EntriesSer(this.entries.clone()))?
@@ -576,8 +510,8 @@ impl<'de, 'a, 'b> Visitor<'de> for FileDe<'a, 'b> {
         let mut seen = FileFields::each(false);
         while let Some(field) = map.next_key()? {
             match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
-                FileFields::Hashbang => result.hashbang = map.next_value_seed(MaybeDe(build))?,
-                FileFields::Prolog => result.prolog = map.next_value_seed(CommentDe(build))?,
+                FileFields::Shebang => result.shebang = map.next_value_seed(MaybeDe(build))?,
+                FileFields::Prolog => result.prolog = map.next_value_seed(MaybeDe(build))?,
                 FileFields::Entries => result.entries = map.next_value_seed(EntriesDe(build))?,
             }
         }
@@ -588,14 +522,14 @@ impl<'de, 'a, 'b> Visitor<'de> for FileDe<'a, 'b> {
         let mut result = File::default();
         for field in FileFields::each(true).selected() {
             match field {
-                FileFields::Hashbang => {
-                    result.hashbang = seq
+                FileFields::Shebang => {
+                    result.shebang = seq
                         .next_element_seed(MaybeDe(build))?
                         .ok_or_else(|| A::Error::invalid_length(field.num(), &FileDe(build)))?
                 }
                 FileFields::Prolog => {
                     result.prolog = seq
-                        .next_element_seed(CommentDe(build))?
+                        .next_element_seed(MaybeDe(build))?
                         .ok_or_else(|| A::Error::invalid_length(field.num(), &FileDe(build)))?
                         .into()
                 }

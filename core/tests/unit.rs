@@ -7,10 +7,32 @@
 use tindalwic::*;
 
 #[test]
-fn from_dict() {
+fn file_from_dict() {
     assert!(File::try_from_dict_without_epilog(&Item::Text("nope".into())).is_none());
     assert!(File::try_from_dict_without_epilog(&Item::List(List::default())).is_none());
+    let mut entries = [Entry::default()];
+    entries[0].name.key = "key".into();
+    entries[0].item = "value".into();
+    let mut dict: Dict = Entries::new(&mut entries).into();
+    dict.prolog = Some("prolog".into());
+    let file = File::try_from_dict_without_epilog(&Item::Dict(dict.clone())).unwrap();
+    assert_eq!(dict.prolog, file.prolog);
+    assert_eq!(dict.entries, file.entries);
 }
+
+#[test]
+fn margin_modified() {
+    let expected = "\t\ttwo\nzero        spaces\n\tone";
+    let source = indent!(
+        "
+                    two
+            zero        spaces
+                one
+        "
+    );
+    assert_eq!(expected, source);
+}
+
 /*
 #[test]
 #[cfg(feature = "alloc")]

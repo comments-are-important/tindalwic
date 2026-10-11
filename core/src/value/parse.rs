@@ -1,8 +1,8 @@
 //! everything related to converting bytes into a File
 
-use core::str::SplitInclusive;
+use core::str::Split;
 
-use crate::{Comment, CommentMarker, Dict, Entries, Entry, File, Item, Items, List, Text, Value};
+use crate::{CommentMarker, Dict, Entries, Entry, File, Item, Items, List, Text, Value};
 
 // there are some lines/branches here that are impossible to get coverage for,
 // and the mechanisms for suppressing the report are inadequate ... until:
@@ -105,7 +105,7 @@ pub trait Parse<'a> {
         content: &'a str,
         report: &'_ mut dyn FnMut(ParseError) -> Reported,
     ) -> Option<File<'a>> {
-        Input::parse(self.builder(), content, report)
+        Input::parse(content, self.builder(), report)
     }
     /// call the parser on the provided content, give up at first error.
     fn first_error(&mut self, content: &'a str) -> Result<File<'a>, ParseError> {
@@ -132,81 +132,105 @@ pub enum Reported {
     Continue,
 }
 
-struct Input<'a, 'b, 'r> {
-    line: usize,
-    empties: usize,
-    tabs: usize, // indentation on this line, unless gap, then peek from next line
+/// can be advanced through each line in a str slice.
+pub struct LineCursor<'a> {
     current: Option<&'a str>,
-    good: bool,
-    report: &'r mut dyn FnMut(ParseError) -> Reported,
-    pending: SplitInclusive<'a, char>,
+    pending: Split<'a, char>,
+    exhausted: bool,
+    /// the line number (starts at 1)
+    pub number: usize,
+}
+impl<'a> LineCursor<'a> {
+    /// return a cursor for the given str slice
+    pub fn new(slice: &'a str) -> Self {
+        let mut pending = slice.split('\n');
+        let current = pending.next();
+        LineCursor {
+            current,
+            pending,
+            exhausted: current.is_none(),
+            number: 1,
+        }
+    }
+
+    /// move to the next line
+    pub fn advance(&mut self) {
+        if self.exhausted {
+            self.current = None;
+        } else {
+            self.number += 1;
+            self.current = self.pending.next();
+            if self.current.is_none() {
+                self.exhausted = true
+            }
+        }
+    }
+
+    /// Some if current line is empty or if margin successfully removed
+    pub fn dedent(&self, indent: usize) -> Option<&'a str> {
+        let Some(line) = self.current else {
+            return None;
+        };
+        if line.is_empty() || indent == 0 {
+            return Some(line);
+        }
+        let bytes = line.as_bytes();
+        for offset in 0..indent {
+            if bytes[offset] != b'\t' {
+                return None;
+            }
+        }
+        Some(&line[indent..])
+    }
+
+    /// count trailing empty lines, or Err if a non-empty line remains
+    pub fn finish(&mut self) -> Result<usize, &'static str> {
+        let start = self.number;
+        loop {
+            match self.current {
+                None => return Ok(self.number - start),
+                Some(line) if line.is_empty() => self.advance(),
+                _ => return Err("not finished, found a non-empty line"),
+            }
+        }
+    }
+}
+
+struct Input<'a, 'b, 'r> {
+    lines: LineCursor<'a>,
     arena: &'b mut dyn Build<'a>,
-    utf8: &'a str, // entire tindalwic encoded content
+    report: &'r mut dyn FnMut(ParseError) -> Reported,
+    source: &'a str,
 }
 impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
     /// None means the arena is too small (or the UTF-8 is way too big).
     pub fn parse(
+        source: &'a str,
         arena: &'b mut dyn Build<'a>,
-        utf8: &'a str,
         mut report: impl FnMut(ParseError) -> Reported + 'r,
     ) -> Option<File<'a>> {
         let mut input = Input {
-            line: 0,
-            empties: 0,
-            tabs: 0,
-            current: None,
-            good: true,
-            report: &mut report,
-            pending: utf8.split_inclusive('\n'),
+            lines: LineCursor::new(source),
             arena,
-            utf8,
+            report: &mut report,
+            source,
         };
-        if input.next(0, true).is_err() {
-            return None;
-        }
         input.file().map_or_else(|_| None, |f| Some(f))
     }
-    fn file(&mut self) -> Result<File<'a>, &'static str> {
-        if self.utf8.len() >= usize::MAX {
-            // not covered (impossible to get, can't suppress completely).
-            // MAX is a sentinel (in Value::indent), so it can't also be a length.
-            // paranoid: no str can be this big (assuming usize correctly implemented),
-            // but it is simple and cheap to be explicit about the contract.
-            self.report(ParseError::Memory("way too big"))?;
-            return Err("parse.file: can't even start");
-        }
+
+    /// finish a complete file
+    pub fn file(&mut self) -> Result<File<'a>, &'static str> {
         let mut file = File::default();
-        file.hashbang = self.comment(0, false, CommentMarker::Shebang)?.value;
-        file.prolog = self.comment(0, true, CommentMarker::Prolog)?;
+        file.shebang = self.comment(0, CommentMarker::Shebang)?;
+        file.prolog = self.comment(0, CommentMarker::Prolog)?;
         file.entries = self.entries(0)?;
-        file.trailing = self.claim_empties();
-        if self.utf8.ends_with('\n') {
-            file.trailing += 1;
-        }
-        if file.prolog.gap != 0 && file.prolog.value.is_none() {
-            if let Some(mut entry) = file.entries.get(0) {
-                entry.name.comment.gap += file.prolog.gap;
-                file.entries.set(0, &entry);
-                file.prolog.gap = 0;
-            }
-        }
-        if self.current.is_some() {
-            self.report(ParseError::at(
-                self.line,
-                "input was not completely consumed",
-            ))?;
-        }
-        if !self.good {
-            Err("parse.file: something was reported")
-        } else {
-            Ok(file)
-        }
+        file.trailing = self.lines.finish()?;
+        Ok(file)
     }
 
-    /// actual ParseError is consumed by the reporting.
-    /// returns an Err(()) to unwind the call stack.
+    /// actual ParseError is consumed by the reporting,
+    /// so returns a vague Err() to unwind the call stack.
     fn report(&mut self, err: ParseError) -> Result<(), &'static str> {
-        self.good = false;
         match (self.report)(err) {
             Reported::Abort => Err("parse.report: caller wants to abort"),
             Reported::Continue => {
@@ -219,176 +243,156 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
         }
     }
 
-    fn advance(&mut self) {
-        self.line += 1;
-        self.current = self.pending.next();
-        self.tabs = self
-            .current
-            .map(|it| it.len() - it.trim_start_matches('\t').len())
-            .unwrap_or_default();
-    }
-
-    fn after_indent(&self, indent: usize) -> Option<&'a str> {
-        let Some(line) = self.current else {
-            return None;
-        };
-        if self.tabs < indent {
-            None
-        } else {
-            Some(&line[indent..].trim_end_matches('\n'))
+    /// done with current line, skip past excessively indented lines until exhausted or
+    /// find one with given indent or less.
+    /// pass usize::MAX to prevent skipping (exactly one advance will be done).
+    /// return true if any lines were skipped.
+    fn next(&mut self, indent: usize) -> Result<bool, &'static str> {
+        self.lines.advance();
+        if indent == usize::MAX || self.lines.dedent(indent + 1).is_none() {
+            return Ok(false);
         }
-    }
-
-    fn claim_empties(&mut self) -> usize {
-        let result = self.empties;
-        self.empties = 0;
-        result
-    }
-
-    /// done with current line, so advance past excessively indented lines.
-    /// pass indent==usize::MAX to avoid skipping the excess (still skips empties).
-    /// return the line just previous to what becomes current.
-    fn next(
-        &mut self,
-        indent: usize,
-        report_excess: bool,
-    ) -> Result<Option<&'a str>, &'static str> {
-        self.empties = 0;
-        let mut previous = None; // current can't be "previous"
-        self.advance();
-        let first = self.line;
-        let mut excess = false;
         loop {
-            while self.current == Some("\n") {
-                self.empties += 1;
-                // leave previous, exclude last clump of empties from stretch
-                self.advance();
+            self.lines.advance();
+            if self.lines.dedent(indent + 1).is_none() {
+                return Ok(true);
             }
-            if self.current.is_none() {
-                break;
-            }
-            if self.tabs <= indent {
-                break;
-            }
-            excess = true;
-            self.empties = 0; // only the last clump of consecutive empties matters
-            previous = self.current;
-            self.advance();
         }
-        if report_excess && excess {
-            self.report(ParseError::new(first, self.line, "excess indentation"))?;
+    }
+    fn excess(&mut self, indent: usize) -> Result<(), &'static str> {
+        let first = self.lines.number;
+        if self.next(indent)? {
+            self.report(ParseError::new(
+                first,
+                self.lines.number,
+                "excess indentation",
+            ))?;
         }
-        Ok(previous)
+        Ok(())
     }
 
-    /// current line has been recognized as beginning of a Comment or Text that might
-    /// continue, so stretch a portion of it out to include the whole thing.
-    fn stretch(&mut self, indent: usize, from: &'a str) -> Result<Value<'a>, &'static str> {
-        let start = Value::from(from);
-        return match self.next(indent, false)? {
-            None => Ok(start),
-            Some(previous) => {
-                Ok(start.stretched(indent + 1, previous.trim_end_matches('\n'), self.utf8)?)
-            }
+    /// current line has been recognized as beginning of a Value that might
+    /// flow, so stretch a portion of it out to include the whole thing.
+    fn flow(&mut self, indent: usize, from: &'a str) -> Result<Value<'a>, &'static str> {
+        if !self.next(indent)? {
+            return Ok(from.into());
+        }
+        let base = self.source.as_ptr() as usize;
+        let limit = base + self.source.len();
+        let first = from.as_ptr() as usize;
+        if first < base || limit < first {
+            return Err("flow `from` did not come from self.source");
+        }
+        let last = match self.lines.dedent(0) {
+            None => limit,
+            Some(line) => line.as_ptr() as usize,
         };
+        if last < base || limit < last {
+            return Err("flow current line isn't from self.source");
+        }
+        if last < first {
+            return Err("flow `from` comes after current line");
+        }
+        let slice = &self.source[first - base..last - base];
+        Ok(Value { slice, indent })
     }
 
-    /// use this whenever a comment is allowed.
-    fn comment(
+    /// parse a comment if one starts on this line.
+    pub fn comment(
         &mut self,
         indent: usize,
-        gap: bool,
         mark: CommentMarker,
-    ) -> Result<Comment<'a>, &'static str> {
-        let line = self
-            .after_indent(indent)
-            .and_then(|line| line.strip_prefix(mark.token()));
-        let mut comment = Comment::default();
-        if gap {
-            comment.gap = self.claim_empties();
+    ) -> Result<Option<Value<'a>>, &'static str> {
+        if let Some(from) = self
+            .lines
+            .dedent(indent)
+            .and_then(|line| line.strip_prefix(mark.token()))
+        {
+            Ok(Some(self.flow(indent, from)?))
+        } else {
+            Ok(None)
         }
-        if let Some(from) = line {
-            comment.value = Some(self.stretch(indent, from)?);
-        }
-        return Ok(comment);
     }
 
     /// current line has been recognized as beginning a Text, from a `<>` context on
     /// the previous line, or from shortcut syntax. `from` is where text begins.
-    /// lenient - one-liners can stretch.
-    fn text(&mut self, indent: usize, from: &'a str) -> Result<Item<'a>, &'static str> {
-        let value = self.stretch(indent, from)?;
-        let epilog = self.comment(indent, false, CommentMarker::Epilog)?.value;
-        Ok(Item::Text(Text {
+    /// lenient because one-liners can stretch.
+    pub fn lenient(&mut self, indent: usize, from: &'a str) -> Result<Text<'a>, &'static str> {
+        let value = self.flow(indent, from)?;
+        let epilog = self.comment(indent, CommentMarker::Epilog)?;
+        Ok(Text {
             value,
             longer: false,
             epilog,
-        }))
+        })
     }
-    fn text_block(&mut self, indent: usize) -> Result<Item<'a>, &'static str> {
+
+    /// parse an indented block of text
+    pub fn text(&mut self, indent: usize) -> Result<Text<'a>, &'static str> {
         let value = self.block(indent)?;
-        let epilog = self.comment(indent, false, CommentMarker::Epilog)?.value;
-        Ok(Item::Text(Text {
+        let epilog = self.comment(indent, CommentMarker::Epilog)?;
+        Ok(Text {
             value,
             longer: true,
             epilog,
-        }))
+        })
     }
     /// a block (optionally) follows current line (at indent+1).
-    /// always need some value, use end of current if no block follows
     fn block(&mut self, indent: usize) -> Result<Value<'a>, &'static str> {
-        self.advance();
-        let Some(first) = self.after_indent(indent + 1) else {
+        self.lines.advance();
+        let Some(first) = self.lines.dedent(indent + 1) else {
             return Ok(Value::default());
         };
-        self.stretch(indent, first)
+        self.flow(indent, first)
     }
 
     /// previous line opened a list context, so parse all the lines in it.
-    fn list(&mut self, indent: usize) -> Result<Item<'a>, &'static str> {
+    pub fn list(&mut self, indent: usize) -> Result<List<'a>, &'static str> {
         let mut list = List::default();
-        list.prolog = self.comment(indent + 1, true, CommentMarker::Prolog)?;
+        list.prolog = self.comment(indent + 1, CommentMarker::Prolog)?;
         list.items = self.items(indent + 1)?;
-        list.epilog = self.comment(indent, true, CommentMarker::Epilog)?;
-        Ok(Item::List(list))
+        list.epilog = self.comment(indent, CommentMarker::Epilog)?;
+        Ok(list)
     }
 
-    fn one_item(&mut self, indent: usize) -> Result<Option<Item<'a>>, &'static str> {
+    /// attempt to parse one item from a list context
+    pub fn item(&mut self, indent: usize) -> Result<Option<Item<'a>>, &'static str> {
         loop {
-            let Some(scan) = self.after_indent(indent) else {
+            let Some(scan) = self.lines.dedent(indent) else {
                 return Ok(None);
             };
-            let line = self.line;
+            let line = self.lines.number;
             let message = if scan.is_empty() {
-                return Ok(Some(self.text(indent, scan)?));
+                "gotta use `<>` for empty items"
             } else if scan == "<>" {
-                return Ok(Some(self.text_block(indent)?));
+                return Ok(Some(Item::Text(self.text(indent)?)));
             } else if scan.starts_with('<') {
                 "malformed `<>` in list"
             } else if scan == "[]" {
-                self.next(indent + 1, true)?;
-                return Ok(Some(self.list(indent)?));
+                self.excess(indent + 1)?;
+                return Ok(Some(Item::List(self.list(indent)?)));
             } else if scan.starts_with('[') {
                 "malformed `[]` in list"
             } else if scan == "{}" {
-                self.next(indent + 1, true)?;
-                return Ok(Some(self.dict(indent)?));
+                self.excess(indent + 1)?;
+                return Ok(Some(Item::Dict(self.dict(indent)?)));
             } else if scan.starts_with('{') {
                 "malformed `{}` in list"
             } else if scan.starts_with(&CommentMarker::FIRST_CHAR) {
                 "stray comment"
             } else {
-                return Ok(Some(self.text(indent, scan)?));
+                return Ok(Some(Item::Text(self.lenient(indent, scan)?)));
             };
             self.report(ParseError::at(line, message))?;
-            self.next(indent, false)?;
+            self.excess(indent)?;
         }
     }
 
-    fn items(&mut self, indent: usize) -> Result<Items<'a>, &'static str> {
+    /// parse any items inside a list context
+    pub fn items(&mut self, indent: usize) -> Result<Items<'a>, &'static str> {
         let mut count = 0usize;
         loop {
-            let Some(item) = self.one_item(indent)? else {
+            let Some(item) = self.item(indent)? else {
                 break;
             };
             if let Err(err) = self.arena.push_item(item) {
@@ -412,37 +416,28 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
     }
 
     /// previous line opened a dict context, so parse all the lines in it.
-    fn dict(&mut self, indent: usize) -> Result<Item<'a>, &'static str> {
+    pub fn dict(&mut self, indent: usize) -> Result<Dict<'a>, &'static str> {
         let mut dict = Dict::default();
-        dict.prolog = self.comment(indent + 1, true, CommentMarker::Prolog)?;
+        dict.prolog = self.comment(indent + 1, CommentMarker::Prolog)?;
         dict.entries = self.entries(indent + 1)?;
-        dict.epilog = self.comment(indent, true, CommentMarker::Epilog)?;
-        if dict.prolog.gap != 0 && dict.prolog.value.is_none() {
-            if let Some(mut entry) = dict.entries.get(0) {
-                entry.name.comment.gap += dict.prolog.gap;
-                dict.entries.set(0, &entry);
-                dict.prolog.gap = 0;
-            }
-        }
-        Ok(Item::Dict(dict))
+        dict.epilog = self.comment(indent, CommentMarker::Epilog)?;
+        Ok(dict)
     }
-    fn one_entry(&mut self, indent: usize) -> Result<Option<Entry<'a>>, &'static str> {
+    // attempt to parse one entry
+    pub fn entry(&mut self, indent: usize) -> Result<Option<Entry<'a>>, &'static str> {
         loop {
-            if self.current.is_none() || self.tabs != indent {
-                return Ok(None);
-            }
-            let comment = self.comment(indent, true, CommentMarker::NameTag)?;
-            let Some(scan) = self.after_indent(indent) else {
-                if comment.gap > 0 || comment.value.is_some() {
-                    self.report(ParseError::at(self.line, "gap/comment but no key"))?;
+            let comment = self.comment(indent, CommentMarker::NameTag)?;
+            let line = self.lines.number;
+            let Some(scan) = self.lines.dedent(indent) else {
+                if comment.is_some() {
+                    self.report(ParseError::at(line, "comment but no key"))?;
                 }
                 return Ok(None);
             };
-            let line = self.line;
             let message = if scan.starts_with('<') && scan.ends_with('>') {
                 let mut entry = Entry::default();
                 entry.name.key = Value::from(&scan[1..scan.len() - 1]);
-                entry.item = self.text_block(indent)?;
+                entry.item = Item::Text(self.text(indent)?);
                 entry.name.comment = comment;
                 entry.name.longer = true;
                 return Ok(Some(entry));
@@ -451,8 +446,8 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
             } else if scan.starts_with('[') && scan.ends_with(']') {
                 let mut entry = Entry::default();
                 entry.name.key = Value::from(&scan[1..scan.len() - 1]);
-                self.next(indent + 1, true)?;
-                entry.item = self.list(indent)?;
+                self.excess(indent + 1)?;
+                entry.item = Item::List(self.list(indent)?);
                 entry.name.comment = comment;
                 entry.name.longer = true;
                 return Ok(Some(entry));
@@ -461,8 +456,8 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
             } else if scan.starts_with('{') && scan.ends_with('}') {
                 let mut entry = Entry::default();
                 entry.name.key = Value::from(&scan[1..scan.len() - 1]);
-                self.next(indent + 1, true)?;
-                entry.item = self.dict(indent)?;
+                self.excess(indent + 1)?;
+                entry.item = Item::Dict(self.dict(indent)?);
                 entry.name.comment = comment;
                 entry.name.longer = true;
                 return Ok(Some(entry));
@@ -472,7 +467,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
                 let mut entry = Entry::default();
                 entry.longer = true;
                 entry.name.key = self.block(indent)?;
-                if let Some(item) = self.one_item(indent)? {
+                if let Some(item) = self.item(indent)? {
                     entry.item = item;
                     entry.name.comment = comment;
                     return Ok(Some(entry));
@@ -485,21 +480,22 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
             } else if let Some((before, after)) = scan.split_once('=') {
                 let mut entry = Entry::default();
                 entry.name.key = Value::from(before);
-                entry.item = self.text(indent, after)?;
+                entry.item = Item::Text(self.lenient(indent, after)?);
                 entry.name.comment = comment;
                 return Ok(Some(entry));
             } else {
                 "missing `=` in dict"
             };
             self.report(ParseError::at(line, message))?;
-            self.next(indent, false)?;
+            self.excess(indent)?;
         }
     }
 
-    fn entries(&mut self, indent: usize) -> Result<Entries<'a>, &'static str> {
+    /// parse any entries inside a dict context
+    pub fn entries(&mut self, indent: usize) -> Result<Entries<'a>, &'static str> {
         let mut count = 0usize;
         loop {
-            let Some(entry) = self.one_entry(indent)? else {
+            let Some(entry) = self.entry(indent)? else {
                 break;
             };
             if let Err(err) = self.arena.push_entry(entry) {

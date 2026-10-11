@@ -3,13 +3,12 @@ use bumpalo::Bump;
 use rand::prelude::IndexedRandom;
 use rand::rngs::SmallRng;
 use rand::{Rng, RngExt, SeedableRng as _};
-use rand_distr::{Distribution as _, Zipf};
 use std::fmt::{self, Write};
 use std::fs;
 use std::io::Write as _;
 use tindalwic::bumpalo::Arena;
 use tindalwic::parse::Parse as _;
-use tindalwic::{Comment, Dict, Entry, File, Item, List, VERSION};
+use tindalwic::{Dict, Entry, File, Item, List, VERSION, Value};
 
 #[derive(clap::Args, Debug)]
 pub struct Args {
@@ -87,26 +86,26 @@ impl Args {
         Ok(())
     }
     fn file<'a>(&self, seed: u64, arena: &mut Arena<'a>) -> anyhow::Result<File<'a>> {
-        let mut hashbang = String::new();
+        let mut shebang = String::new();
         for arg in std::env::args() {
-            if hashbang.is_empty() {
-                hashbang.push_str("/usr/bin/env -S tindalwic");
+            if shebang.is_empty() {
+                shebang.push_str("/usr/bin/env -S tindalwic");
             } else {
-                hashbang.push(' ');
-                hashbang.push_str(&arg);
+                shebang.push(' ');
+                shebang.push_str(&arg);
             }
         }
-        hashbang.push_str(" --seed=");
-        write!(hashbang, "{:X}", seed)?;
-        hashbang.push_str("\nat ");
-        hashbang.push_str(&super::now());
-        hashbang.push_str(" by version ");
-        hashbang.push_str(VERSION);
+        shebang.push_str(" --seed=");
+        write!(shebang, "{:X}", seed)?;
+        shebang.push_str("\nat ");
+        shebang.push_str(&super::now());
+        shebang.push_str(" by version ");
+        shebang.push_str(VERSION);
         let mut rng = SmallRng::seed_from_u64(seed);
         let sample = Args::sample(self.unicode);
         let mut random = Random::new(arena, &mut rng, sample)?;
         let mut file = random.file(self.items)?;
-        file.hashbang = Some(arena.intern(&hashbang).into());
+        file.shebang = Some(arena.intern(&shebang).into());
         Ok(file)
     }
 }
@@ -182,7 +181,6 @@ impl fmt::Display for Silhouette {
 pub struct Random<'a, 'r, R: Rng + ?Sized> {
     arena: &'r mut Arena<'a>,
     rng: &'r mut R,
-    gaps: Zipf<f32>,
     sample: Vec<char>,
 }
 impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
@@ -195,13 +193,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
         if sample.contains(&'\n') {
             anyhow::bail!("can't have LF char in sample");
         }
-        let gaps = Zipf::new(4f32, 2f32).unwrap();
-        Ok(Random {
-            arena,
-            rng,
-            gaps,
-            sample,
-        })
+        Ok(Random { arena, rng, sample })
     }
     fn not_linefeed(&mut self) -> char {
         if !self.sample.is_empty() {
@@ -234,14 +226,12 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
         }
         self.arena.intern(&value)
     }
-    fn comment(&mut self) -> Comment<'a> {
-        let gap = self.gaps.sample(self.rng) as usize;
-        let value = if self.rng.random_bool(0.5) {
+    fn comment(&mut self) -> Option<Value<'a>> {
+        if self.rng.random_bool(0.5) {
             Some(self.value().into())
         } else {
             None
-        };
-        Comment { gap, value }
+        }
     }
     fn item(&mut self, shape: &Option<Silhouette>) -> anyhow::Result<Item<'a>> {
         Ok(if let Some(parent) = shape {
@@ -304,13 +294,13 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
     pub fn file(&mut self, grow: usize) -> anyhow::Result<File<'a>> {
         let shape = Silhouette::random(grow, self.rng);
         let count = self.entries(&shape.children)?;
-        let hashbang = if self.rng.random_bool(0.5) {
+        let shebang = if self.rng.random_bool(0.5) {
             None
         } else {
             Some(self.value().into())
         };
         Ok(File {
-            hashbang,
+            shebang,
             prolog: self.comment(),
             entries: self
                 .arena

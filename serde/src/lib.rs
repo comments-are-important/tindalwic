@@ -104,7 +104,7 @@ impl<'a> Serialize for MaybeSer<'a> {
         let MaybeSer(this) = self;
         match this {
             None => s.serialize_none(),
-            Some(value) => s.serialize_some(&ValueSer(value.clone())),
+            Some(value) => s.serialize_some(&ValueSer(*value)),
         }
     }
 }
@@ -161,7 +161,7 @@ macro_rules! variantHelp {
     };
 }
 
-#[derive(Clone, Copy, Deserialize, IntoStaticStr, VariantNames)]
+#[derive(Clone, Copy, Debug, Deserialize, IntoStaticStr, VariantNames)]
 #[serde(variant_identifier)]
 enum ItemVariants {
     Text,
@@ -224,7 +224,7 @@ macro_rules! fieldHelp {
     };
 }
 
-#[derive(Clone, Copy, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
+#[derive(Clone, Copy, Debug, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
 #[serde(field_identifier, rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 enum TextFields {
@@ -233,7 +233,7 @@ enum TextFields {
 }
 fieldHelp!(TextFields<Text>);
 
-#[derive(Clone, Copy, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
+#[derive(Clone, Copy, Debug, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
 #[serde(field_identifier, rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 enum ListFields {
@@ -243,7 +243,7 @@ enum ListFields {
 }
 fieldHelp!(ListFields<List>);
 
-#[derive(Clone, Copy, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
+#[derive(Clone, Copy, Debug, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
 #[serde(field_identifier, rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 enum NameFields {
@@ -252,7 +252,7 @@ enum NameFields {
 }
 fieldHelp!(NameFields<Name>);
 
-#[derive(Clone, Copy, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
+#[derive(Clone, Copy, Debug, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
 #[serde(field_identifier, rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 enum EntryFields {
@@ -261,7 +261,7 @@ enum EntryFields {
 }
 fieldHelp!(EntryFields<Entry>);
 
-#[derive(Clone, Copy, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
+#[derive(Clone, Copy, Debug, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
 #[serde(field_identifier, rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 enum DictFields {
@@ -271,7 +271,7 @@ enum DictFields {
 }
 fieldHelp!(DictFields<Dict>);
 
-#[derive(Clone, Copy, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
+#[derive(Clone, Copy, Debug, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
 #[serde(field_identifier, rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 enum FileFields {

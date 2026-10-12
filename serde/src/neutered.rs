@@ -11,9 +11,9 @@ impl<'a> Serialize for ItemSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let ItemSer(this) = self;
         match this {
-            Item::Text(text) => ValueSer(text.value.clone()).serialize(s),
-            Item::List(list) => ItemsSer(list.items.clone()).serialize(s),
-            Item::Dict(dict) => EntriesSer(dict.entries.clone()).serialize(s),
+            Item::Text(text) => ValueSer(text.value).serialize(s),
+            Item::List(list) => ItemsSer(list.items).serialize(s),
+            Item::Dict(dict) => EntriesSer(dict.entries).serialize(s),
         }
     }
 }
@@ -182,7 +182,7 @@ struct FileSer<'a>(File<'a>);
 impl<'a> Serialize for FileSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let FileSer(this) = self;
-        EntriesSer(this.entries.clone()).serialize(s)
+        EntriesSer(this.entries).serialize(s)
     }
 }
 struct FileDe<'a, 'b>(&'b mut dyn Build<'a>);
@@ -212,7 +212,7 @@ pub struct Neutered<'a>(pub File<'a>);
 impl<'a> Serialize for Neutered<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let Neutered(this) = self;
-        FileSer(this.clone()).serialize(s)
+        FileSer(*this).serialize(s)
     }
 }
 impl<'a> Neutered<'a> {

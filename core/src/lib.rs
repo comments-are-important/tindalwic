@@ -2,14 +2,12 @@
 
 //! Text in Nested Dictionaries and Lists - with Important Comments
 
-use core::cell::Cell;
-
 #[doc(inline)]
 pub use tindalwic_macros::indent;
 
 pub mod capped;
 pub mod fmt;
-pub mod iter;
+pub mod group;
 
 #[cfg(feature = "alloc")]
 pub mod alloc;
@@ -57,7 +55,7 @@ impl CommentMarker {
 }
 
 /// a data [Value] and its metadata.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Text<'a> {
     /// the string value. there are two possible forms for encoding: a single line not
     /// indented, or an indented block. the single line form in a dictionary context
@@ -82,20 +80,11 @@ where
     }
 }
 
-/// the slice type for [List::items]
-#[derive(Clone, Default)]
-pub struct Items<'a> {
-    cells: &'a [Cell<Item<'a>>],
-}
-impl<'a> From<&'a mut [Item<'a>]> for Items<'a> {
-    fn from(value: &'a mut [Item<'a>]) -> Self {
-        let cells = Cell::from_mut(value).as_slice_of_cells();
-        Items { cells }
-    }
-}
+#[doc(inline)]
+pub use group::Items;
 
 /// a linear array of [Item]
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct List<'a> {
     /// A List can have an introductory comment.
     pub prolog: Option<Value<'a>>,
@@ -116,20 +105,26 @@ where
     }
 }
 
-/// the slice type for [Dict::entries]
-#[derive(Clone, Default)]
-pub struct Entries<'a> {
-    cells: &'a [Cell<Entry<'a>>],
-}
-impl<'a> From<&'a mut [Entry<'a>]> for Entries<'a> {
-    fn from(value: &'a mut [Entry<'a>]) -> Self {
-        let cells = Cell::from_mut(value).as_slice_of_cells();
-        Entries { cells }
+#[doc(inline)]
+pub use group::Entries;
+impl<'a> Entries<'a> {
+    /// `O(N)` lookup.
+    pub fn linear_search<T>(&self, key: T) -> Option<Entry<'a>>
+    where
+        Value<'a>: From<T>,
+    {
+        let value: Value<'a> = key.into();
+        for entry in self {
+            if value == entry.name.key {
+                return Some(entry);
+            }
+        }
+        None
     }
 }
 
 /// an associative array of [Entry]
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Dict<'a> {
     /// A Dict can have an introductory comment.
     pub prolog: Option<Value<'a>>,
@@ -153,7 +148,7 @@ where
 // ------------------------------------------------------------------------------------
 
 /// the key in an association.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Name<'a> {
     /// a key can have a comment before it (below its blank line).
     pub comment: Option<Value<'a>>,
@@ -177,7 +172,7 @@ where
 /// an association (from name to item).
 ///
 /// at the lowest level, these are stored in an array.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Entry<'a> {
     /// the key half
     pub name: Name<'a>,
@@ -190,7 +185,7 @@ pub struct Entry<'a> {
 // ------------------------------------------------------------------------------------
 
 /// the three Item variants
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Item<'a> {
     /// a [Value]
     Text(Text<'a>),
@@ -228,7 +223,7 @@ impl<'a> From<Entries<'a>> for Item<'a> {
 /// the outermost context.
 ///
 /// similar to a [Item::Dict], but with different comments.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct File<'a> {
     /// A File can start with a Unix `#!` comment.
     pub shebang: Option<Value<'a>>,
@@ -243,16 +238,16 @@ impl<'a> File<'a> {
     /// make an [Item::Dict] from self.prolog and self.entries
     pub fn embed_without_shebang(&self) -> Item<'a> {
         Item::Dict(Dict {
-            prolog: self.prolog.clone(),
-            entries: self.entries.clone(),
+            prolog: self.prolog,
+            entries: self.entries,
             ..Default::default()
         })
     }
     /// take prolog and entries from an [Dict] to make a new File.
     pub fn from_dict_without_epilog(dict: &Dict<'a>) -> Self {
         File {
-            prolog: dict.prolog.clone(),
-            entries: dict.entries.clone(),
+            prolog: dict.prolog,
+            entries: dict.entries,
             ..Default::default()
         }
     }

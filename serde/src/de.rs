@@ -19,7 +19,7 @@ pub fn from_tindalwic<'de, T: ::serde::Deserialize<'de>>(
 }
 
 /// [conventional](https://serde.rs/conventions.html) Deserializer type
-#[derive(Clone)]
+#[derive(Clone, Copy, Debug)]
 pub struct ItemDe<'de, 'a> {
     encoded: &'de str,
     item: Item<'a>,
@@ -35,7 +35,7 @@ impl<'de, 'a> ItemDe<'de, 'a> {
         self.with_item(Item::Text(value.into()))
     }
     fn parse<T: std::str::FromStr>(&self) -> Option<T> {
-        if let Item::Text(Text { value, .. }) = self.item.clone() {
+        if let Item::Text(Text { value, .. }) = self.item {
             if let Some(verbatim) = value.verbatim(0) {
                 if let Ok(value) = verbatim.trim().parse::<T>() {
                     return Some(value);
@@ -313,7 +313,7 @@ impl<'de, 'a> serde::Deserializer<'de> for ItemDe<'de, 'a> {
         match &self.item {
             Item::Text(text) => v.visit_enum(EnumDe {
                 de: &self,
-                name: text.value.clone(),
+                name: text.value,
                 payload: None,
             }),
             Item::Dict(dict) => {

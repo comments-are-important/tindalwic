@@ -117,9 +117,9 @@ impl SerDe {
     /// serialize [File] to a [Neutered] pretty string
     pub fn ser(&self, file: &File) -> Result<String> {
         Ok(match self {
-            SerDe::JSON => serde_json::to_string_pretty(&Neutered(file.clone()))?,
-            SerDe::TOML => toml_edit::ser::to_string_pretty(&Neutered(file.clone()))?,
-            SerDe::YAML => yaml_serde::to_string(&Neutered(file.clone()))?,
+            SerDe::JSON => serde_json::to_string_pretty(&Neutered(*file))?,
+            SerDe::TOML => toml_edit::ser::to_string_pretty(&Neutered(*file))?,
+            SerDe::YAML => yaml_serde::to_string(&Neutered(*file))?,
         })
     }
 

@@ -3,8 +3,7 @@
 extern crate alloc;
 
 use crate::Value;
-pub use alloc::rc::Rc;
-pub use alloc::string::String;
+use alloc::string::String;
 
 impl<'a> Value<'a> {
     /// Allocates a [String], filled with the UTF-8 copied from `self`.

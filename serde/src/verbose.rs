@@ -11,9 +11,9 @@ impl<'a> Serialize for ItemSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let ItemSer(this) = self;
         match this {
-            Item::Text(text) => ItemVariants::Text.serialize(s, &TextSer(text.clone())),
-            Item::List(list) => ItemVariants::List.serialize(s, &ListSer(list.clone())),
-            Item::Dict(dict) => ItemVariants::Dict.serialize(s, &DictSer(dict.clone())),
+            Item::Text(text) => ItemVariants::Text.serialize(s, &TextSer(*text)),
+            Item::List(list) => ItemVariants::List.serialize(s, &ListSer(*list)),
+            Item::Dict(dict) => ItemVariants::Dict.serialize(s, &DictSer(*dict)),
         }
     }
 }
@@ -50,11 +50,9 @@ impl<'a> Serialize for TextSer<'a> {
         let mut fields = s.serialize_struct(TextFields::KIND, should.count())?;
         for field in should.selected() {
             match field {
-                TextFields::Value => {
-                    fields.serialize_field(field.into(), &ValueSer(this.value.clone()))?
-                }
+                TextFields::Value => fields.serialize_field(field.into(), &ValueSer(this.value))?,
                 TextFields::Epilog => {
-                    fields.serialize_field(field.into(), &MaybeSer(this.epilog.clone()))?
+                    fields.serialize_field(field.into(), &MaybeSer(this.epilog))?
                 }
             }
         }
@@ -152,13 +150,11 @@ impl<'a> Serialize for ListSer<'a> {
         for field in should.selected() {
             match field {
                 ListFields::Prolog => {
-                    fields.serialize_field(field.into(), &MaybeSer(this.prolog.clone()))?
+                    fields.serialize_field(field.into(), &MaybeSer(this.prolog))?
                 }
-                ListFields::Items => {
-                    fields.serialize_field(field.into(), &ItemsSer(this.items.clone()))?
-                }
+                ListFields::Items => fields.serialize_field(field.into(), &ItemsSer(this.items))?,
                 ListFields::Epilog => {
-                    fields.serialize_field(field.into(), &MaybeSer(this.epilog.clone()))?
+                    fields.serialize_field(field.into(), &MaybeSer(this.epilog))?
                 }
             }
         }
@@ -229,11 +225,9 @@ impl<'a> Serialize for NameSer<'a> {
         for field in should.selected() {
             match field {
                 NameFields::Comment => {
-                    fields.serialize_field(field.into(), &MaybeSer(this.comment.clone()))?
+                    fields.serialize_field(field.into(), &MaybeSer(this.comment))?
                 }
-                NameFields::Key => {
-                    fields.serialize_field(field.into(), &ValueSer(this.key.clone()))?
-                }
+                NameFields::Key => fields.serialize_field(field.into(), &ValueSer(this.key))?,
             }
         }
         fields.end()
@@ -294,12 +288,8 @@ impl<'a> Serialize for EntrySer<'a> {
         let mut fields = s.serialize_struct(EntryFields::KIND, should.count())?;
         for field in should.selected() {
             match field {
-                EntryFields::Name => {
-                    fields.serialize_field(field.into(), &NameSer(this.name.clone()))?
-                }
-                EntryFields::Item => {
-                    fields.serialize_field(field.into(), &ItemSer(this.item.clone()))?
-                }
+                EntryFields::Name => fields.serialize_field(field.into(), &NameSer(this.name))?,
+                EntryFields::Item => fields.serialize_field(field.into(), &ItemSer(this.item))?,
             }
         }
         fields.end()
@@ -400,13 +390,13 @@ impl<'a> Serialize for DictSer<'a> {
         for field in should.selected() {
             match field {
                 DictFields::Prolog => {
-                    fields.serialize_field(field.into(), &MaybeSer(dict.prolog.clone()))?
+                    fields.serialize_field(field.into(), &MaybeSer(dict.prolog))?
                 }
                 DictFields::Entries => {
-                    fields.serialize_field(field.into(), &EntriesSer(dict.entries.clone()))?
+                    fields.serialize_field(field.into(), &EntriesSer(dict.entries))?
                 }
                 DictFields::Epilog => {
-                    fields.serialize_field(field.into(), &MaybeSer(dict.epilog.clone()))?
+                    fields.serialize_field(field.into(), &MaybeSer(dict.epilog))?
                 }
             }
         }
@@ -477,13 +467,13 @@ impl<'a> Serialize for FileSer<'a> {
         for field in should.selected() {
             match field {
                 FileFields::Shebang => {
-                    fields.serialize_field(field.into(), &MaybeSer(this.shebang.clone()))?
+                    fields.serialize_field(field.into(), &MaybeSer(this.shebang))?
                 }
                 FileFields::Prolog => {
-                    fields.serialize_field(field.into(), &MaybeSer(this.prolog.clone()))?
+                    fields.serialize_field(field.into(), &MaybeSer(this.prolog))?
                 }
                 FileFields::Entries => {
-                    fields.serialize_field(field.into(), &EntriesSer(this.entries.clone()))?
+                    fields.serialize_field(field.into(), &EntriesSer(this.entries))?
                 }
             }
         }
@@ -549,7 +539,7 @@ pub struct Verbose<'a>(pub File<'a>);
 impl<'a> Serialize for Verbose<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let Verbose(this) = self;
-        FileSer(this.clone()).serialize(s)
+        FileSer(*this).serialize(s)
     }
 }
 impl<'a> Verbose<'a> {

@@ -124,7 +124,7 @@ pub trait Parse<'a> {
 }
 
 /// the "report" callback provided to the parser should return one of these
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reported {
     /// tell parser to give up
     Abort,

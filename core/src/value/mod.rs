@@ -1,8 +1,6 @@
 pub mod parse;
-// #[cfg(feature = "alloc")]
-// use crate::alloc::{Rc, String};
 
-/// All primitive values in Tindalwic are string slice references.
+/// All primitive values in Tindalwic are string slice references, not owned.
 ///
 ///  + [Text::value](super::Text::value)
 ///  + [Name::key](super::Name::key)
@@ -12,7 +10,7 @@ pub mod parse;
 /// the encoded data. The methods here will strip indentation as necessary.
 /// Apps that modify only a few values do not have to pay for any processing of
 /// unmodified values that are already appropriately indented.
-#[derive(Clone, Eq)]
+#[derive(Clone, Copy, Eq)]
 pub struct Value<'a> {
     slice: &'a str,
     indent: usize, // usize::MAX => single line

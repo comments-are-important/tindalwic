@@ -14,7 +14,7 @@ fn file_from_dict() {
     entries[0].item = "value".into();
     let mut dict: Dict = (&mut entries[..]).into();
     dict.prolog = Some("prolog".into());
-    let file = File::try_from_dict_without_epilog(&Item::Dict(dict.clone())).unwrap();
+    let file = File::try_from_dict_without_epilog(&Item::Dict(dict)).unwrap();
     assert_eq!(
         file.to_string(),
         indent!(
@@ -52,11 +52,26 @@ fn three_blank_comments() {
 #[test]
 #[cfg(feature = "bumpalo")]
 fn example() -> io::Result<()> {
-    let example = fs::read_to_string("../example.tindalwic")?;
+    let content = fs::read_to_string("../example.tindalwic")?;
     let bump = Bump::new();
     let mut arena = tindalwic::bumpalo::Arena::new(&bump);
-    let file = arena.panic_first_error(&example);
-    assert_eq!(example, file.to_string());
+    let file = arena.panic_first_error(&content);
+    assert_eq!(content, file.to_string());
+    // let Item::Dict(example) = file
+    //     .entries
+    //     .linear_search("epilog comments are not just for text")
+    //     .unwrap()
+    //     .item
+    // else {
+    //     panic!("not dict")
+    // };
+    // assert!(!File::from_dict_without_epilog(&example).to_string().contains("!!!!"));
+    // let Item::Dict(dict) = example.entries.linear_search("dict").unwrap().item else {
+    //     panic!("not dict")
+    // };
+    // let mut entry = dict.entries.get(0).unwrap();
+    // entry.name.key = "!!!!".into();
+    // dict.entries.set(0,&entry);
     Ok(())
 }
 

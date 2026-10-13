@@ -57,21 +57,26 @@ fn example() -> io::Result<()> {
     let mut arena = tindalwic::bumpalo::Arena::new(&bump);
     let file = arena.panic_first_error(&content);
     assert_eq!(content, file.to_string());
-    // let Item::Dict(example) = file
-    //     .entries
-    //     .linear_search("epilog comments are not just for text")
-    //     .unwrap()
-    //     .item
-    // else {
-    //     panic!("not dict")
-    // };
-    // assert!(!File::from_dict_without_epilog(&example).to_string().contains("!!!!"));
-    // let Item::Dict(dict) = example.entries.linear_search("dict").unwrap().item else {
-    //     panic!("not dict")
-    // };
-    // let mut entry = dict.entries.get(0).unwrap();
-    // entry.name.key = "!!!!".into();
-    // dict.entries.set(0,&entry);
+    let Item::Dict(example) = file
+        .entries
+        .linear_search("epilog comments are not just for text")
+        .unwrap()
+        .item
+    else {
+        panic!("not dict")
+    };
+    assert_eq!(example.entries.len(), 2);
+    assert!(
+        !File::from_dict_without_epilog(&example)
+            .to_string()
+            .contains("!!!!")
+    );
+    let Item::Dict(dict) = example.entries.linear_search("dict").unwrap().item else {
+        panic!("not dict")
+    };
+    let mut entry = dict.entries.get(0).unwrap();
+    entry.name.key = "!!!!".into();
+    dict.entries.set(0, entry).unwrap();
     Ok(())
 }
 

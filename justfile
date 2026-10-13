@@ -93,7 +93,7 @@ api: (_install "cargo-public-api") _is_running_inside_devcontainer
 lines: (_install "cargo-llvm-lines") _is_running_inside_devcontainer
     cargo llvm-lines -p tindalwic --all-features >target/llvm-lines.out
 
-cli: fmt _is_running_inside_devcontainer
+cli: fmt test _is_running_inside_devcontainer
   cargo build -p tindalwic-cli
   target/debug/tindalwic-cli random --check=1000
 

@@ -31,6 +31,7 @@ pub const VERSION: &str = env!("TINDALWIC_VERSION");
 pub use value::Value;
 
 /// the tokens that start a comment
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CommentMarker {
     /// `#!`
     Shebang,

@@ -8,6 +8,7 @@ use std::marker::PhantomData;
 use std::result::Result as StdResult;
 use strum::{EnumCount, IntoStaticStr, VariantArray, VariantNames};
 use tindalwic::parse::Build;
+use tindalwic::text::UTF8;
 use tindalwic::*;
 
 /// [conventional](https://serde.rs/conventions.html) Deserializer API module
@@ -17,8 +18,8 @@ pub mod ser;
 
 /// specialized to Err([Error])
 pub type Result<T> = StdResult<T, Error>;
-pub use de::ItemDe as Deserializer;
-pub use ser::ItemSer as Serializer;
+pub use de::DataDe as Deserializer;
+pub use ser::DataSer as Serializer;
 
 /// payload is just an English message
 #[derive(Debug)]
@@ -60,7 +61,7 @@ pub use compact::Compact;
 pub use neutered::Neutered;
 pub use verbose::Verbose;
 
-struct ValueSer<'a>(Value<'a>);
+struct ValueSer<'a>(UTF8<'a>);
 impl<'a> Serialize for ValueSer<'a> {
     fn serialize<S>(&self, s: S) -> StdResult<S::Ok, S::Error>
     where
@@ -76,7 +77,7 @@ impl<'a> Serialize for ValueSer<'a> {
 }
 struct ValueDe<'a, 'b>(&'b mut dyn Build<'a>);
 impl<'de, 'a, 'b> DeserializeSeed<'de> for ValueDe<'a, 'b> {
-    type Value = Value<'a>;
+    type Value = UTF8<'a>;
     fn deserialize<D>(self, d: D) -> StdResult<Self::Value, D::Error>
     where
         D: serde::de::Deserializer<'de>,
@@ -85,7 +86,7 @@ impl<'de, 'a, 'b> DeserializeSeed<'de> for ValueDe<'a, 'b> {
     }
 }
 impl<'de, 'a, 'b> Visitor<'de> for ValueDe<'a, 'b> {
-    type Value = Value<'a>;
+    type Value = UTF8<'a>;
     fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
         out.write_str("a string value")
     }
@@ -95,7 +96,7 @@ impl<'de, 'a, 'b> Visitor<'de> for ValueDe<'a, 'b> {
     }
 }
 
-struct MaybeSer<'a>(Option<Value<'a>>);
+struct MaybeSer<'a>(Option<UTF8<'a>>);
 impl<'a> Serialize for MaybeSer<'a> {
     fn serialize<S>(&self, s: S) -> StdResult<S::Ok, S::Error>
     where
@@ -110,7 +111,7 @@ impl<'a> Serialize for MaybeSer<'a> {
 }
 struct MaybeDe<'a, 'b>(&'b mut dyn Build<'a>);
 impl<'de, 'a, 'b> DeserializeSeed<'de> for MaybeDe<'a, 'b> {
-    type Value = Option<Value<'a>>;
+    type Value = Option<UTF8<'a>>;
     fn deserialize<D>(self, d: D) -> StdResult<Self::Value, D::Error>
     where
         D: serde::de::Deserializer<'de>,
@@ -119,7 +120,7 @@ impl<'de, 'a, 'b> DeserializeSeed<'de> for MaybeDe<'a, 'b> {
     }
 }
 impl<'de, 'a, 'b> Visitor<'de> for MaybeDe<'a, 'b> {
-    type Value = Option<Value<'a>>;
+    type Value = Option<UTF8<'a>>;
     fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
         out.write_str("an optional value (comments)")
     }
@@ -166,7 +167,6 @@ macro_rules! variantHelp {
 enum ItemVariants {
     Text,
     List,
-    Dict,
 }
 variantHelp! { ItemVariants<Item> }
 
@@ -228,8 +228,9 @@ macro_rules! fieldHelp {
 #[serde(field_identifier, rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
 enum TextFields {
-    Value,
+    Lines,
     Epilog,
+    Verbose,
 }
 fieldHelp!(TextFields<Text>);
 
@@ -238,7 +239,7 @@ fieldHelp!(TextFields<Text>);
 #[strum(serialize_all = "lowercase")]
 enum ListFields {
     Prolog,
-    Items,
+    Groups,
     Epilog,
 }
 fieldHelp!(ListFields<List>);
@@ -246,30 +247,22 @@ fieldHelp!(ListFields<List>);
 #[derive(Clone, Copy, Debug, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
 #[serde(field_identifier, rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
-enum NameFields {
+enum MemberFields {
     Comment,
-    Key,
-}
-fieldHelp!(NameFields<Name>);
-
-#[derive(Clone, Copy, Debug, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
-#[serde(field_identifier, rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
-enum EntryFields {
     Name,
-    Item,
+    Longer,
+    Data,
 }
-fieldHelp!(EntryFields<Entry>);
+fieldHelp!(MemberFields<Member>);
 
 #[derive(Clone, Copy, Debug, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
 #[serde(field_identifier, rename_all = "lowercase")]
 #[strum(serialize_all = "lowercase")]
-enum DictFields {
-    Prolog,
-    Entries,
-    Epilog,
+enum GroupFields {
+    Heading,
+    Members,
 }
-fieldHelp!(DictFields<Dict>);
+fieldHelp!(GroupFields<Group>);
 
 #[derive(Clone, Copy, Debug, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
 #[serde(field_identifier, rename_all = "lowercase")]
@@ -277,6 +270,6 @@ fieldHelp!(DictFields<Dict>);
 enum FileFields {
     Shebang,
     Prolog,
-    Entries,
+    Groups,
 }
 fieldHelp!(FileFields<File>);

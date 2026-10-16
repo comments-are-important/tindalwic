@@ -1,52 +1,59 @@
 use super::{Error, Result};
 use serde::de::{DeserializeSeed, Unexpected, Visitor};
 use serde::de::{Deserializer as _, Error as _};
+use tindalwic::Data;
 use tindalwic::parse::Parse;
-use tindalwic::{Dict, Item, List, Text, Value};
+use tindalwic::text::UTF8;
 
-/// decode tindalwic data file into a type that is compatible with dictionary
+/// decode tindalwic file containing a single member (any name) into a value
 pub fn from_tindalwic<'de, T: ::serde::Deserialize<'de>>(
     parse: &mut (dyn Parse<'de> + 'de),
     encoded: &'de str,
 ) -> Result<T> {
-    let item = parse
-        .first_error(encoded)
-        .map_err(Error::custom)?
-        // terrible - keep file around so comments can be serialized later...
-        .embed_without_shebang();
-    let value = T::deserialize(ItemDe { encoded, item })?;
+    let file = parse.first_error(encoded).map_err(Error::custom)?;
+    let mut members = file.members();
+    let Some(member) = members.next() else {
+        return Err(Error::new("file has zero members"));
+    };
+    if members.next().is_some() {
+        return Err(Error::new("file has multiple members"));
+    }
+    let value = T::deserialize(DataDe {
+        encoded,
+        data: member.data,
+    })?;
     Ok(value)
 }
 
 /// [conventional](https://serde.rs/conventions.html) Deserializer type
 #[derive(Clone, Copy, Debug)]
-pub struct ItemDe<'de, 'a> {
+pub struct DataDe<'de, 'a> {
     encoded: &'de str,
-    item: Item<'a>,
+    data: Data<'a>,
 }
-impl<'de, 'a> ItemDe<'de, 'a> {
-    fn with_item(&self, item: Item<'a>) -> Self {
-        ItemDe {
+impl<'de, 'a> DataDe<'de, 'a> {
+    fn with_data(&self, data: Data<'a>) -> Self {
+        DataDe {
             encoded: self.encoded,
-            item,
+            data,
         }
     }
-    fn with_text(&self, value: Value<'a>) -> Self {
-        self.with_item(Item::Text(value.into()))
+    fn with_text(&self, value: UTF8<'a>) -> Self {
+        self.with_data(Data::Text(value.into()))
     }
     fn parse<T: std::str::FromStr>(&self) -> Option<T> {
-        if let Item::Text(Text { value, .. }) = self.item {
-            if let Some(verbatim) = value.verbatim(0) {
+        if let Data::Text(text) = self.data {
+            if let Some(verbatim) = text.lines.verbatim(0) {
                 if let Ok(value) = verbatim.trim().parse::<T>() {
                     return Some(value);
                 }
-            } else if let Ok(value) = value.joined().trim().parse::<T>() {
+            } else if let Ok(value) = text.lines.joined().trim().parse::<T>() {
                 return Some(value);
             }
         }
         None
     }
-    fn outlive(&self, value: &Value<'a>) -> Option<&'de str> {
+    fn outlive(&self, value: &UTF8<'a>) -> Option<&'de str> {
         if let Some(verbatim) = value.verbatim(0) {
             let base = self.encoded.as_ptr() as usize;
             let mut start = verbatim.as_ptr() as usize;
@@ -58,37 +65,30 @@ impl<'de, 'a> ItemDe<'de, 'a> {
         None
     }
 }
-impl<'de, 'a> serde::de::IntoDeserializer<'de, Error> for ItemDe<'de, 'a> {
+impl<'de, 'a> serde::de::IntoDeserializer<'de, Error> for DataDe<'de, 'a> {
     type Deserializer = Self;
     fn into_deserializer(self) -> Self::Deserializer {
         self
     }
 }
-impl<'de, 'a> serde::Deserializer<'de> for ItemDe<'de, 'a> {
+impl<'de, 'a> serde::Deserializer<'de> for DataDe<'de, 'a> {
     type Error = Error;
 
     /// use Item kind (without conversion) to dispatch to visitor.
     /// all other methods attempt a conversion but fall back here to get
     /// the no conversion behavior or (more often) a good error.
     fn deserialize_any<V: Visitor<'de>>(self, v: V) -> Result<V::Value> {
-        match &self.item {
-            Item::Text(text) => {
-                if let Some(verbatim) = self.outlive(&text.value) {
+        match &self.data {
+            Data::Text(text) => {
+                if let Some(verbatim) = self.outlive(&text.lines) {
                     v.visit_borrowed_str(verbatim)
                 } else {
-                    v.visit_string(text.value.joined())
+                    v.visit_string(text.lines.joined())
                 }
             }
-            Item::List(list) => {
-                let items = list.items.into_iter().map(|item| self.with_item(item));
+            Data::List(list) => {
+                let items = list.members().map(|it| self.with_data(it.data));
                 v.visit_seq(serde::de::value::SeqDeserializer::new(items))
-            }
-            Item::Dict(dict) => {
-                let entries = dict
-                    .entries
-                    .into_iter()
-                    .map(|entry| (self.with_text(entry.name.key), self.with_item(entry.item)));
-                v.visit_map(serde::de::value::MapDeserializer::new(entries))
             }
         }
     }
@@ -179,13 +179,13 @@ impl<'de, 'a> serde::Deserializer<'de> for ItemDe<'de, 'a> {
                 _ => None,
             }
         }
-        if let Item::Text(Text { value, .. }) = &self.item {
-            if let Some(verbatim) = value.verbatim(0) {
+        if let Data::Text(text) = &self.data {
+            if let Some(verbatim) = text.lines.verbatim(0) {
                 if let Some(only) = only_char(verbatim) {
                     return v.visit_char(only);
                 }
             } else {
-                let joined = value.joined();
+                let joined = text.lines.joined();
                 if let Some(only) = only_char(&joined) {
                     return v.visit_char(only);
                 }
@@ -201,12 +201,12 @@ impl<'de, 'a> serde::Deserializer<'de> for ItemDe<'de, 'a> {
         self.deserialize_any(v)
     }
     fn deserialize_bytes<V: Visitor<'de>>(self, v: V) -> Result<V::Value> {
-        if let Item::Text(Text { value, .. }) = &self.item {
-            if let Some(verbatim) = self.outlive(&value).filter(|it| it.is_ascii()) {
+        if let Data::Text(text) = &self.data {
+            if let Some(verbatim) = self.outlive(&text.lines).filter(|it| it.is_ascii()) {
                 return v.visit_borrowed_bytes(verbatim.as_bytes());
             }
             use ::bytes::{BufMut, BytesMut};
-            let value = value.joined();
+            let value = text.lines.joined();
             let mut bytes = BytesMut::with_capacity(value.len());
             for ch in value.chars() {
                 bytes.put_u8(
@@ -223,23 +223,25 @@ impl<'de, 'a> serde::Deserializer<'de> for ItemDe<'de, 'a> {
     }
 
     fn deserialize_option<V: Visitor<'de>>(self, v: V) -> Result<V::Value> {
-        if let Item::List(list) = &self.item {
-            return if list.items.len() > 1 {
+        if let Data::List(list) = &self.data {
+            let mut members = list.members();
+            let Some(first) = members.next() else {
+                return v.visit_none();
+            };
+            return if members.next().is_some() {
                 Err(Error::new(
                     "can't make option from list with more than one item",
                 ))
-            } else if let Some(item) = list.items.get(0) {
-                v.visit_some(self.with_item(item))
             } else {
-                v.visit_none()
+                v.visit_some(self.with_data(first.data))
             };
         }
         self.deserialize_any(v)
     }
 
     fn deserialize_unit<V: Visitor<'de>>(self, v: V) -> Result<V::Value> {
-        if let Item::List(List { items: cells, .. }) = &self.item {
-            if cells.is_empty() {
+        if let Data::List(list) = &self.data {
+            if list.members().next().is_none() {
                 return v.visit_unit();
             }
         }
@@ -251,13 +253,13 @@ impl<'de, 'a> serde::Deserializer<'de> for ItemDe<'de, 'a> {
         name: &'static str,
         v: V,
     ) -> Result<V::Value> {
-        if let Item::Text(Text { value, .. }) = &self.item {
-            if let Some(verbatim) = value.verbatim(0) {
+        if let Data::Text(text) = &self.data {
+            if let Some(verbatim) = text.lines.verbatim(0) {
                 if verbatim == name {
                     return v.visit_unit();
                 }
             } else {
-                let joined = value.joined();
+                let joined = text.lines.joined();
                 if joined == name {
                     return v.visit_unit();
                 }
@@ -292,6 +294,12 @@ impl<'de, 'a> serde::Deserializer<'de> for ItemDe<'de, 'a> {
     }
 
     fn deserialize_map<V: Visitor<'de>>(self, v: V) -> Result<V::Value> {
+        if let Data::List(list) = self.data {
+            let items = list
+                .members()
+                .map(|it| (self.with_data(it.name.into()), self.with_data(it.data)));
+            return v.visit_map(serde::de::value::MapDeserializer::new(items));
+        }
         self.deserialize_any(v)
     }
 
@@ -301,7 +309,7 @@ impl<'de, 'a> serde::Deserializer<'de> for ItemDe<'de, 'a> {
         _fields: &'static [&'static str],
         v: V,
     ) -> Result<V::Value> {
-        self.deserialize_any(v)
+        self.deserialize_map(v)
     }
 
     fn deserialize_enum<V: Visitor<'de>>(
@@ -310,24 +318,23 @@ impl<'de, 'a> serde::Deserializer<'de> for ItemDe<'de, 'a> {
         _variants: &'static [&'static str],
         v: V,
     ) -> Result<V::Value> {
-        match &self.item {
-            Item::Text(text) => v.visit_enum(EnumDe {
+        match &self.data {
+            Data::Text(text) => v.visit_enum(EnumDe {
                 de: &self,
-                name: text.value,
+                name: text.lines,
                 payload: None,
             }),
-            Item::Dict(dict) => {
-                if let Some(entry) = dict.entries.get(0) {
+            Data::List(list) => {
+                if let Some(entry) = list.members().next() {
                     v.visit_enum(EnumDe {
                         de: &self,
-                        name: entry.name.key,
-                        payload: Some(entry.item),
+                        name: entry.name,
+                        payload: Some(entry.data),
                     })
                 } else {
-                    self.deserialize_any(v)
+                    self.deserialize_map(v)
                 }
             }
-            _ => self.deserialize_any(v),
         }
     }
 
@@ -340,9 +347,9 @@ impl<'de, 'a> serde::Deserializer<'de> for ItemDe<'de, 'a> {
     }
 }
 struct EnumDe<'de, 'a, 'i> {
-    de: &'i ItemDe<'de, 'a>, // the container of this encoded enum
-    name: Value<'a>,
-    payload: Option<Item<'a>>,
+    de: &'i DataDe<'de, 'a>, // the container of this encoded enum
+    name: UTF8<'a>,
+    payload: Option<Data<'a>>,
 }
 impl<'de, 'a, 'i> serde::de::EnumAccess<'de> for EnumDe<'de, 'a, 'i> {
     type Error = Error;
@@ -357,8 +364,8 @@ impl<'de, 'a, 'i> serde::de::EnumAccess<'de> for EnumDe<'de, 'a, 'i> {
     }
 }
 struct VariantDe<'de, 'a, 'i> {
-    de: &'i ItemDe<'de, 'a>, // the container of this encoded enum
-    payload: Option<Item<'a>>,
+    de: &'i DataDe<'de, 'a>, // the container of this encoded enum
+    payload: Option<Data<'a>>,
 }
 impl<'de, 'a, 'i> serde::de::VariantAccess<'de> for VariantDe<'de, 'a, 'i> {
     type Error = Error;
@@ -366,8 +373,8 @@ impl<'de, 'a, 'i> serde::de::VariantAccess<'de> for VariantDe<'de, 'a, 'i> {
     fn unit_variant(self) -> Result<()> {
         if let Some(item) = self.payload {
             match item {
-                Item::Text(Text { value, .. }) => {
-                    if value.is_empty() {
+                Data::Text(text) => {
+                    if text.lines.is_empty() {
                         Ok(())
                     } else {
                         // could Unexpected::Str but that needs borrowed slice
@@ -378,12 +385,7 @@ impl<'de, 'a, 'i> serde::de::VariantAccess<'de> for VariantDe<'de, 'a, 'i> {
                         ))
                     }
                 }
-                Item::List(List { .. }) => {
-                    Err(Error::invalid_type(Unexpected::Seq, &"unit variant"))
-                }
-                Item::Dict(Dict { .. }) => {
-                    Err(Error::invalid_type(Unexpected::Map, &"unit variant"))
-                }
+                _ => Err(Error::invalid_type(Unexpected::Seq, &"unit variant")),
             }
         } else {
             Ok(())
@@ -392,7 +394,7 @@ impl<'de, 'a, 'i> serde::de::VariantAccess<'de> for VariantDe<'de, 'a, 'i> {
 
     fn newtype_variant_seed<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value> {
         if let Some(item) = self.payload {
-            seed.deserialize(self.de.with_item(item))
+            seed.deserialize(self.de.with_data(item))
         } else {
             Err(Error::invalid_type(
                 Unexpected::UnitVariant,
@@ -403,7 +405,7 @@ impl<'de, 'a, 'i> serde::de::VariantAccess<'de> for VariantDe<'de, 'a, 'i> {
 
     fn tuple_variant<V: Visitor<'de>>(self, _len: usize, v: V) -> Result<V::Value> {
         if let Some(item) = self.payload {
-            self.de.with_item(item).deserialize_seq(v)
+            self.de.with_data(item).deserialize_seq(v)
         } else {
             Err(Error::invalid_type(
                 Unexpected::UnitVariant,
@@ -418,7 +420,7 @@ impl<'de, 'a, 'i> serde::de::VariantAccess<'de> for VariantDe<'de, 'a, 'i> {
         v: V,
     ) -> Result<V::Value> {
         if let Some(item) = self.payload {
-            self.de.with_item(item).deserialize_struct("", fields, v)
+            self.de.with_data(item).deserialize_struct("", fields, v)
         } else {
             Err(Error::invalid_type(
                 Unexpected::UnitVariant,

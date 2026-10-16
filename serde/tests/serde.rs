@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::fmt::Debug;
 use tindalwic::bumpalo::Arena;
 use tindalwic::parse::Parse as _;
-use tindalwic::{File, Item};
+use tindalwic::{Data, File};
 use tindalwic_serde::Neutered;
 use tindalwic_serde::de::from_tindalwic;
 use tindalwic_serde::ser::to_tindalwic;
@@ -20,13 +20,13 @@ fn deserialize_file_from_json() {
     let mut file = serde_json::Deserializer::from_str(r#"{ "key":"one\ntwo" }"#);
     let file: File = Neutered::seed(&mut arena).deserialize(&mut file).unwrap();
 
-    assert_eq!(file.entries.len(), 1);
-    let only = file.entries.get(0).unwrap();
-    assert_eq!(only.name.key, "key".into());
-    let Item::Text(text) = only.item else {
+    assert_eq!(file.members().count(), 1);
+    let only = file.members().next().unwrap();
+    assert_eq!(only.name, "key".into());
+    let Data::Text(text) = only.data else {
         panic!("not text")
     };
-    assert_eq!(text.value, "one\ntwo".into());
+    assert_eq!(text.lines, "one\ntwo".into());
 }
 
 struct Check(bumpalo::Bump);
@@ -37,14 +37,10 @@ impl Check {
     {
         let mut arena = tindalwic::bumpalo::Arena::new(&self.0);
         println!("# {value:?}");
-        let mut data = BTreeMap::new();
-        data.insert("data", &value);
-        let string = to_tindalwic(arena.builder(), &data).unwrap();
+        let string = to_tindalwic(arena.builder(), "data", &value).unwrap();
         let string = arena.builder().intern(&string).unwrap();
         println!("## encoded\n{string}");
-        let mut file: BTreeMap<&str, T> = from_tindalwic(&mut arena, &string).unwrap();
-        let data: T = file.remove("data").unwrap();
-        assert!(file.is_empty());
+        let data: T = from_tindalwic(&mut arena, &string).unwrap();
         data
     }
     fn check<'de, T>(&'de self, value: T)

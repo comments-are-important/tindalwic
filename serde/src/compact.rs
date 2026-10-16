@@ -4,40 +4,39 @@ use serde::de::{Error as _, VariantAccess as _};
 use serde::ser::{Serialize, Serializer};
 use serde::ser::{SerializeSeq as _, SerializeStruct as _};
 use std::fmt;
+use tindalwic::group::{Groups, Members};
 use tindalwic::parse::{Build, Parse};
 
-struct ItemSer<'a>(Item<'a>);
-impl<'a> Serialize for ItemSer<'a> {
+struct DataSer<'a>(Data<'a>);
+impl<'a> Serialize for DataSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
-        let ItemSer(this) = self;
+        let DataSer(this) = self;
         match this {
-            Item::Text(text) => ItemVariants::Text.serialize(s, &TextSer(*text)),
-            Item::List(list) => ItemVariants::List.serialize(s, &ListSer(*list)),
-            Item::Dict(dict) => ItemVariants::Dict.serialize(s, &DictSer(*dict)),
+            Data::Text(text) => ItemVariants::Text.serialize(s, &TextSer(*text)),
+            Data::List(list) => ItemVariants::List.serialize(s, &ListSer(*list)),
         }
     }
 }
-struct ItemDe<'a, 'b>(&'b mut dyn Build<'a>);
-impl<'de, 'a, 'b> DeserializeSeed<'de> for ItemDe<'a, 'b> {
-    type Value = Item<'a>;
+struct DataDe<'a, 'b>(&'b mut dyn Build<'a>);
+impl<'de, 'a, 'b> DeserializeSeed<'de> for DataDe<'a, 'b> {
+    type Value = Data<'a>;
     fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
         d.deserialize_enum(ItemVariants::KIND, ItemVariants::NAMES, self)
     }
 }
-impl<'de, 'a, 'b> Visitor<'de> for ItemDe<'a, 'b> {
-    type Value = Item<'a>;
+impl<'de, 'a, 'b> Visitor<'de> for DataDe<'a, 'b> {
+    type Value = Data<'a>;
     fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
         let kind = ItemVariants::KIND;
         let names = ItemVariants::NAMES.join(" | ");
         write!(out, "{STYLE} {kind}: {names}")
     }
     fn visit_enum<A: EnumAccess<'de>>(self, data: A) -> StdResult<Self::Value, A::Error> {
-        let ItemDe(build) = self;
+        let DataDe(build) = self;
         let (this, access) = data.variant::<ItemVariants>()?;
         Ok(match this {
-            ItemVariants::Text => Item::Text(access.newtype_variant_seed(TextDe(build))?),
-            ItemVariants::List => Item::List(access.newtype_variant_seed(ListDe(build))?),
-            ItemVariants::Dict => Item::Dict(access.newtype_variant_seed(DictDe(build))?),
+            ItemVariants::Text => Data::Text(access.newtype_variant_seed(TextDe(build))?),
+            ItemVariants::List => Data::List(access.newtype_variant_seed(ListDe(build))?),
         })
     }
 }
@@ -47,16 +46,18 @@ impl<'a> Serialize for TextSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let TextSer(this) = self;
         let should = TextFields::assign(|field| match field {
-            TextFields::Value => !this.value.is_empty(),
+            TextFields::Lines => !this.lines.is_empty(),
             TextFields::Epilog => this.epilog.is_some(),
+            TextFields::Verbose => this.verbose,
         });
         let mut fields = s.serialize_struct(TextFields::KIND, should.count())?;
         for field in should.selected() {
             match field {
-                TextFields::Value => fields.serialize_field(field.into(), &ValueSer(this.value))?,
+                TextFields::Lines => fields.serialize_field(field.into(), &ValueSer(this.lines))?,
                 TextFields::Epilog => {
                     fields.serialize_field(field.into(), &MaybeSer(this.epilog))?
                 }
+                TextFields::Verbose => fields.serialize_field(field.into(), &this.verbose)?,
             }
         }
         fields.end()
@@ -82,8 +83,9 @@ impl<'de, 'a, 'b> Visitor<'de> for TextDe<'a, 'b> {
         let mut seen = TextFields::each(false);
         while let Some(field) = map.next_key()? {
             match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
-                TextFields::Value => result.value = map.next_value_seed(ValueDe(build))?,
+                TextFields::Lines => result.lines = map.next_value_seed(ValueDe(build))?,
                 TextFields::Epilog => result.epilog = map.next_value_seed(MaybeDe(build))?,
+                TextFields::Verbose => result.verbose = map.next_value()?,
             }
         }
         Ok(result)
@@ -93,38 +95,38 @@ impl<'de, 'a, 'b> Visitor<'de> for TextDe<'a, 'b> {
     }
 }
 
-struct ItemsSer<'a>(Items<'a>);
-impl<'a> Serialize for ItemsSer<'a> {
+struct GroupsSer<'a>(Groups<'a>);
+impl<'a> Serialize for GroupsSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
-        let ItemsSer(this) = self;
+        let GroupsSer(this) = self;
         let mut seq = s.serialize_seq(Some(this.len()))?;
         for item in this {
-            seq.serialize_element(&ItemSer(item))?;
+            seq.serialize_element(&GroupSer(item))?;
         }
         seq.end()
     }
 }
-struct ItemsDe<'a, 'b>(&'b mut dyn Build<'a>);
-impl<'de, 'a, 'b> DeserializeSeed<'de> for ItemsDe<'a, 'b> {
-    type Value = Items<'a>;
+struct GroupsDe<'a, 'b>(&'b mut dyn Build<'a>);
+impl<'de, 'a, 'b> DeserializeSeed<'de> for GroupsDe<'a, 'b> {
+    type Value = Groups<'a>;
     fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
         d.deserialize_seq(self)
     }
 }
-impl<'de, 'a, 'b> Visitor<'de> for ItemsDe<'a, 'b> {
-    type Value = Items<'a>;
+impl<'de, 'a, 'b> Visitor<'de> for GroupsDe<'a, 'b> {
+    type Value = Groups<'a>;
     fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-        let kind = ItemVariants::KIND;
+        let kind = GroupFields::KIND;
         write!(out, "sequence of {STYLE} {kind}")
     }
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> StdResult<Self::Value, A::Error> {
-        let ItemsDe(build) = self;
+        let GroupsDe(build) = self;
         let mut count = 0usize;
-        while let Some(item) = seq.next_element_seed(ItemDe(build))? {
-            build.push_item(item).map_err(A::Error::custom)?;
+        while let Some(item) = seq.next_element_seed(GroupDe(build))? {
+            build.push_group(item).map_err(A::Error::custom)?;
             count += 1;
         }
-        Ok(build.finish_items(count).map_err(A::Error::custom)?)
+        Ok(build.finish_groups(count).map_err(A::Error::custom)?)
     }
 }
 
@@ -134,7 +136,7 @@ impl<'a> Serialize for ListSer<'a> {
         let ListSer(this) = self;
         let should = ListFields::assign(|field| match field {
             ListFields::Prolog => this.prolog.is_some(),
-            ListFields::Items => !this.items.is_empty(),
+            ListFields::Groups => !this.groups.is_empty(),
             ListFields::Epilog => this.epilog.is_some(),
         });
         let mut fields = s.serialize_struct(ListFields::KIND, should.count())?;
@@ -143,7 +145,9 @@ impl<'a> Serialize for ListSer<'a> {
                 ListFields::Prolog => {
                     fields.serialize_field(field.into(), &MaybeSer(this.prolog))?
                 }
-                ListFields::Items => fields.serialize_field(field.into(), &ItemsSer(this.items))?,
+                ListFields::Groups => {
+                    fields.serialize_field(field.into(), &GroupsSer(this.groups))?
+                }
                 ListFields::Epilog => {
                     fields.serialize_field(field.into(), &MaybeSer(this.epilog))?
                 }
@@ -173,7 +177,7 @@ impl<'de, 'a, 'b> Visitor<'de> for ListDe<'a, 'b> {
         while let Some(field) = map.next_key()? {
             match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
                 ListFields::Prolog => result.prolog = map.next_value_seed(MaybeDe(build))?,
-                ListFields::Items => result.items = map.next_value_seed(ItemsDe(build))?,
+                ListFields::Groups => result.groups = map.next_value_seed(GroupsDe(build))?,
                 ListFields::Epilog => result.epilog = map.next_value_seed(MaybeDe(build))?,
             }
         }
@@ -184,103 +188,64 @@ impl<'de, 'a, 'b> Visitor<'de> for ListDe<'a, 'b> {
     }
 }
 
-struct NameSer<'a>(Name<'a>);
-impl<'a> Serialize for NameSer<'a> {
+struct MemberSer<'a>(Member<'a>);
+impl<'a> Serialize for MemberSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
-        let NameSer(this) = self;
-        let should = NameFields::assign(|field| match field {
-            NameFields::Comment => this.comment.is_some(),
-            NameFields::Key => !this.key.is_empty(),
-        });
-        let mut fields = s.serialize_struct(NameFields::KIND, should.count())?;
-        for field in should.selected() {
-            match field {
-                NameFields::Comment => {
-                    fields.serialize_field(field.into(), &MaybeSer(this.comment))?
-                }
-                NameFields::Key => fields.serialize_field(field.into(), &ValueSer(this.key))?,
-            }
-        }
-        fields.end()
-    }
-}
-struct NameDe<'a, 'b>(&'b mut dyn Build<'a>);
-impl<'de, 'a, 'b> DeserializeSeed<'de> for NameDe<'a, 'b> {
-    type Value = Name<'a>;
-    fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
-        d.deserialize_struct(NameFields::KIND, NameFields::NAMES, self)
-    }
-}
-impl<'de, 'a, 'b> Visitor<'de> for NameDe<'a, 'b> {
-    type Value = Name<'a>;
-    fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-        let kind = NameFields::KIND;
-        let names = NameFields::NAMES.join(", ");
-        write!(out, "{STYLE} {kind}: {names}")
-    }
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> StdResult<Self::Value, A::Error> {
-        let NameDe(build) = self;
-        let mut result = Name::default();
-        let mut seen = NameFields::each(false);
-        while let Some(field) = map.next_key()? {
-            match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
-                NameFields::Comment => result.comment = map.next_value_seed(MaybeDe(build))?,
-                NameFields::Key => result.key = map.next_value_seed(ValueDe(build))?,
-            }
-        }
-        Ok(result)
-    }
-    fn visit_seq<A: SeqAccess<'de>>(self, _seq: A) -> StdResult<Self::Value, A::Error> {
-        Err(A::Error::custom("visitor wants seq of fields, use Verbose"))
-    }
-}
-
-struct EntrySer<'a>(Entry<'a>);
-impl<'a> Serialize for EntrySer<'a> {
-    fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
-        let EntrySer(this) = self;
-        let should = EntryFields::assign(|field| match field {
-            EntryFields::Name => !this.name.key.is_empty() || this.name.comment.is_some(),
-            EntryFields::Item => match this.item {
-                Item::Text(Text { value, epilog, .. }) => epilog.is_some() || !value.is_empty(),
+        let MemberSer(this) = self;
+        let should = MemberFields::assign(|field| match field {
+            MemberFields::Comment => this.comment.is_some(),
+            MemberFields::Name => !this.name.is_empty() || this.comment.is_some(),
+            MemberFields::Data => match this.data {
+                Data::Text(text) => text.epilog.is_some() || !text.lines.is_empty(),
                 _ => true,
             },
+            MemberFields::Longer => this.longer,
         });
-        let mut fields = s.serialize_struct(EntryFields::KIND, should.count())?;
+        let mut fields = s.serialize_struct(MemberFields::KIND, should.count())?;
         for field in should.selected() {
             match field {
-                EntryFields::Name => fields.serialize_field(field.into(), &NameSer(this.name))?,
-                EntryFields::Item => fields.serialize_field(field.into(), &ItemSer(this.item))?,
+                MemberFields::Comment => {
+                    fields.serialize_field(field.into(), &MaybeSer(this.comment))?
+                }
+                MemberFields::Name => fields.serialize_field(field.into(), &ValueSer(this.name))?,
+                MemberFields::Data => fields.serialize_field(field.into(), &DataSer(this.data))?,
+                MemberFields::Longer => fields.serialize_field(field.into(), &this.longer)?,
             }
         }
         fields.end()
     }
 }
-struct EntryDe<'a, 'b>(&'b mut dyn Build<'a>);
-impl<'de, 'a, 'b> DeserializeSeed<'de> for EntryDe<'a, 'b> {
-    type Value = Entry<'a>;
+struct MemberDe<'a, 'b>(&'b mut dyn Build<'a>);
+impl<'de, 'a, 'b> DeserializeSeed<'de> for MemberDe<'a, 'b> {
+    type Value = Member<'a>;
     fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
-        d.deserialize_struct(EntryFields::KIND, EntryFields::NAMES, self)
+        d.deserialize_struct(MemberFields::KIND, MemberFields::NAMES, self)
     }
 }
-impl<'de, 'a, 'b> Visitor<'de> for EntryDe<'a, 'b> {
-    type Value = Entry<'a>;
+impl<'de, 'a, 'b> Visitor<'de> for MemberDe<'a, 'b> {
+    type Value = Member<'a>;
     fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-        let kind = EntryFields::KIND;
-        let names = EntryFields::NAMES.join(", ");
+        let kind = MemberFields::KIND;
+        let names = MemberFields::NAMES.join(", ");
         write!(out, "{STYLE} {kind}: {names}")
     }
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> StdResult<Self::Value, A::Error> {
-        let EntryDe(build) = self;
-        let mut result = Entry::default();
-        let mut seen = EntryFields::each(false);
+        let MemberDe(build) = self;
+        let mut result = Member::default();
+        let mut seen = MemberFields::each(false);
         while let Some(field) = map.next_key()? {
             match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
-                EntryFields::Name => {
-                    result.name = map.next_value_seed(NameDe(build))?;
+                MemberFields::Comment => {
+                    result.comment = map.next_value_seed(MaybeDe(build))?;
                 }
-                EntryFields::Item => {
-                    result.item = map.next_value_seed(ItemDe(build))?;
+                MemberFields::Name => {
+                    result.name = map.next_value_seed(ValueDe(build))?;
+                }
+                MemberFields::Data => {
+                    result.data = map.next_value_seed(DataDe(build))?;
+                }
+                MemberFields::Longer => {
+                    result.longer = map.next_value()?;
                 }
             }
         }
@@ -291,90 +256,85 @@ impl<'de, 'a, 'b> Visitor<'de> for EntryDe<'a, 'b> {
     }
 }
 
-struct EntriesSer<'a>(Entries<'a>);
-impl<'a> Serialize for EntriesSer<'a> {
+struct MembersSer<'a>(Members<'a>);
+impl<'a> Serialize for MembersSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
-        let EntriesSer(this) = self;
+        let MembersSer(this) = self;
         let mut seq = s.serialize_seq(Some(this.len()))?;
         for entry in this {
-            seq.serialize_element(&EntrySer(entry))?;
+            seq.serialize_element(&MemberSer(entry))?;
         }
         seq.end()
     }
 }
-struct EntriesDe<'a, 'b>(&'b mut dyn Build<'a>);
-impl<'de, 'a, 'b> DeserializeSeed<'de> for EntriesDe<'a, 'b> {
-    type Value = Entries<'a>;
+struct MembersDe<'a, 'b>(&'b mut dyn Build<'a>);
+impl<'de, 'a, 'b> DeserializeSeed<'de> for MembersDe<'a, 'b> {
+    type Value = Members<'a>;
     fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
         d.deserialize_seq(self)
     }
 }
-impl<'de, 'a, 'b> Visitor<'de> for EntriesDe<'a, 'b> {
-    type Value = Entries<'a>;
+impl<'de, 'a, 'b> Visitor<'de> for MembersDe<'a, 'b> {
+    type Value = Members<'a>;
     fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-        let kind = EntryFields::KIND;
+        let kind = MemberFields::KIND;
         write!(out, "sequence of {STYLE} {kind}")
     }
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> StdResult<Self::Value, A::Error> {
-        let EntriesDe(build) = self;
+        let MembersDe(build) = self;
         let mut count = 0usize;
-        while let Some(entry) = seq.next_element_seed(EntryDe(build))? {
-            build.push_entry(entry).map_err(A::Error::custom)?;
+        while let Some(entry) = seq.next_element_seed(MemberDe(build))? {
+            build.push_member(entry).map_err(A::Error::custom)?;
             count += 1;
         }
-        Ok(build.finish_entries(count).map_err(A::Error::custom)?)
+        Ok(build.finish_members(count).map_err(A::Error::custom)?)
     }
 }
 
-struct DictSer<'a>(Dict<'a>);
-impl<'a> Serialize for DictSer<'a> {
+struct GroupSer<'a>(Group<'a>);
+impl<'a> Serialize for GroupSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
-        let DictSer(dict) = self;
-        let should = DictFields::assign(|field| match field {
-            DictFields::Prolog => dict.prolog.is_some(),
-            DictFields::Entries => !dict.entries.is_empty(),
-            DictFields::Epilog => dict.epilog.is_some(),
+        let GroupSer(this) = self;
+        let should = GroupFields::assign(|field| match field {
+            GroupFields::Heading => this.heading.is_some(),
+            GroupFields::Members => !this.members.is_empty(),
         });
-        let mut fields = s.serialize_struct(DictFields::KIND, should.count())?;
+        let mut fields = s.serialize_struct(GroupFields::KIND, should.count())?;
         for field in should.selected() {
             match field {
-                DictFields::Prolog => {
-                    fields.serialize_field(field.into(), &MaybeSer(dict.prolog))?
+                GroupFields::Heading => {
+                    fields.serialize_field(field.into(), &MaybeSer(this.heading))?
                 }
-                DictFields::Entries => {
-                    fields.serialize_field(field.into(), &EntriesSer(dict.entries))?
-                }
-                DictFields::Epilog => {
-                    fields.serialize_field(field.into(), &MaybeSer(dict.epilog))?
+                GroupFields::Members => {
+                    fields.serialize_field(field.into(), &MembersSer(this.members))?
                 }
             }
         }
         fields.end()
     }
 }
-struct DictDe<'a, 'b>(&'b mut dyn Build<'a>);
-impl<'de, 'a, 'b> DeserializeSeed<'de> for DictDe<'a, 'b> {
-    type Value = Dict<'a>;
+struct GroupDe<'a, 'b>(&'b mut dyn Build<'a>);
+impl<'de, 'a, 'b> DeserializeSeed<'de> for GroupDe<'a, 'b> {
+    type Value = Group<'a>;
     fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
-        d.deserialize_struct(DictFields::KIND, DictFields::NAMES, self)
+        d.deserialize_struct(GroupFields::KIND, GroupFields::NAMES, self)
     }
 }
-impl<'de, 'a, 'b> Visitor<'de> for DictDe<'a, 'b> {
-    type Value = Dict<'a>;
+impl<'de, 'a, 'b> Visitor<'de> for GroupDe<'a, 'b> {
+    type Value = Group<'a>;
     fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-        let kind = DictFields::KIND;
-        let names = DictFields::NAMES.join(", ");
+        let kind = GroupFields::KIND;
+        let names = GroupFields::NAMES.join(", ");
         write!(out, "{STYLE} {kind}: {names}")
     }
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> StdResult<Self::Value, A::Error> {
-        let DictDe(build) = self;
-        let mut result = Dict::default();
-        let mut seen = DictFields::each(false);
+        let GroupDe(build) = self;
+        let mut result = Group::default();
+        let mut seen = GroupFields::each(false);
         while let Some(field) = map.next_key()? {
             match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
-                DictFields::Prolog => result.prolog = map.next_value_seed(MaybeDe(build))?,
-                DictFields::Entries => result.entries = map.next_value_seed(EntriesDe(build))?,
-                DictFields::Epilog => result.epilog = map.next_value_seed(MaybeDe(build))?,
+                GroupFields::Heading => result.heading = map.next_value_seed(MaybeDe(build))?,
+                GroupFields::Members => result.members = map.next_value_seed(MembersDe(build))?,
             }
         }
         Ok(result)
@@ -391,7 +351,7 @@ impl<'a> Serialize for FileSer<'a> {
         let should = FileFields::assign(|field| match field {
             FileFields::Shebang => this.shebang.is_some(),
             FileFields::Prolog => this.prolog.is_some(),
-            FileFields::Entries => !this.entries.is_empty(),
+            FileFields::Groups => !this.groups.is_empty(),
         });
         let mut fields = s.serialize_struct(FileFields::KIND, should.count())?;
         for field in should.selected() {
@@ -402,8 +362,8 @@ impl<'a> Serialize for FileSer<'a> {
                 FileFields::Prolog => {
                     fields.serialize_field(field.into(), &MaybeSer(this.prolog))?
                 }
-                FileFields::Entries => {
-                    fields.serialize_field(field.into(), &EntriesSer(this.entries))?
+                FileFields::Groups => {
+                    fields.serialize_field(field.into(), &GroupsSer(this.groups))?
                 }
             }
         }
@@ -432,7 +392,7 @@ impl<'de, 'a, 'b> Visitor<'de> for FileDe<'a, 'b> {
             match seen.once::<A, _>(field, |it| A::Error::duplicate_field(it))? {
                 FileFields::Shebang => result.shebang = map.next_value_seed(MaybeDe(build))?,
                 FileFields::Prolog => result.prolog = map.next_value_seed(MaybeDe(build))?,
-                FileFields::Entries => result.entries = map.next_value_seed(EntriesDe(build))?,
+                FileFields::Groups => result.groups = map.next_value_seed(GroupsDe(build))?,
             }
         }
         Ok(result)

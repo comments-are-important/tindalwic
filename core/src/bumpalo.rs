@@ -2,8 +2,9 @@
 
 extern crate alloc;
 
+use crate::group::{Groups, Members};
 use crate::parse::{Build, Parse, ParseError, Reported};
-use crate::{Entries, Entry, File, Item, Items};
+use crate::{File, Group, Member};
 use alloc::string::String;
 use alloc::vec::Vec;
 use bumpalo::Bump;
@@ -39,28 +40,28 @@ impl<T: Copy> CellVec<T> {
 }
 
 struct HeapBuilder<'a> {
-    items: CellVec<Item<'a>>,
-    entries: CellVec<Entry<'a>>,
+    groups: CellVec<Group<'a>>,
+    members: CellVec<Member<'a>>,
     bump: &'a Bump,
 }
 impl<'a> Build<'a> for HeapBuilder<'a> {
-    fn finish_items(&mut self, count: usize) -> Result<Items<'a>, &'static str> {
-        self.items
+    fn finish_groups(&mut self, count: usize) -> Result<Groups<'a>, &'static str> {
+        self.groups
             .finish(count, self.bump)
-            .map(|cells| Items::new(cells))
+            .map(|cells| Groups::new(cells))
             .ok_or("not enough items to make that list")
     }
-    fn finish_entries(&mut self, count: usize) -> Result<Entries<'a>, &'static str> {
-        self.entries
+    fn finish_members(&mut self, count: usize) -> Result<Members<'a>, &'static str> {
+        self.members
             .finish(count, self.bump)
-            .map(|cells| Entries::new(cells))
+            .map(|cells| Members::new(cells))
             .ok_or("not enough entries to make that dict")
     }
-    fn push_item(&mut self, item: Item<'a>) -> Result<(), &'static str> {
-        self.items.push(item).ok_or("no room for item")
+    fn push_group(&mut self, item: Group<'a>) -> Result<(), &'static str> {
+        self.groups.push(item).ok_or("no room for item")
     }
-    fn push_entry(&mut self, entry: Entry<'a>) -> Result<(), &'static str> {
-        self.entries.push(entry).ok_or("no room for entry")
+    fn push_member(&mut self, entry: Member<'a>) -> Result<(), &'static str> {
+        self.members.push(entry).ok_or("no room for entry")
     }
     fn intern(&mut self, value: &'_ str) -> Result<&'a str, &'static str> {
         Ok(self.bump.alloc_str(value))
@@ -80,8 +81,8 @@ impl<'a> Arena<'a> {
     /// the Bump needs an outside let binding so it lives long enough.
     pub fn new(bump: &'a Bump) -> Self {
         let builder = HeapBuilder {
-            items: CellVec::new(),
-            entries: CellVec::new(),
+            groups: CellVec::new(),
+            members: CellVec::new(),
             bump,
         };
         Arena { builder }

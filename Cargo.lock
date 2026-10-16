@@ -730,8 +730,6 @@ dependencies = [
  "anyhow",
  "bumpalo",
  "markdown",
- "rand",
- "tindalwic-cli",
  "tindalwic-macros",
  "trybuild",
 ]

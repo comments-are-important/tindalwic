@@ -2,33 +2,26 @@
 
 //! Text in Nested Dictionaries and Lists - with Important Comments
 
+use core::ops::Deref;
+
 #[doc(inline)]
 pub use tindalwic_macros::indent;
 
 pub mod capped;
 pub mod fmt;
 pub mod group;
+pub mod parse;
+pub mod text;
 
 #[cfg(feature = "alloc")]
 pub mod alloc;
 #[cfg(feature = "bumpalo")]
 pub mod bumpalo;
 
-mod value;
-
-/// converting bytes into a File
-pub mod parse {
-    #[doc(inline)]
-    pub use super::value::parse::{Build, Parse, ParseError, Reported};
-}
-
 /// the semver plus the git fingerprint
 pub const VERSION: &str = env!("TINDALWIC_VERSION");
 
 // ====================================================================================
-
-#[doc(inline)]
-pub use value::Value;
 
 /// the tokens that start a comment
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -41,6 +34,8 @@ pub enum CommentMarker {
     Epilog,
     /// `%@`
     NameTag,
+    /// `=`
+    Group,
 }
 impl CommentMarker {
     const FIRST_CHAR: [char; 2] = ['%', '#'];
@@ -51,96 +46,90 @@ impl CommentMarker {
             CommentMarker::Prolog => "%!",
             CommentMarker::Epilog => "%%",
             CommentMarker::NameTag => "%@",
+            CommentMarker::Group => "=",
         }
     }
 }
 
-/// a data [Value] and its metadata.
+use text::UTF8;
+
+/// the only primitive data type.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Text<'a> {
-    /// the string value. there are two possible forms for encoding: a single line not
-    /// indented, or an indented block. the single line form in a dictionary context
-    /// will follow a (possibly empty) key and an equals sign: `key=value`. in a list
-    /// context it is the entire line, but it must not start with a char (can't be
-    /// empty) that is not reserved.
-    pub value: Value<'a>,
-    /// A Text value can have a epilog comment after it,
-    pub epilog: Option<Value<'a>>,
-    /// is a longer text encoding preferred? (i.e. `<>` + single line block)
-    pub longer: bool,
-}
-impl<'a, T> From<T> for Text<'a>
-where
-    Value<'a>: From<T>,
-{
-    fn from(value: T) -> Self {
-        Text {
-            value: value.into(),
-            ..Default::default()
-        }
-    }
+    /// the data. there are two possible forms for encoding: a single line not
+    /// indented, or an indented block.
+    pub lines: UTF8<'a>,
+    /// A Text can have a epilog comment after it,
+    pub epilog: Option<UTF8<'a>>,
+    /// gloss indicating preference to avoid any shortcut encoding
+    pub verbose: bool,
 }
 
-#[doc(inline)]
-pub use group::Items;
-
-/// a linear array of [Item]
+/// the only composite data type.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct List<'a> {
     /// A List can have an introductory comment.
-    pub prolog: Option<Value<'a>>,
-    /// The contents of the Item::List.
-    pub items: Items<'a>,
+    pub prolog: Option<UTF8<'a>>,
+    /// many lists will have a single group without a header.
+    pub groups: group::Groups<'a>,
     /// A List can have a comment after it.
-    pub epilog: Option<Value<'a>>,
+    pub epilog: Option<UTF8<'a>>,
+}
+impl<'a> Deref for List<'a> {
+    type Target = group::Groups<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.groups
+    }
 }
 impl<'a, T> From<T> for List<'a>
 where
-    Items<'a>: From<T>,
+    group::Groups<'a>: From<T>,
 {
     fn from(value: T) -> Self {
         List {
-            items: value.into(),
+            groups: value.into(),
             ..Default::default()
         }
     }
 }
 
-#[doc(inline)]
-pub use group::Entries;
-impl<'a> Entries<'a> {
-    /// `O(N)` lookup.
-    pub fn linear_search<T>(&self, key: T) -> Option<Entry<'a>>
-    where
-        Value<'a>: From<T>,
-    {
-        let value: Value<'a> = key.into();
-        for entry in self {
-            if value == entry.name.key {
-                return Some(entry);
-            }
+/// data within a List has metadata. List is the data type, this is structure.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Member<'a> {
+    /// the name can have a comment before it.
+    pub comment: Option<UTF8<'a>>,
+    /// the name need not be unique, and may be empty.
+    pub name: UTF8<'a>,
+    /// gloss indicating preference to avoid any shortcut encoding
+    pub longer: bool,
+    /// the Text or List
+    pub data: Data<'a>,
+}
+impl<'a> From<Data<'a>> for Member<'a> {
+    fn from(value: Data<'a>) -> Self {
+        Member {
+            data: value,
+            ..Default::default()
         }
-        None
     }
 }
 
-/// an associative array of [Entry]
+/// data within a List is grouped. List is the data type, this is structure.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Dict<'a> {
-    /// A Dict can have an introductory comment.
-    pub prolog: Option<Value<'a>>,
-    /// The contents of the Item::Dict.
-    pub entries: Entries<'a>,
-    /// A Dict can have a comment after it.
-    pub epilog: Option<Value<'a>>,
+pub struct Group<'a> {
+    /// the metadata
+    pub heading: Option<UTF8<'a>>,
+    /// the data
+    pub members: group::Members<'a>,
 }
-impl<'a, T> From<T> for Dict<'a>
+impl<'a, T> From<T> for Group<'a>
 where
-    Entries<'a>: From<T>,
+    group::Members<'a>: From<T>,
 {
     fn from(value: T) -> Self {
-        Dict {
-            entries: value.into(),
+        Group {
+            members: value.into(),
             ..Default::default()
         }
     }
@@ -148,74 +137,25 @@ where
 
 // ------------------------------------------------------------------------------------
 
-/// the key in an association.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Name<'a> {
-    /// a key can have a comment before it (below its blank line).
-    pub comment: Option<Value<'a>>,
-    /// the string value
-    pub key: Value<'a>,
-    /// does Name.key prefer a longer encoding? (i.e. brackets instead of `=`)
-    pub longer: bool,
-}
-impl<'a, T> From<T> for Name<'a>
-where
-    Value<'a>: From<T>,
-{
-    fn from(value: T) -> Self {
-        Name {
-            key: value.into(),
-            ..Default::default()
-        }
-    }
-}
-
-/// an association (from name to item).
-///
-/// at the lowest level, these are stored in an array.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Entry<'a> {
-    /// the key half
-    pub name: Name<'a>,
-    /// does Entry.name prefer a longer encoding? (i.e. `@`)
-    pub longer: bool,
-    /// the value half
-    pub item: Item<'a>,
-}
-
-// ------------------------------------------------------------------------------------
-
-/// the three Item variants
+/// the two data types
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Item<'a> {
-    /// a [Value]
+pub enum Data<'a> {
+    /// a primitive
     Text(Text<'a>),
-    /// a linear array of [Item]
+    /// a composite
     List(List<'a>),
-    /// an associative array of [Entry]
-    Dict(Dict<'a>),
 }
-impl<'a> Default for Item<'a> {
+impl<'a> Default for Data<'a> {
     fn default() -> Self {
-        Item::Text(Text::default())
+        Data::Text(Text::default())
     }
 }
-impl<'a, T> From<T> for Item<'a>
+impl<'a, T> From<T> for Data<'a>
 where
     Text<'a>: From<T>,
 {
     fn from(value: T) -> Self {
-        Item::Text(Text::from(value))
-    }
-}
-impl<'a> From<Items<'a>> for Item<'a> {
-    fn from(value: Items<'a>) -> Self {
-        Item::List(List::from(value))
-    }
-}
-impl<'a> From<Entries<'a>> for Item<'a> {
-    fn from(value: Entries<'a>) -> Self {
-        Item::Dict(Dict::from(value))
+        Data::Text(Text::from(value))
     }
 }
 
@@ -223,50 +163,60 @@ impl<'a> From<Entries<'a>> for Item<'a> {
 
 /// the outermost context.
 ///
-/// similar to a [Item::Dict], but with different comments.
+/// basically a [List], but with different comments.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct File<'a> {
     /// A File can start with a Unix `#!` comment.
-    pub shebang: Option<Value<'a>>,
+    pub shebang: Option<UTF8<'a>>,
     /// A File can have an introductory comment.
-    pub prolog: Option<Value<'a>>,
-    /// The contents of the Item::File.
-    pub entries: Entries<'a>,
+    pub prolog: Option<UTF8<'a>>,
+    /// many lists will have a single group without a header.
+    pub groups: group::Groups<'a>,
     // /// number of trailing empty lines
     // pub trailing: usize,
 }
-impl<'a> File<'a> {
-    /// make an [Item::Dict] from self.prolog and self.entries
-    pub fn embed_without_shebang(&self) -> Item<'a> {
-        Item::Dict(Dict {
-            prolog: self.prolog,
-            entries: self.entries,
-            ..Default::default()
-        })
+impl<'a> Deref for File<'a> {
+    type Target = group::Groups<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.groups
     }
-    /// take prolog and entries from an [Dict] to make a new File.
-    pub fn from_dict_without_epilog(dict: &Dict<'a>) -> Self {
+}
+impl<'a, T> From<T> for File<'a>
+where
+    group::Groups<'a>: From<T>,
+{
+    fn from(value: T) -> Self {
         File {
-            prolog: dict.prolog,
-            entries: dict.entries,
+            groups: value.into(),
             ..Default::default()
-        }
-    }
-    /// take prolog and entries from an [Item::Dict] to make a new File.
-    ///
-    /// None if the item is not a dictionary.
-    pub fn try_from_dict_without_epilog(dict: &Item<'a>) -> Option<Self> {
-        match dict {
-            Item::Dict(dict) => Some(File::from_dict_without_epilog(dict)),
-            _ => None,
         }
     }
 }
-impl<'a> From<Entries<'a>> for File<'a> {
-    fn from(value: Entries<'a>) -> Self {
-        File {
-            entries: value,
+impl<'a> File<'a> {
+    /// make an [List] from self.prolog and self.groups
+    pub fn embed_without_shebang(&self) -> List<'a> {
+        List {
+            prolog: self.prolog,
+            groups: self.groups,
             ..Default::default()
+        }
+    }
+    /// use a List prolog and groups to make a new File.
+    pub fn from_list_without_epilog(list: &List<'a>) -> Self {
+        File {
+            prolog: list.prolog,
+            groups: list.groups,
+            ..Default::default()
+        }
+    }
+    /// use a List prolog and groups to make a new File.
+    ///
+    /// None if the item is not a List.
+    pub fn try_from_list_without_epilog(data: &Data<'a>) -> Option<Self> {
+        match data {
+            Data::List(list) => Some(File::from_list_without_epilog(list)),
+            _ => None,
         }
     }
 }

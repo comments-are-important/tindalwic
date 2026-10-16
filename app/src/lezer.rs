@@ -1,10 +1,10 @@
 //! this module is elided from release builds because it is a developer tool.
 
 use anyhow::{Error, Result};
-use bumpalo::Bump;
 use std::path::PathBuf;
-use tindalwic::bumpalo::Arena;
-use tindalwic::{CommentMarker, Dict, Entries, Entry, File, Item, Items, List, Text, Value};
+use tindalwic::CommentMarker;
+use tindalwic::File;
+use tindalwic::text::UTF8;
 
 /// read tindalwic, print expected lezer tree to stdout
 /// the core crate is authoritative so the lezer needs to conform.
@@ -12,138 +12,90 @@ use tindalwic::{CommentMarker, Dict, Entries, Entry, File, Item, Items, List, Te
 /// mechanically then tweak the grammar code so it produces correct trees.
 pub fn run(input: &PathBuf) -> Result<()> {
     let content = super::read_to_string(input)?;
-    let bump = Bump::new();
-    let mut arena = Arena::new(&bump);
+    let bump = bumpalo::Bump::new();
+    let mut arena = tindalwic::bumpalo::Arena::new(&bump);
     let parsed = arena.format_errors(&input.display(), &content, usize::MAX);
-    println!("{}", file(&parsed.map_err(Error::msg)?));
+    let mut root = Parent::default();
+    root.fill(Node::File(parsed.map_err(Error::msg)?));
+    let mut buffer = String::new();
+    Tree::Node(root).lezer(&mut buffer);
+    println!("{}", buffer);
     Ok(())
 }
 
-fn file(file: &File) -> String {
-    let mut kids = Vec::new();
-    if let Some(shebang) = &file.shebang {
-        kids.push(format!(
-            "Shebang(\"{}\",{})",
-            CommentMarker::Shebang.token(),
-            lines(&shebang, Some("Interpreter"))
-        ))
-    }
-    kids.extend(comment(CommentMarker::Prolog, &file.prolog));
-    for kid in &file.entries {
-        kids.push(entry(&kid))
-    }
-    if kids.is_empty() {
-        format!("File")
-    } else {
-        format!("File({})", kids.join(","))
-    }
+enum Node<'a> {
+    File(File<'a>),
+    Lines(usize),
+    Shebang(Option<UTF8<'a>>),
+    Prolog(Option<UTF8<'a>>),
 }
-
-fn entry(entry: &Entry) -> String {
-    let mut parts = Vec::new();
-    parts.extend(comment(CommentMarker::NameTag, &entry.name.comment));
-    let (bra, ket) = match &entry.item {
-        Item::Text(_) => ("\"<\"", "\">\""),
-        Item::List(_) => ("\"[\"", "\"]\""),
-        Item::Dict(_) => ("\"{\"", "\"}\""),
-    };
-    parts.push(bra.into());
-    parts.push(text("Key", &entry.name.key));
-    parts.push(ket.into());
-    parts.push(item(&entry.item));
-    parts.extend(epilog(&entry.item));
-    format!("Entry({})", parts.join(","))
-}
-
-fn item(item: &Item) -> String {
-    match item {
-        Item::Text(text_) => text("Text", &text_.value),
-        Item::List(list_) => list(&list_.prolog, &list_.items),
-        Item::Dict(dict_) => dict(&dict_.prolog, &dict_.entries),
-    }
-}
-
-fn dict<'a>(prolog: &Option<Value<'a>>, entries: &Entries) -> String {
-    let mut kids = Vec::new();
-    kids.extend(comment(CommentMarker::Prolog, &prolog));
-    for kid in entries {
-        kids.push(entry(&kid))
-    }
-    if kids.is_empty() {
-        format!("Dict")
-    } else {
-        format!("Dict({})", kids.join(","))
-    }
-}
-
-fn list<'a>(prolog: &Option<Value<'a>>, items: &Items) -> String {
-    let mut kids = Vec::new();
-    kids.extend(comment(CommentMarker::Prolog, &prolog));
-    for kid in items {
-        let mut parts = Vec::new();
-        let bracket = match &kid {
-            Item::Text(text_) => {
-                parts.push(text("Text", &text_.value));
-                "\"<>\""
+impl Parent {
+    fn fill(&mut self, node: Node) {
+        match node {
+            Node::File(file) => {
+                self.leaf("File");
+                self.kid(Node::Shebang(file.shebang));
+                self.kid(Node::Prolog(file.prolog));
             }
-            Item::List(list_) => {
-                parts.push(list(&list_.prolog, &list_.items));
-                "\"[]\""
+            Node::Lines(count) => {
+                for _ in 0..count {
+                    self.leaf("Line");
+                }
             }
-            Item::Dict(dict_) => {
-                parts.push(dict(&dict_.prolog, &dict_.entries));
-                "\"{}\""
+            Node::Shebang(Some(utf8)) => {
+                self.leaf("Shebang");
+                self.leaf(CommentMarker::Shebang.token());
+                self.fill(Node::Lines(utf8.into_iter().count()));
             }
-        };
-        parts.extend(epilog(&kid));
-        kids.push(format!("Item({bracket},{})", parts.join(",")));
+            Node::Prolog(Some(utf8)) => {
+                self.leaf("Prolog");
+                self.leaf(CommentMarker::Prolog.token());
+                self.fill(Node::Lines(utf8.into_iter().count()));
+            }
+            _ => {}
+        }
     }
-    if kids.is_empty() {
-        format!("List")
-    } else {
-        format!("List({})", kids.join(","))
+    fn kid(&mut self, node: Node) {
+        match node {
+            Node::Lines(count) if count == 0 => {}
+            Node::Shebang(None) => {}
+            Node::Prolog(None) => {}
+            _ => {
+                let mut kid = Parent::default();
+                kid.fill(node);
+                self.kids.push(Tree::Node(kid));
+            }
+        }
+    }
+    fn leaf(&mut self, leaf: &'static str) {
+        self.kids.push(Tree::Leaf(leaf));
     }
 }
-
-fn epilog(item: &Item) -> Option<String> {
-    comment(
-        CommentMarker::Epilog,
-        match item {
-            Item::Text(Text { epilog, .. }) => &epilog,
-            Item::List(List { epilog, .. }) => &epilog,
-            Item::Dict(Dict { epilog, .. }) => &epilog,
-        },
-    )
+#[derive(Default)]
+struct Parent {
+    kids: Vec<Tree>,
 }
-
-fn comment(marker: CommentMarker, maybe: &Option<Value>) -> Option<String> {
-    let Some(comment) = maybe else {
-        return None;
-    };
-    let node = match marker {
-        CommentMarker::Shebang => "Shebang",
-        CommentMarker::Prolog => "Prolog",
-        CommentMarker::Epilog => "Epilog",
-        CommentMarker::NameTag => "Comment", // TODO harmonize grammar
-    };
-    return Some(format!(
-        "{node}(\"{}\",{})",
-        marker.token(),
-        text("GFM", &comment)
-    ));
+enum Tree {
+    Leaf(&'static str),
+    Node(Parent),
 }
-
-fn text(tag: &str, value: &Value) -> String {
-    format!("{tag}({})", lines(value, None))
-}
-
-fn lines(value: &Value, wrap_first: Option<&str>) -> String {
-    let first = match wrap_first {
-        None => "Line".to_owned(),
-        Some(wrap) => format!("{wrap}(Line)"),
-    };
-    match value.lines().count() {
-        0 => "".to_owned(),
-        n => format!("{first}{}", ",Line".repeat(n - 1)),
+impl Tree {
+    fn lezer(&self, buffer: &mut String) {
+        match self {
+            Tree::Leaf(leaf) => buffer.push_str(leaf),
+            Tree::Node(parent) => {
+                let mut iter = parent.kids.iter();
+                let Some(first) = iter.next() else { return };
+                first.lezer(buffer);
+                let Some(second) = iter.next() else { return };
+                buffer.push('(');
+                second.lezer(buffer);
+                for rest in iter {
+                    buffer.push(',');
+                    rest.lezer(buffer);
+                }
+                buffer.push(')');
+            }
+        }
     }
 }

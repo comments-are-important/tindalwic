@@ -1,8 +1,9 @@
 //! macros depend on these, so must be public.
 //! but you should probably not use these directly, macros are much easier.
 
+use crate::group::{Groups, Members};
 use crate::parse::{Build, Parse};
-use crate::{Entries, Entry, Item, Items};
+use crate::{Group, Member};
 
 use core::cell::Cell;
 
@@ -55,14 +56,14 @@ impl<'a, T> LowToHigh<'a, T> {
 }
 
 struct StackBuilder<'a> {
-    items: LowToHigh<'a, Item<'a>>,
-    entries: LowToHigh<'a, Entry<'a>>,
+    groups: LowToHigh<'a, Group<'a>>,
+    members: LowToHigh<'a, Member<'a>>,
 }
 impl<'a> StackBuilder<'a> {
-    pub fn wrap(items: &'a [Cell<Item<'a>>], entries: &'a [Cell<Entry<'a>>]) -> Self {
-        let items = LowToHigh::wrap(items);
-        let entries = LowToHigh::wrap(entries);
-        StackBuilder { items, entries }
+    pub fn wrap(groups: &'a [Cell<Group<'a>>], members: &'a [Cell<Member<'a>>]) -> Self {
+        let groups = LowToHigh::wrap(groups);
+        let members = LowToHigh::wrap(members);
+        StackBuilder { groups, members }
     }
 }
 /// a flavor of Arena that uses fixed-size array slices.
@@ -77,21 +78,21 @@ impl<'a> Parse<'a> for Arena<'a> {
 }
 impl<'a> Arena<'a> {
     /// provide the storage
-    pub fn wrap(items: &'a [Cell<Item<'a>>], entries: &'a [Cell<Entry<'a>>]) -> Self {
-        let builder = StackBuilder::wrap(items, entries);
+    pub fn wrap(groups: &'a [Cell<Group<'a>>], members: &'a [Cell<Member<'a>>]) -> Self {
+        let builder = StackBuilder::wrap(groups, members);
         Arena { builder }
     }
     /// returns count of items that can still fit.
     pub fn item_slots(&self) -> usize {
-        self.builder.items.done - self.builder.items.next
+        self.builder.groups.done - self.builder.groups.next
     }
     /// returns count of entries that can still fit.
     pub fn entry_slots(&self) -> usize {
-        self.builder.entries.done - self.builder.entries.next
+        self.builder.members.done - self.builder.members.next
     }
     /// the json! macro uses this as a sanity check that no space gets wasted.
     pub fn completed(&self) -> Option<()> {
-        if self.builder.items.done == 0 && self.builder.entries.done == 0 {
+        if self.builder.groups.done == 0 && self.builder.members.done == 0 {
             Some(())
         } else {
             None
@@ -99,23 +100,23 @@ impl<'a> Arena<'a> {
     }
 }
 impl<'a> Build<'a> for StackBuilder<'a> {
-    fn finish_items(&mut self, count: usize) -> Result<Items<'a>, &'static str> {
-        self.items
+    fn finish_groups(&mut self, count: usize) -> Result<Groups<'a>, &'static str> {
+        self.groups
             .finish(count)
-            .map(|cells| Items::new(cells))
+            .map(|cells| Groups::new(cells))
             .ok_or_else(|| "not enough items to make that list")
     }
-    fn finish_entries(&mut self, count: usize) -> Result<Entries<'a>, &'static str> {
-        self.entries
+    fn finish_members(&mut self, count: usize) -> Result<Members<'a>, &'static str> {
+        self.members
             .finish(count)
-            .map(|cells| Entries::new(cells))
+            .map(|cells| Members::new(cells))
             .ok_or_else(|| "not enough entries to make that dict")
     }
-    fn push_item(&mut self, item: Item<'a>) -> Result<(), &'static str> {
-        self.items.push(item).ok_or_else(|| "no room for item")
+    fn push_group(&mut self, item: Group<'a>) -> Result<(), &'static str> {
+        self.groups.push(item).ok_or_else(|| "no room for item")
     }
-    fn push_entry(&mut self, entry: Entry<'a>) -> Result<(), &'static str> {
-        self.entries.push(entry).ok_or_else(|| "no room for entry")
+    fn push_member(&mut self, entry: Member<'a>) -> Result<(), &'static str> {
+        self.members.push(entry).ok_or_else(|| "no room for entry")
     }
 }
 

@@ -2,17 +2,17 @@
 
 extern crate alloc;
 
-use crate::Value;
+use crate::UTF8;
 use alloc::string::String;
 
-impl<'a> Value<'a> {
+impl<'a> UTF8<'a> {
     /// Allocates a [String], filled with the UTF-8 copied from `self`.
     pub fn joined(&self) -> String {
         if let Some(slice) = self.verbatim(0) {
             String::from(slice)
         } else {
-            let mut result = String::with_capacity(self.len());
-            let mut iter = self.lines();
+            let mut result = String::new();
+            let mut iter = self.into_iter();
             if let Some(first) = iter.next() {
                 result.push_str(first)
             }
@@ -24,9 +24,9 @@ impl<'a> Value<'a> {
         }
     }
 }
-impl<'a> From<&'a String> for Value<'a> {
+impl<'a> From<&'a String> for UTF8<'a> {
     fn from(value: &'a String) -> Self {
-        Value::from(&value[..])
+        UTF8::from(&value[..])
     }
 }
 

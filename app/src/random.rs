@@ -8,7 +8,8 @@ use std::fs;
 use std::io::Write as _;
 use tindalwic::bumpalo::Arena;
 use tindalwic::parse::Parse as _;
-use tindalwic::{Dict, Entry, File, Item, List, VERSION, Value};
+use tindalwic::text::UTF8;
+use tindalwic::{Data, File, Group, List, Member, VERSION};
 
 #[derive(clap::Args, Debug)]
 pub struct Args {
@@ -226,74 +227,57 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
         }
         self.arena.intern(&value)
     }
-    fn comment(&mut self) -> Option<Value<'a>> {
+    fn comment(&mut self) -> Option<UTF8<'a>> {
         if self.rng.random_bool(0.5) {
             Some(self.value().into())
         } else {
             None
         }
     }
-    fn item(&mut self, shape: &Option<Silhouette>) -> anyhow::Result<Item<'a>> {
+    fn data(&mut self, shape: &Option<Silhouette>) -> anyhow::Result<Data<'a>> {
         Ok(if let Some(parent) = shape {
-            if self.rng.random_ratio(1, 2) {
-                let count = self.entries(&parent.children)?;
-                self.dict(count)?
-            } else {
-                let count = self.items(&parent.children)?;
-                self.list(count)?
-            }
+            let count = self.groups(&parent.children)?;
+            self.list(count)?
         } else {
-            Item::Text(self.value().into())
+            Data::Text(self.value().into())
         })
     }
-    fn items(&mut self, kids: &[Option<Silhouette>]) -> anyhow::Result<usize> {
+    fn member(&mut self, _shape: &Option<Silhouette>) -> anyhow::Result<Member<'a>> {
+        self.data(&None)?;
+        anyhow::bail!("todo member")
+    }
+    fn members(&mut self, kids: &[Option<Silhouette>]) -> anyhow::Result<usize> {
         for kid in kids {
-            let item = self.item(kid)?;
+            let member = self.member(kid)?;
             self.arena
                 .builder()
-                .push_item(item)
+                .push_member(member)
                 .map_err(anyhow::Error::msg)?;
         }
         Ok(kids.len())
     }
-    fn list(&mut self, count: usize) -> anyhow::Result<Item<'a>> {
-        Ok(Item::List(List {
+    fn group(&mut self, _shape: &Option<Silhouette>) -> anyhow::Result<Group<'a>> {
+        self.members(&[][..])?;
+        anyhow::bail!("todo group")
+    }
+    fn groups(&mut self, _kids: &[Option<Silhouette>]) -> anyhow::Result<usize> {
+        self.group(&None)?;
+        anyhow::bail!("todo groups")
+    }
+    fn list(&mut self, count: usize) -> anyhow::Result<Data<'a>> {
+        Ok(Data::List(List {
             prolog: self.comment(),
-            items: self
+            groups: self
                 .arena
                 .builder()
-                .finish_items(count)
-                .map_err(anyhow::Error::msg)?,
-            epilog: self.comment(),
-        }))
-    }
-    fn entries(&mut self, kids: &[Option<Silhouette>]) -> anyhow::Result<usize> {
-        for kid in kids {
-            let mut entry = Entry::default();
-            entry.name.comment = self.comment();
-            entry.name.key = self.value().into();
-            entry.item = self.item(kid)?;
-            self.arena
-                .builder()
-                .push_entry(entry)
-                .map_err(anyhow::Error::msg)?;
-        }
-        Ok(kids.len())
-    }
-    fn dict(&mut self, count: usize) -> anyhow::Result<Item<'a>> {
-        Ok(Item::Dict(Dict {
-            prolog: self.comment(),
-            entries: self
-                .arena
-                .builder()
-                .finish_entries(count)
+                .finish_groups(count)
                 .map_err(anyhow::Error::msg)?,
             epilog: self.comment(),
         }))
     }
     pub fn file(&mut self, grow: usize) -> anyhow::Result<File<'a>> {
         let shape = Silhouette::random(grow, self.rng);
-        let count = self.entries(&shape.children)?;
+        let count = self.groups(&shape.children)?;
         let shebang = if self.rng.random_bool(0.5) {
             None
         } else {
@@ -302,10 +286,10 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
         Ok(File {
             shebang,
             prolog: self.comment(),
-            entries: self
+            groups: self
                 .arena
                 .builder()
-                .finish_entries(count)
+                .finish_groups(count)
                 .map_err(anyhow::Error::msg)?,
             // trailing: self.rng.random_range(0..3),
         })

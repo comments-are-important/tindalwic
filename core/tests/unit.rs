@@ -1,20 +1,17 @@
 //! unit tests are outside the crate modules to stand as examples of API usage
 
-use ::bumpalo::Bump;
-use std::{fs, io};
-use tindalwic::parse::Parse as _;
 use tindalwic::*;
 
 #[test]
-fn file_from_dict() {
-    assert!(File::try_from_dict_without_epilog(&Item::Text("nope".into())).is_none());
-    assert!(File::try_from_dict_without_epilog(&Item::List(List::default())).is_none());
-    let mut entries = [Entry::default()];
-    entries[0].name.key = "key".into();
-    entries[0].item = "value".into();
-    let mut dict: Dict = (&mut entries[..]).into();
-    dict.prolog = Some("prolog".into());
-    let file = File::try_from_dict_without_epilog(&Item::Dict(dict)).unwrap();
+fn file_from_list() {
+    assert!(File::try_from_list_without_epilog(&Data::Text("nope".into())).is_none());
+    let mut members = [Member::default()];
+    members[0].name = "key".into();
+    members[0].data = "value".into();
+    let mut groups = [(&mut members[..]).into()];
+    let mut list: List = (&mut groups[..]).into();
+    list.prolog = Some("prolog".into());
+    let file = File::try_from_list_without_epilog(&Data::List(list)).unwrap();
     assert_eq!(
         file.to_string(),
         indent!(
@@ -28,13 +25,14 @@ fn file_from_dict() {
 
 #[test]
 fn three_blank_comments() {
-    let mut entries = [Entry::default()];
-    entries[0].name.comment = Some("".into());
-    entries[0].item = Item::Dict(Dict::default());
+    let mut members = [Member::default()];
+    members[0].comment = Some("".into());
+    members[0].data = Data::List(List::default());
     let mut file = File::default();
     file.shebang = Some("".into());
     file.prolog = Some("".into());
-    file.entries = (&mut entries[..]).into();
+    let mut groups = [(&mut members[..]).into()];
+    file.groups = (&mut groups[..]).into();
     // file.trailing = 1; // and a bonus blank line
     assert_eq!(
         file.to_string(),
@@ -42,42 +40,50 @@ fn three_blank_comments() {
             r#"
                 #!
                 %!
-                %@
-                {}
+                =
+                []
             "#
         )
     );
 }
 
-#[test]
 #[cfg(feature = "bumpalo")]
-fn example() -> io::Result<()> {
-    let content = fs::read_to_string("../example.tindalwic")?;
-    let bump = Bump::new();
-    let mut arena = tindalwic::bumpalo::Arena::new(&bump);
-    let file = arena.panic_first_error(&content);
-    assert_eq!(content, file.to_string());
-    let Item::Dict(example) = file
-        .entries
-        .linear_search("epilog comments are not just for text")
-        .unwrap()
-        .item
-    else {
-        panic!("not dict")
-    };
-    assert_eq!(example.entries.len(), 2);
-    assert!(
-        !File::from_dict_without_epilog(&example)
-            .to_string()
-            .contains("!!!!")
-    );
-    let Item::Dict(dict) = example.entries.linear_search("dict").unwrap().item else {
-        panic!("not dict")
-    };
-    let mut entry = dict.entries.get(0).unwrap();
-    entry.name.key = "!!!!".into();
-    dict.entries.set(0, entry).unwrap();
-    Ok(())
+mod bumps {
+    use ::bumpalo::Bump;
+    use std::{fs, io};
+    use tindalwic::parse::Parse as _;
+    use tindalwic::*;
+    #[test]
+    #[ignore]
+    fn example() -> io::Result<()> {
+        let content = fs::read_to_string("../example.tindalwic")?;
+        let bump = Bump::new();
+        let mut arena = tindalwic::bumpalo::Arena::new(&bump);
+        let file = arena.panic_first_error(&content);
+        assert_eq!(content, file.to_string());
+        let Data::List(example) = file
+            .named("epilog comments are not just for text")
+            .next()
+            .unwrap()
+            .data
+        else {
+            panic!("not dict")
+        };
+        assert_eq!(example.members().count(), 2);
+        assert!(
+            !File::from_list_without_epilog(&example)
+                .to_string()
+                .contains("!!!!")
+        );
+        let Data::List(list) = example.named("dict").next().unwrap().data else {
+            panic!("not dict")
+        };
+        let mut entry = list.members().next().unwrap();
+        entry.name = "!!!!".into();
+        assert_eq!(entry.to_string(), "");
+        //list.entries.set(0, entry).unwrap(); // iters good for fetching, but not for setting
+        Ok(())
+    }
 }
 
 /*

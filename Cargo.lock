@@ -811,6 +811,7 @@ version = "0.6.0-alpha"
 name = "tindalwic-macros"
 version = "0.6.0-alpha"
 dependencies = [
+ "heck",
  "phf",
  "proc-macro2",
  "quote",
@@ -847,6 +848,7 @@ dependencies = [
  "serde_json",
  "strum",
  "tindalwic",
+ "tindalwic-macros",
 ]
 
 [[package]]

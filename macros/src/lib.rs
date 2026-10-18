@@ -5,10 +5,15 @@
 //! You could depend on and import from this macros crate directly,
 //! but the simpler `use tindalwic::indent` is suggested.
 
+use heck::ToUpperCamelCase;
 use proc_macro::TokenStream as RawStream;
 use std::collections::HashMap;
-use syn::{Fields, ItemEnum, ItemStruct, LitStr};
-use syn::{parse::Parse, parse_macro_input};
+use syn::punctuated::Punctuated;
+use syn::{Fields, Ident, ItemEnum, ItemStruct, LitStr, Token, Variant};
+use syn::{
+    parse::{Parse, Parser},
+    parse_macro_input, parse_str,
+};
 use tindalwic_indent::Line;
 
 mod errors {
@@ -27,7 +32,7 @@ mod errors {
                 Some(previous) => previous.combine(error),
             }
         }
-        pub fn err<T: ToTokens, M: Display>(&mut self, tokens: T, message: M) {
+        pub fn span<T: ToTokens, M: Display>(&mut self, tokens: T, message: M) {
             self.push(Error::new_spanned(tokens, message));
         }
         #[inline]
@@ -66,12 +71,12 @@ pub fn indent(stream: RawStream) -> RawStream {
     let value = input.value();
     let mut all: Vec<_> = value.lines().map(|it| Line::from(it)).collect();
     if all.len() < 3 {
-        errors.err(input, "not enough lines for macro to work with");
+        errors.span(input, "not enough lines for macro to work with");
         return errors.bail();
     }
     let last = all.len() - 1;
     if all[0].content.len() != 0 || !all[last].content.is_empty() {
-        errors.err(input, "the quotes must go on their own lines");
+        errors.span(input, "the quotes must go on their own lines");
         return errors.bail();
     }
     let lines = &mut all[1..last];
@@ -142,7 +147,7 @@ fn hash_map(
         .collect::<HashMap<&'static str, &'static str>>()
 }
 fn parse_str_eq<T: Parse + PartialEq>(input: &T, truth: &str) -> bool {
-    match syn::parse_str::<T>(truth) {
+    match parse_str::<T>(truth) {
         Err(_) => false,
         Ok(parsed) => input == &parsed,
     }
@@ -153,28 +158,28 @@ pub fn check_fields(_attr: RawStream, stream: RawStream) -> RawStream {
     let input = parse_macro_input!(stream as ItemStruct);
     let mut errors = errors::Errors::default();
     match TRUTH.get(&input.ident.to_string()) {
-        None => errors.err(&input.ident, "unknown struct"),
+        None => errors.span(&input.ident, "unknown struct"),
         Some(truth) => {
             let mut expected = hash_map(truth);
             match expected.remove("") {
                 None if !input.generics.params.is_empty() => {
-                    errors.err(&input.generics, "unexpected generics")
+                    errors.span(&input.generics, "unexpected generics")
                 }
                 Some(generics) if !parse_str_eq(&input.generics, generics) => {
-                    errors.err(&input.generics, format!("expected `{generics}`"))
+                    errors.span(&input.generics, format!("expected `{generics}`"))
                 }
                 _ => {}
             }
             for field in &input.fields {
                 let Some(name) = &field.ident else {
-                    errors.err(&field, "impossible unnamed struct field");
+                    errors.span(&field, "impossible unnamed struct field");
                     continue;
                 };
                 let key = name.to_string();
                 match expected.remove(key.as_str()) {
-                    None => errors.err(&name, "unexpected field"),
+                    None => errors.span(&name, "unexpected field"),
                     Some(ty) if !parse_str_eq(&field.ty, ty) => {
-                        errors.err(&field.ty, format!("expected `{ty}`"))
+                        errors.span(&field.ty, format!("expected `{ty}`"))
                     }
                     _ => {}
                 }
@@ -184,7 +189,7 @@ pub fn check_fields(_attr: RawStream, stream: RawStream) -> RawStream {
                     .iter()
                     .map(|(&k, &v)| format!("{k}: {v}"))
                     .collect();
-                errors.err(&input.ident, format!("missing: {:?}", missing));
+                errors.span(&input.ident, format!("missing: {:?}", missing));
             }
         }
     }
@@ -196,39 +201,39 @@ pub fn check_variants(_attr: RawStream, stream: RawStream) -> RawStream {
     let input = parse_macro_input!(stream as ItemEnum);
     let mut errors = errors::Errors::default();
     match TRUTH.get(&input.ident.to_string()) {
-        None => errors.err(&input.ident, "unknown enum"),
+        None => errors.span(&input.ident, "unknown enum"),
         Some(truth) => {
             let mut expected = hash_map(truth);
             match expected.remove("") {
                 None if !input.generics.params.is_empty() => {
-                    errors.err(&input.generics, "unexpected generics")
+                    errors.span(&input.generics, "unexpected generics")
                 }
                 Some(generics) if !parse_str_eq(&input.generics, generics) => {
-                    errors.err(&input.generics, format!("expected `{generics}`"))
+                    errors.span(&input.generics, format!("expected `{generics}`"))
                 }
                 _ => {}
             }
             for variant in &input.variants {
                 let name = &variant.ident;
                 match &variant.fields {
-                    Fields::Unit => errors.err(&variant.ident, "expected unnamed fields"),
-                    Fields::Named(_) => errors.err(&variant.fields, "expected unnamed fields"),
+                    Fields::Unit => errors.span(&variant.ident, "expected unnamed fields"),
+                    Fields::Named(_) => errors.span(&variant.fields, "expected unnamed fields"),
                     Fields::Unnamed(fields) => {
                         match fields.unnamed.first() {
-                            None => errors.err(&fields, "expected one field"),
+                            None => errors.span(&fields, "expected one field"),
                             Some(first) => {
                                 let key = name.to_string();
                                 match expected.remove(key.as_str()) {
-                                    None => errors.err(&name, "unexpected variant"),
+                                    None => errors.span(&name, "unexpected variant"),
                                     Some(ty) if !parse_str_eq(&first.ty, ty) => {
-                                        errors.err(&first.ty, format!("expected `{ty}`"))
+                                        errors.span(&first.ty, format!("expected `{ty}`"))
                                     }
                                     _ => {}
                                 }
                             }
                         }
                         if fields.unnamed.len() > 1 {
-                            errors.err(&fields, "expected single field")
+                            errors.span(&fields, "expected single field")
                         }
                     }
                 }
@@ -238,7 +243,31 @@ pub fn check_variants(_attr: RawStream, stream: RawStream) -> RawStream {
                     .iter()
                     .map(|(&k, &v)| format!("{k}: {v}"))
                     .collect();
-                errors.err(&input.ident, format!("missing: {:?}", missing));
+                errors.span(&input.ident, format!("missing: {:?}", missing));
+            }
+        }
+    }
+    errors.and(input).into()
+}
+
+#[proc_macro_attribute]
+pub fn inject_unit_variants(attr: RawStream, stream: RawStream) -> RawStream {
+    let names =
+        parse_macro_input!(attr with Punctuated::<Ident,Token![,]>::parse_separated_nonempty);
+    let mut input = parse_macro_input!(stream as ItemEnum);
+    let mut errors = errors::Errors::default();
+    for name in names {
+        match TRUTH.get(&name.to_string()) {
+            None => errors.span(name, "unknown"),
+            Some(map) => {
+                for (&k, _) in map.entries() {
+                    if !k.is_empty() {
+                        match Variant::parse.parse_str(&k.to_upper_camel_case()) {
+                            Err(err) => errors.push(err),
+                            Ok(variant) => input.variants.push(variant),
+                        }
+                    }
+                }
             }
         }
     }

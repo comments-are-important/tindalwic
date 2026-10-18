@@ -9,7 +9,6 @@ use std::result::Result as StdResult;
 use strum::{EnumCount, IntoStaticStr, VariantArray, VariantNames};
 use tindalwic::parse::Build;
 use tindalwic::text::UTF8;
-use tindalwic::*;
 
 /// [conventional](https://serde.rs/conventions.html) Deserializer API module
 pub mod de;
@@ -138,38 +137,6 @@ impl<'de, 'a, 'b> Visitor<'de> for MaybeDe<'a, 'b> {
 
 // ==================================================================================
 
-trait VariantHelp: VariantNames + Into<&'static str> + Copy {
-    const KIND: &'static str;
-    fn num(self) -> usize;
-
-    const NAMES: &'static [&'static str] = <Self as VariantNames>::VARIANTS;
-    fn serialize<S, W>(&self, s: S, value: &W) -> StdResult<S::Ok, S::Error>
-    where
-        S: serde::ser::Serializer,
-        W: ?Sized + Serialize,
-    {
-        s.serialize_newtype_variant(Self::KIND, self.num() as u32, (*self).into(), value)
-    }
-}
-macro_rules! variantHelp {
-    ($helper:ident<$type:ident>) => {
-        impl VariantHelp for $helper {
-            const KIND: &'static str = stringify!($type);
-            fn num(self) -> usize {
-                self as usize
-            }
-        }
-    };
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, IntoStaticStr, VariantNames)]
-#[serde(variant_identifier)]
-enum ItemVariants {
-    Text,
-    List,
-}
-variantHelp! { ItemVariants<Item> }
-
 struct Flags<H: FieldHelp> {
     flags: Box<[bool]>,
     phantom: PhantomData<H>,
@@ -193,6 +160,7 @@ impl<H: FieldHelp> Flags<H> {
         Ok(variant)
     }
 }
+
 trait FieldHelp: EnumCount + VariantArray + VariantNames + Into<&'static str> + Copy {
     const KIND: &'static str;
     fn num(self) -> usize;
@@ -213,8 +181,29 @@ trait FieldHelp: EnumCount + VariantArray + VariantNames + Into<&'static str> + 
         flags
     }
 }
-macro_rules! fieldHelp {
+trait VariantHelp: VariantNames + Into<&'static str> + Copy {
+    const KIND: &'static str;
+    fn num(self) -> usize;
+
+    const NAMES: &'static [&'static str] = <Self as VariantNames>::VARIANTS;
+    fn serialize<S, W>(&self, s: S, value: &W) -> StdResult<S::Ok, S::Error>
+    where
+        S: serde::ser::Serializer,
+        W: ?Sized + Serialize,
+    {
+        s.serialize_newtype_variant(Self::KIND, self.num() as u32, (*self).into(), value)
+    }
+}
+
+macro_rules! field_help {
     ($helper:ident<$type:ident>) => {
+        #[tindalwic_macros::inject_unit_variants($type)]
+        #[derive(
+            Clone, Copy, Debug, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames,
+        )]
+        #[serde(field_identifier, rename_all = "lowercase")]
+        #[strum(serialize_all = "lowercase")]
+        enum $helper {}
         impl FieldHelp for $helper {
             const KIND: &'static str = stringify!($type);
             fn num(self) -> usize {
@@ -223,53 +212,24 @@ macro_rules! fieldHelp {
         }
     };
 }
-
-#[derive(Clone, Copy, Debug, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
-#[serde(field_identifier, rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
-enum TextFields {
-    Lines,
-    Epilog,
-    Verbose,
+macro_rules! variant_help {
+    ($helper:ident<$type:ident>) => {
+        #[tindalwic_macros::inject_unit_variants($type)]
+        #[derive(Clone, Copy, Debug, Deserialize, IntoStaticStr, VariantNames)]
+        #[serde(variant_identifier)]
+        enum $helper {}
+        impl VariantHelp for $helper {
+            const KIND: &'static str = stringify!($type);
+            fn num(self) -> usize {
+                self as usize
+            }
+        }
+    };
 }
-fieldHelp!(TextFields<Text>);
 
-#[derive(Clone, Copy, Debug, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
-#[serde(field_identifier, rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
-enum ListFields {
-    Prolog,
-    Groups,
-    Epilog,
-}
-fieldHelp!(ListFields<List>);
-
-#[derive(Clone, Copy, Debug, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
-#[serde(field_identifier, rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
-enum MemberFields {
-    Comment,
-    Name,
-    Longer,
-    Data,
-}
-fieldHelp!(MemberFields<Member>);
-
-#[derive(Clone, Copy, Debug, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
-#[serde(field_identifier, rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
-enum GroupFields {
-    Heading,
-    Members,
-}
-fieldHelp!(GroupFields<Group>);
-
-#[derive(Clone, Copy, Debug, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
-#[serde(field_identifier, rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
-enum FileFields {
-    Shebang,
-    Prolog,
-    Groups,
-}
-fieldHelp!(FileFields<File>);
+field_help! { TextFields<Text> }
+field_help! { ListFields<List> }
+field_help! { MemberFields<Member> }
+field_help! { GroupFields<Group> }
+field_help! { FileFields<File> }
+variant_help! { DataVariants<Data> }

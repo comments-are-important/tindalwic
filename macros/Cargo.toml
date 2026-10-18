@@ -16,6 +16,7 @@ path = "src/lib.rs"
 proc-macro = true
 
 [dependencies]
+heck = { workspace = true }
 phf = { workspace = true, features = ["macros"] }
 proc-macro2 = { workspace = true }
 quote = { workspace = true }

@@ -6,14 +6,15 @@ use serde::ser::{SerializeSeq as _, SerializeStruct as _};
 use std::fmt;
 use tindalwic::group::{Groups, Members};
 use tindalwic::parse::{Build, Parse};
+use tindalwic::{Data, File, Group, List, Member, Text};
 
 struct DataSer<'a>(Data<'a>);
 impl<'a> Serialize for DataSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let DataSer(this) = self;
         match this {
-            Data::Text(text) => ItemVariants::Text.serialize(s, &TextSer(*text)),
-            Data::List(list) => ItemVariants::List.serialize(s, &ListSer(*list)),
+            Data::Text(text) => DataVariants::Text.serialize(s, &TextSer(*text)),
+            Data::List(list) => DataVariants::List.serialize(s, &ListSer(*list)),
         }
     }
 }
@@ -21,22 +22,22 @@ struct DataDe<'a, 'b>(&'b mut dyn Build<'a>);
 impl<'de, 'a, 'b> DeserializeSeed<'de> for DataDe<'a, 'b> {
     type Value = Data<'a>;
     fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
-        d.deserialize_enum(ItemVariants::KIND, ItemVariants::NAMES, self)
+        d.deserialize_enum(DataVariants::KIND, DataVariants::NAMES, self)
     }
 }
 impl<'de, 'a, 'b> Visitor<'de> for DataDe<'a, 'b> {
     type Value = Data<'a>;
     fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-        let kind = ItemVariants::KIND;
-        let names = ItemVariants::NAMES.join(" | ");
+        let kind = DataVariants::KIND;
+        let names = DataVariants::NAMES.join(" | ");
         write!(out, "{STYLE} {kind}: {names}")
     }
     fn visit_enum<A: EnumAccess<'de>>(self, data: A) -> StdResult<Self::Value, A::Error> {
         let DataDe(build) = self;
-        let (this, access) = data.variant::<ItemVariants>()?;
+        let (this, access) = data.variant::<DataVariants>()?;
         Ok(match this {
-            ItemVariants::Text => Data::Text(access.newtype_variant_seed(TextDe(build))?),
-            ItemVariants::List => Data::List(access.newtype_variant_seed(ListDe(build))?),
+            DataVariants::Text => Data::Text(access.newtype_variant_seed(TextDe(build))?),
+            DataVariants::List => Data::List(access.newtype_variant_seed(ListDe(build))?),
         })
     }
 }

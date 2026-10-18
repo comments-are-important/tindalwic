@@ -6,14 +6,54 @@ use serde::ser::{SerializeSeq as _, SerializeStruct as _};
 use std::fmt;
 use tindalwic::group::{Groups, Members};
 use tindalwic::parse::{Build, Parse};
+use tindalwic::{Data, File, Group, List, Member, Text};
+
+fn text_should<'a>(text: &Text<'a>) -> Flags<TextFields> {
+    TextFields::assign(|field| match field {
+        TextFields::Lines => !text.lines.is_empty(),
+        TextFields::Epilog => text.epilog.is_some(),
+        TextFields::Verbose => text.verbose,
+    })
+}
+fn list_should<'a>(list: &List<'a>) -> Flags<ListFields> {
+    ListFields::assign(|field| match field {
+        ListFields::Prolog => list.prolog.is_some(),
+        ListFields::Groups => !list.groups.is_empty(),
+        ListFields::Epilog => list.epilog.is_some(),
+    })
+}
+fn member_should<'a>(member: &Member<'a>) -> Flags<MemberFields> {
+    MemberFields::assign(|field| match field {
+        MemberFields::Comment => member.comment.is_some(),
+        MemberFields::Name => !member.name.is_empty() || member.comment.is_some(),
+        MemberFields::Data => match member.data {
+            Data::Text(text) => text.epilog.is_some() || !text.lines.is_empty(),
+            _ => true,
+        },
+        MemberFields::Longer => member.longer,
+    })
+}
+fn group_should<'a>(group: &Group<'a>) -> Flags<GroupFields> {
+    GroupFields::assign(|field| match field {
+        GroupFields::Heading => group.heading.is_some(),
+        GroupFields::Members => !group.members.is_empty(),
+    })
+}
+fn file_should<'a>(file: &File<'a>) -> Flags<FileFields> {
+    FileFields::assign(|field| match field {
+        FileFields::Shebang => file.shebang.is_some(),
+        FileFields::Prolog => file.prolog.is_some(),
+        FileFields::Groups => !file.groups.is_empty(),
+    })
+}
 
 struct DataSer<'a>(Data<'a>);
 impl<'a> Serialize for DataSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let DataSer(this) = self;
         match this {
-            Data::Text(text) => ItemVariants::Text.serialize(s, &TextSer(*text)),
-            Data::List(list) => ItemVariants::List.serialize(s, &ListSer(*list)),
+            Data::Text(text) => DataVariants::Text.serialize(s, &TextSer(*text)),
+            Data::List(list) => DataVariants::List.serialize(s, &ListSer(*list)),
         }
     }
 }
@@ -21,22 +61,22 @@ struct DataDe<'a, 'b>(&'b mut dyn Build<'a>);
 impl<'de, 'a, 'b> DeserializeSeed<'de> for DataDe<'a, 'b> {
     type Value = Data<'a>;
     fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
-        d.deserialize_enum(ItemVariants::KIND, ItemVariants::NAMES, self)
+        d.deserialize_enum(DataVariants::KIND, DataVariants::NAMES, self)
     }
 }
 impl<'de, 'a, 'b> Visitor<'de> for DataDe<'a, 'b> {
     type Value = Data<'a>;
     fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-        let kind = ItemVariants::KIND;
-        let names = ItemVariants::NAMES.join(" | ");
+        let kind = DataVariants::KIND;
+        let names = DataVariants::NAMES.join(" | ");
         write!(out, "{STYLE} {kind}: {names}")
     }
     fn visit_enum<A: EnumAccess<'de>>(self, data: A) -> StdResult<Self::Value, A::Error> {
         let DataDe(build) = self;
-        let (this, access) = data.variant::<ItemVariants>()?;
+        let (this, access) = data.variant::<DataVariants>()?;
         Ok(match this {
-            ItemVariants::Text => Data::Text(access.newtype_variant_seed(TextDe(build))?),
-            ItemVariants::List => Data::List(access.newtype_variant_seed(ListDe(build))?),
+            DataVariants::Text => Data::Text(access.newtype_variant_seed(TextDe(build))?),
+            DataVariants::List => Data::List(access.newtype_variant_seed(ListDe(build))?),
         })
     }
 }
@@ -45,11 +85,7 @@ struct TextSer<'a>(Text<'a>);
 impl<'a> Serialize for TextSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let TextSer(this) = self;
-        let should = TextFields::assign(|field| match field {
-            TextFields::Lines => !this.lines.is_empty(),
-            TextFields::Epilog => this.epilog.is_some(),
-            TextFields::Verbose => this.verbose,
-        });
+        let should = text_should(this);
         let mut fields = s.serialize_struct(TextFields::KIND, should.count())?;
         for field in should.selected() {
             match field {
@@ -134,11 +170,7 @@ struct ListSer<'a>(List<'a>);
 impl<'a> Serialize for ListSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let ListSer(this) = self;
-        let should = ListFields::assign(|field| match field {
-            ListFields::Prolog => this.prolog.is_some(),
-            ListFields::Groups => !this.groups.is_empty(),
-            ListFields::Epilog => this.epilog.is_some(),
-        });
+        let should = list_should(this);
         let mut fields = s.serialize_struct(ListFields::KIND, should.count())?;
         for field in should.selected() {
             match field {
@@ -192,15 +224,7 @@ struct MemberSer<'a>(Member<'a>);
 impl<'a> Serialize for MemberSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let MemberSer(this) = self;
-        let should = MemberFields::assign(|field| match field {
-            MemberFields::Comment => this.comment.is_some(),
-            MemberFields::Name => !this.name.is_empty() || this.comment.is_some(),
-            MemberFields::Data => match this.data {
-                Data::Text(text) => text.epilog.is_some() || !text.lines.is_empty(),
-                _ => true,
-            },
-            MemberFields::Longer => this.longer,
-        });
+        let should = member_should(this);
         let mut fields = s.serialize_struct(MemberFields::KIND, should.count())?;
         for field in should.selected() {
             match field {
@@ -295,10 +319,7 @@ struct GroupSer<'a>(Group<'a>);
 impl<'a> Serialize for GroupSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let GroupSer(this) = self;
-        let should = GroupFields::assign(|field| match field {
-            GroupFields::Heading => this.heading.is_some(),
-            GroupFields::Members => !this.members.is_empty(),
-        });
+        let should = group_should(this);
         let mut fields = s.serialize_struct(GroupFields::KIND, should.count())?;
         for field in should.selected() {
             match field {
@@ -348,11 +369,7 @@ struct FileSer<'a>(File<'a>);
 impl<'a> Serialize for FileSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
         let FileSer(this) = self;
-        let should = FileFields::assign(|field| match field {
-            FileFields::Shebang => this.shebang.is_some(),
-            FileFields::Prolog => this.prolog.is_some(),
-            FileFields::Groups => !this.groups.is_empty(),
-        });
+        let should = file_should(this);
         let mut fields = s.serialize_struct(FileFields::KIND, should.count())?;
         for field in should.selected() {
             match field {

@@ -19,7 +19,7 @@ pub fn to_tindalwic<'a, T: ?Sized + Serialize>(
     Ok(file.to_string())
 }
 
-/// build a tindalwic [Item] from any `T: Serialize`
+/// build a tindalwic [Data] from any `T: Serialize`
 pub struct DataSer<'b, 'a> {
     build: &'b mut dyn Build<'a>,
 }

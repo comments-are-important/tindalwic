@@ -51,10 +51,12 @@ impl CommentMarker {
     }
 }
 
+use group::{Groups, Members};
 use text::UTF8;
 
 /// the only primitive data type.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[tindalwic_macros::check_fields]
 pub struct Text<'a> {
     /// the data. there are two possible forms for encoding: a single line not
     /// indented, or an indented block.
@@ -67,16 +69,17 @@ pub struct Text<'a> {
 
 /// the only composite data type.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[tindalwic_macros::check_fields]
 pub struct List<'a> {
     /// A List can have an introductory comment.
     pub prolog: Option<UTF8<'a>>,
     /// many lists will have a single group without a header.
-    pub groups: group::Groups<'a>,
+    pub groups: Groups<'a>,
     /// A List can have a comment after it.
     pub epilog: Option<UTF8<'a>>,
 }
 impl<'a> Deref for List<'a> {
-    type Target = group::Groups<'a>;
+    type Target = Groups<'a>;
 
     fn deref(&self) -> &Self::Target {
         &self.groups
@@ -84,7 +87,7 @@ impl<'a> Deref for List<'a> {
 }
 impl<'a, T> From<T> for List<'a>
 where
-    group::Groups<'a>: From<T>,
+    Groups<'a>: From<T>,
 {
     fn from(value: T) -> Self {
         List {
@@ -96,6 +99,7 @@ where
 
 /// data within a List has metadata. List is the data type, this is structure.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[tindalwic_macros::check_fields]
 pub struct Member<'a> {
     /// the name can have a comment before it.
     pub comment: Option<UTF8<'a>>,
@@ -117,15 +121,16 @@ impl<'a> From<Data<'a>> for Member<'a> {
 
 /// data within a List is grouped. List is the data type, this is structure.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[tindalwic_macros::check_fields]
 pub struct Group<'a> {
     /// the metadata
     pub heading: Option<UTF8<'a>>,
     /// the data
-    pub members: group::Members<'a>,
+    pub members: Members<'a>,
 }
 impl<'a, T> From<T> for Group<'a>
 where
-    group::Members<'a>: From<T>,
+    Members<'a>: From<T>,
 {
     fn from(value: T) -> Self {
         Group {
@@ -139,6 +144,7 @@ where
 
 /// the two data types
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[tindalwic_macros::check_variants]
 pub enum Data<'a> {
     /// a primitive
     Text(Text<'a>),
@@ -165,18 +171,19 @@ where
 ///
 /// basically a [List], but with different comments.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[tindalwic_macros::check_fields]
 pub struct File<'a> {
     /// A File can start with a Unix `#!` comment.
     pub shebang: Option<UTF8<'a>>,
     /// A File can have an introductory comment.
     pub prolog: Option<UTF8<'a>>,
     /// many lists will have a single group without a header.
-    pub groups: group::Groups<'a>,
+    pub groups: Groups<'a>,
     // /// number of trailing empty lines
     // pub trailing: usize,
 }
 impl<'a> Deref for File<'a> {
-    type Target = group::Groups<'a>;
+    type Target = Groups<'a>;
 
     fn deref(&self) -> &Self::Target {
         &self.groups
@@ -184,7 +191,7 @@ impl<'a> Deref for File<'a> {
 }
 impl<'a, T> From<T> for File<'a>
 where
-    group::Groups<'a>: From<T>,
+    Groups<'a>: From<T>,
 {
     fn from(value: T) -> Self {
         File {

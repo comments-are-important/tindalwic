@@ -13,6 +13,7 @@ use core::str::Split;
 /// methods strip indentation as necessary. Encoding is particularly cheap when the
 /// embedded margins already match what is needed.
 #[derive(Clone, Copy, Debug, Eq)]
+#[tindalwic_macros::check_fields]
 pub struct UTF8<'a> {
     slice: &'a str,
     indent: usize, // usize::MAX => single line

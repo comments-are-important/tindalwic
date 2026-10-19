@@ -1,4 +1,10 @@
 {
+    "rust-analyzer.cargo.features": "all",
+    "search.exclude": {
+        "Cargo.lock": true,
+        "target": true
+    },
+    "cSpell.spellCheckOnlyWorkspaceFiles": true,
     "cSpell.words": [
         "bindgen",
         "binstall",
@@ -11,6 +17,7 @@
         "lldb",
         "msrv",
         "newtype",
+        "peekable",
         "pkgid",
         "punct",
         "pushln",
@@ -26,12 +33,5 @@
         "trybuild",
         "vadimcn",
         "Zipf"
-    ],
-    "editor.hover.delay": 3000,
-    "rust-analyzer.cargo.features": "all",
-    "search.exclude": {
-        "Cargo.lock": true,
-        "target": true
-    },
-    "cSpell.spellCheckOnlyWorkspaceFiles": true
+    ]
 }

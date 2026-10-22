@@ -7,7 +7,8 @@
 
 use heck::{ToSnakeCase, ToUpperCamelCase};
 use proc_macro::TokenStream as CompilerStream;
-use proc_macro2::{Group, Span, TokenStream};
+use proc_macro2::extra::DelimSpan;
+use proc_macro2::{Delimiter, Group, Punct, Span, TokenStream};
 use quote::{ToTokens, quote};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
@@ -317,17 +318,24 @@ fn reveal(cursor: Cursor) -> String {
 }
 
 struct Subst<'a> {
-    tilde: Span,
+    literal: bool,
+    marker: Span,
     ident: Ident,
     next: Cursor<'a>,
 }
 impl<'a> Subst<'a> {
     fn parse(input: Cursor<'a>) -> Option<Self> {
         if let Some((punct, one)) = input.punct() {
-            if '~' == punct.as_char() {
+            let literal = '@' == punct.as_char();
+            if literal || '~' == punct.as_char() {
                 if let Some((ident, next)) = one.ident() {
-                    let tilde = input.span().join(one.span()).unwrap_or(input.span());
-                    return Some(Subst { tilde, ident, next });
+                    let marker = input.span().join(one.span()).unwrap_or(input.span());
+                    return Some(Subst {
+                        literal,
+                        marker,
+                        ident,
+                        next,
+                    });
                 }
             }
         }
@@ -341,10 +349,14 @@ impl<'a> Subst<'a> {
         match replace(&ident) {
             Some(subst) => {
                 // eprintln!("Subst: {ident} -> {subst}");
-                output.extend(Ident::new(subst, self.tilde).to_token_stream());
+                output.extend(if self.literal {
+                    LitStr::new(subst, self.marker).to_token_stream()
+                } else {
+                    Ident::new(subst, self.marker).to_token_stream()
+                });
             }
             None => {
-                errors.new(self.tilde, "expected a placeholder");
+                errors.new(self.marker, "expected a placeholder");
                 output.extend(self.ident.to_token_stream());
             }
         }
@@ -403,20 +415,86 @@ impl<'a> Paste<'a> {
     }
 }
 
-#[proc_macro]
-pub fn each(input: CompilerStream) -> CompilerStream {
-    let mut errors = Errors::default();
-    let buffer = TokenBuffer::new(input);
-    let mut cursor = buffer.begin();
-    let mut requested = HashMap::new();
-    let mut unexpected = false;
-    let mut previous: Option<Cursor> = None;
-    while !cursor.eof() {
-        if previous == Some(cursor) {
-            panic!("no advancement");
+#[derive(Clone, Copy)]
+struct Wrap {
+    delim: Option<Delimiter>,
+    span: Option<DelimSpan>,
+}
+impl Wrap {
+    fn outermost() -> Self {
+        Wrap {
+            delim: Some(Delimiter::None),
+            span: None,
         }
-        previous = Some(cursor);
-        if let Some((ident, next)) = cursor.ident() {
+    }
+    fn some(delim: Delimiter, span: DelimSpan) -> Self {
+        Wrap {
+            delim: Some(delim),
+            span: Some(span),
+        }
+    }
+    fn parse(&mut self, punct: &Punct) -> bool {
+        match punct.as_char() {
+            '^' => {
+                self.delim = None;
+                self.span = None;
+                true
+            }
+            '%' => true,
+            _ => false,
+        }
+    }
+    fn run(&self, stream: TokenStream) -> TokenStream {
+        match self.delim {
+            None => stream,
+            Some(delim) => {
+                let mut wrapped = Group::new(delim, stream);
+                if let Some(span) = self.span {
+                    wrapped.set_span(span.join());
+                }
+                wrapped.to_token_stream()
+            }
+        }
+    }
+}
+
+#[proc_macro]
+pub fn template(input: CompilerStream) -> CompilerStream {
+    let buffer = TokenBuffer::new(input);
+    let mut errors = Errors::default();
+    let output = transcribe(buffer.begin(), Wrap::outermost(), &mut errors);
+    return errors.and(output.into());
+}
+
+fn transcribe(mut cursor: Cursor, wrap: Wrap, errors: &mut Errors) -> TokenStream {
+    if let Some((punct, next)) = cursor.punct() {
+        if '?' == punct.as_char() {
+            return each(next, wrap, errors);
+        }
+    }
+    let mut output = TokenStream::new();
+    while !cursor.eof() {
+        cursor = if let Some((group, delim, span, next)) = cursor.any_group() {
+            output.extend(transcribe(group, Wrap::some(delim, span), errors));
+            next
+        } else if let Some((tree, next)) = cursor.token_tree() {
+            output.extend(tree.to_token_stream());
+            next
+        } else {
+            // should be unreachable: token_tree should be Some whenever !eof
+            errors.new(cursor.span(), "unexpected cursor API behavior");
+            break; // failing to advance would loop forever
+        }
+    }
+    wrap.run(output)
+}
+
+fn each(mut cursor: Cursor, mut wrap: Wrap, errors: &mut Errors) -> TokenStream {
+    let mut requested = HashMap::new();
+    let mut explained = false;
+    while !cursor.eof() {
+        // eprintln!("each ({})", reveal(cursor));
+        cursor = if let Some((ident, next)) = cursor.ident() {
             let name = ident.to_string();
             if let Some(each) = TRUTH.get_entry(&name).map(Each::from_phf) {
                 requested.insert(each.key, each);
@@ -432,46 +510,44 @@ pub fn each(input: CompilerStream) -> CompilerStream {
                     errors.span(ident, "unknown");
                 }
             }
-            cursor = next;
-            continue;
-        }
-        if let Some((punct, next)) = cursor.punct() {
-            match punct.as_char() {
-                ',' => {
-                    // commas are ignored, not required
-                    cursor = next;
-                    continue;
-                }
-                '^' => {
+            next
+        } else if let Some((punct, next)) = cursor.punct() {
+            if ',' != punct.as_char() {
+                // commas are ignored, not required
+                if wrap.parse(&punct) {
                     cursor = next;
                     break;
+                } else {
+                    errors.span(punct, "unhandled");
                 }
-                _ => { /* fall through to say unhandled */ }
             }
-        }
-        if let Some((_, next)) = cursor.token_tree() {
+            next
+        } else if let Some((_, next)) = cursor.token_tree() {
             errors.new(cursor.span(), "unhandled");
-            unexpected = true;
-            cursor = next;
-            continue;
+            if !explained {
+                let mut choices = HashSet::new();
+                for facts in TRUTH.values() {
+                    choices.insert(facts.selector);
+                }
+                for key in TRUTH.keys() {
+                    choices.insert(key);
+                }
+                let message = format!("allowed before the `^` marker: {:?}", choices);
+                errors.new(Span::call_site(), message);
+                explained = true;
+            }
+            next
+        } else {
+            // should be unreachable: token_tree should be Some whenever !eof
+            errors.new(cursor.span(), "unexpected cursor API behavior");
+            break; // failing to advance would loop forever
         }
-    }
-    if unexpected {
-        let mut choices = HashSet::new();
-        for facts in TRUTH.values() {
-            choices.insert(facts.selector);
-        }
-        for key in TRUTH.keys() {
-            choices.insert(key);
-        }
-        let message = format!("allowed before the `^`: {:?}", choices);
-        errors.new(Span::call_site(), message);
     }
     let mut output = TokenStream::new();
     for each in requested.values() {
-        output.extend(each.one(cursor, &mut errors));
+        output.extend(each.one(cursor, wrap, errors));
     }
-    errors.and(output.into())
+    output // individually wrapped, not here
 }
 
 struct Each {
@@ -491,63 +567,36 @@ impl Each {
         let snake = key.to_snake_case();
         Each { key, facts, snake }
     }
-    fn one(&self, mut input: Cursor, errors: &mut Errors) -> TokenStream {
+    fn one(&self, mut cursor: Cursor, mut wrap: Wrap, errors: &mut Errors) -> TokenStream {
         let mut output = TokenStream::new();
-        loop {
-            // eprintln!("Each::one ({})", reveal(input));
-            if let Some(paste) = Paste::parse(input) {
-                input = paste.run(|it| self.replace(it), &mut output, errors);
-                continue;
-            }
-            if let Some(subst) = Subst::parse(input) {
-                input = subst.run(|it| self.replace(it), &mut output, errors);
-                continue;
-            }
-            // if let Some((literal, next)) = input.literal() {
-            //     output.extend(
-            //         if let Ok(string) = parse2::<LitStr>(literal.to_token_stream()) {
-            //             let sub = self.replaced(string.value());
-            //             LitStr::new(&sub, literal.span()).to_token_stream()
-            //         } else {
-            //             literal.to_token_stream()
-            //         },
-            //     );
-            //     input = next;
-            //     continue;
-            // }
-            if let Some((group, delim, span, next)) = input.any_group() {
-                if let Some((punct, peek)) = group.punct() {
-                    if '^' == punct.as_char() {
-                        let mut collect = TokenStream::new();
-                        for entry in self.facts.map.entries() {
-                            let fact = Fact::from_phf(self, entry);
-                            collect.extend(fact.one(&self, peek, errors));
-                        }
-                        let mut expanded = Group::new(delim, collect);
-                        expanded.set_span(span.join());
-                        output.extend(expanded.to_token_stream());
-                        input = next;
-                        continue;
-                    }
+        if let Some((punct, next)) = cursor.punct() {
+            if wrap.parse(&punct) {
+                for entry in self.facts.map.entries() {
+                    let fact = Fact::from_phf(self, entry);
+                    output.extend(fact.one(next, wrap, errors));
                 }
-                let stream = self.one(group, errors);
-                let mut expanded = Group::new(delim, stream);
-                expanded.set_span(span.join());
-                output.extend(expanded.to_token_stream());
-                input = next;
-                continue;
+                return output; // individually wrapped, not here
             }
-            if let Some((tree, next)) = input.token_tree() {
-                output.extend(tree.to_token_stream());
-                input = next;
-                continue;
-            }
-            if !input.eof() {
-                errors.new(input.span(), "unhandled");
-            }
-            break;
         }
-        output
+        while !cursor.eof() {
+            // eprintln!("Each::one ({})", reveal(input));
+            cursor = if let Some(paste) = Paste::parse(cursor) {
+                paste.run(|it| self.replace(it), &mut output, errors)
+            } else if let Some(subst) = Subst::parse(cursor) {
+                subst.run(|it| self.replace(it), &mut output, errors)
+            } else if let Some((group, delim, span, next)) = cursor.any_group() {
+                output.extend(self.one(group, Wrap::some(delim, span), errors));
+                next
+            } else if let Some((tree, next)) = cursor.token_tree() {
+                output.extend(tree.to_token_stream());
+                next
+            } else {
+                // should be unreachable: token_tree should be Some whenever !eof
+                errors.new(cursor.span(), "unexpected cursor API behavior");
+                break; // failing to advance would loop forever
+            }
+        }
+        wrap.run(output)
     }
 }
 
@@ -575,18 +624,28 @@ impl<'a> Fact<'a> {
             camel,
         }
     }
-    fn one(&self, each: &Each, mut input: Cursor, errors: &mut Errors) -> TokenStream {
+    fn one(&self, mut cursor: Cursor, wrap: Wrap, errors: &mut Errors) -> TokenStream {
         let mut output = TokenStream::new();
-        while !input.eof() {
+        if let Some((punct, next)) = cursor.punct() {
+            if '?' == punct.as_char() {
+                // collect tokens until ^ or % via wrap.parse()
+                let pattern = ""; // parse collection as Type
+                for entry in self.each.facts.map.entries() {
+                    let fact = Fact::from_phf(self.each, entry);
+                    if pattern == fact.key || pattern == fact.value || pattern == self.each.key {
+                        output.extend(fact.one(next, wrap, errors));
+                    }
+                }
+                return output; // individually wrapped, not here
+            }
+        }
+        while !cursor.eof() {
             // eprintln!("Fact::one ({})", reveal(input));
-            if let Some(paste) = Paste::parse(input) {
-                input = paste.run(|it| self.replace(it), &mut output, errors);
-                continue;
-            }
-            if let Some(subst) = Subst::parse(input) {
-                input = subst.run(|it| self.replace(it), &mut output, errors);
-                continue;
-            }
+            cursor = if let Some(paste) = Paste::parse(cursor) {
+                paste.run(|it| self.replace(it), &mut output, errors)
+            } else if let Some(subst) = Subst::parse(cursor) {
+                subst.run(|it| self.replace(it), &mut output, errors)
+            } else
             // if let Some((literal, next)) = input.literal() {
             //     output.extend(
             //         if let Ok(string) = parse2::<LitStr>(literal.to_token_stream()) {
@@ -599,24 +658,18 @@ impl<'a> Fact<'a> {
             //     input = next;
             //     continue;
             // }
-            if let Some((group, delim, span, next)) = input.any_group() {
-                let stream = self.one(each, group, errors);
-                let mut expanded = Group::new(delim, stream);
-                expanded.set_span(span.join());
-                output.extend(expanded.to_token_stream());
-                input = next;
-                continue;
-            }
-            if let Some((tree, next)) = input.token_tree() {
+            if let Some((group, delim, span, next)) = cursor.any_group() {
+                output.extend(self.one(group, Wrap::some(delim, span), errors));
+                next
+            } else if let Some((tree, next)) = cursor.token_tree() {
                 output.extend(tree.to_token_stream());
-                input = next;
-                continue;
+                next
+            } else {
+                // should be unreachable: token_tree should be Some whenever !eof
+                errors.new(cursor.span(), "unexpected cursor API behavior");
+                break; // failing to advance would loop forever
             }
-            if !input.eof() {
-                errors.new(input.span(), "unhandled");
-            }
-            break;
         }
-        output
+        wrap.run(output)
     }
 }

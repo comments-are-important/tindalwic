@@ -161,6 +161,32 @@ impl<H: FieldHelp> Flags<H> {
     }
 }
 
+tindalwic_macros::each! {Text,List,Group,Member,File ^
+    #[derive(Clone, Copy, Debug, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
+    #[serde(field_identifier, rename_all = "lowercase")]
+    #[strum(serialize_all = "lowercase")]
+    enum Each~Fields { ^ ~Name, }
+}
+
+tindalwic_macros::each! { Data ^
+    #[derive(Clone, Copy, Debug, Deserialize, IntoStaticStr, VariantNames)]
+    #[serde(variant_identifier)]
+    enum Each~Variants { ^ ~Name, }
+}
+
+// #[tindalwic_macros::each(Text,List,File)]
+// impl FieldHelp for FieldsᛳEach {
+//     const KIND: &'static str = "ᛳEach";
+//     fn num(self) -> usize { self as usize }
+//     fn should<'a>(this: &ᛳEach<ᛲ>) -> Flags<FieldsᛳEach> {
+//         FieldsᛳEach::assign(|field| match field { `
+//             [ ? UTF8<ᛲ>         ^ FieldsᛳEach::ᛳName => !this.ᛳname.is_empty(), ]
+//             [ ? Option<UTF8<ᛲ>> ^ FieldsᛳEach::ᛳName => this.ᛳname.is_some(), ]
+//             [ ? bool            ^ FieldsᛳEach::ᛳName => this.ᛳname, ]
+//         })
+//     }
+// }
+
 trait FieldHelp: EnumCount + VariantArray + VariantNames + Into<&'static str> + Copy {
     const KIND: &'static str;
     fn num(self) -> usize;
@@ -197,13 +223,6 @@ trait VariantHelp: VariantNames + Into<&'static str> + Copy {
 
 macro_rules! field_help {
     ($helper:ident<$type:ident>) => {
-        #[tindalwic_macros::inject_unit_variants($type)]
-        #[derive(
-            Clone, Copy, Debug, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames,
-        )]
-        #[serde(field_identifier, rename_all = "lowercase")]
-        #[strum(serialize_all = "lowercase")]
-        enum $helper {}
         impl FieldHelp for $helper {
             const KIND: &'static str = stringify!($type);
             fn num(self) -> usize {
@@ -214,10 +233,6 @@ macro_rules! field_help {
 }
 macro_rules! variant_help {
     ($helper:ident<$type:ident>) => {
-        #[tindalwic_macros::inject_unit_variants($type)]
-        #[derive(Clone, Copy, Debug, Deserialize, IntoStaticStr, VariantNames)]
-        #[serde(variant_identifier)]
-        enum $helper {}
         impl VariantHelp for $helper {
             const KIND: &'static str = stringify!($type);
             fn num(self) -> usize {

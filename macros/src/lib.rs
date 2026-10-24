@@ -239,6 +239,8 @@ impl ParsedTypeMap {
         for (name, link) in entity.facets.iter().copied() {
             let resolved = if link == "str" {
                 "&'a str".to_string()
+            } else if entity.category == "array" {
+                format!("&'a [Cell<{link}<'a>>]")
             } else if let Some(found) = ENTITIES.get(link) {
                 match found.category {
                     "option" => format!("Option<{}<'a>>", found.facets[0].1),
@@ -286,9 +288,11 @@ impl ParsedTypeMap {
     }
 }
 impl Entity {
-    fn check_selector(&self, expected: &'static str, errors: &mut Errors) {
-        if self.category != expected {
-            errors.new(Span::call_site(), format!("expected {expected}"));
+    fn check_selector(&self, fields: bool, errors: &mut Errors) {
+        if fields && self.category == "enum" {
+            errors.new(Span::call_site(), format!("expected fields"));
+        } else if !fields && self.category != "enum" {
+            errors.new(Span::call_site(), format!("expected variants"));
         }
     }
     fn check_lifetime(&self, generics: &Generics, errors: &mut Errors) {
@@ -314,7 +318,7 @@ pub fn check_fields(attr: CompilerStream, item: CompilerStream) -> CompilerStrea
         Ok(input) => match ENTITIES.get(&input.ident.to_string()) {
             None => errors.span(&input.ident, "unknown struct"),
             Some(truth) => {
-                truth.check_selector("struct", &mut errors);
+                truth.check_selector(true, &mut errors);
                 truth.check_lifetime(&input.generics, &mut errors);
                 let mut expected = ParsedTypeMap::new(truth, &mut errors);
                 for field in &input.fields {
@@ -342,7 +346,7 @@ pub fn check_variants(attr: CompilerStream, item: CompilerStream) -> CompilerStr
         Ok(input) => match ENTITIES.get(&input.ident.to_string()) {
             None => errors.span(&input.ident, "unknown enum"),
             Some(truth) => {
-                truth.check_selector("enum", &mut errors);
+                truth.check_selector(false, &mut errors);
                 truth.check_lifetime(&input.generics, &mut errors);
                 let mut expected = ParsedTypeMap::new(truth, &mut errors);
                 for variant in &input.variants {
@@ -435,7 +439,7 @@ impl<'a> Paste<'a> {
     fn parse(input: Cursor<'a>) -> Option<Self> {
         if let Some((before, one)) = input.ident() {
             if let Some((punct, two)) = one.punct() {
-                if '$' == punct.as_char() {
+                if '@' == punct.as_char() {
                     if let Some((after, next)) = two.ident() {
                         let tilde = input.span().join(two.span()).unwrap_or(one.span());
                         return Some(Paste {
@@ -616,8 +620,8 @@ struct Each {
 impl Each {
     fn from_phf((&key, entity): (&&'static str, &'static Entity)) -> Self {
         let mut replace = Replace::new();
-        replace.insert("Each", key.to_upper_camel_case());
-        replace.insert("each", key.to_snake_case());
+        replace.insert("Entity", key.to_upper_camel_case());
+        replace.insert("entity", key.to_snake_case());
         Each {
             key,
             entity,

@@ -139,8 +139,8 @@ tindalwic_macros::template! { ? struct ^
 
     #[derive(Clone, Copy, Debug, Deserialize)]
     #[serde(field_identifier, rename_all = "lowercase")]
-    enum Each$Fields { [^ $Name, ] }
-    impl Each$Fields {
+    enum Entity@Fields { [^ $Name, ] }
+    impl Entity@Fields {
         const NAMES: &'static [&'static str] = &[[^ ~Name, ]];
     }
 
@@ -150,8 +150,8 @@ tindalwic_macros::template! { ? enum ^
 
     #[derive(Clone, Copy, Debug, Deserialize)]
     #[serde(variant_identifier)]
-    enum Each$Variants { [ ^ $Name, ] }
-    impl Each$Variants {
+    enum Entity@Variants { [ ^ $Name, ] }
+    impl Entity@Variants {
         const NAMES: &'static [&'static str] = &[[^ ~Name, ]];
         fn name(&self) -> &'static str { Self::NAMES[(*self) as usize] }
 
@@ -160,7 +160,7 @@ tindalwic_macros::template! { ? enum ^
             S: serde::ser::Serializer,
             W: ?Sized + Serialize,
         {
-            s.serialize_newtype_variant(~Each, (*self) as u32, self.name(), value)
+            s.serialize_newtype_variant(~Entity, (*self) as u32, self.name(), value)
         }
     }
 }

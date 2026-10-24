@@ -9,87 +9,87 @@ use tindalwic::parse::{Build, Parse};
 use tindalwic::{Data, File, Group, List, Member, Text};
 
 tindalwic_macros::template! { ? enum ^
-    struct Each$Ser<'a>($Each<'a>);
-    impl <'a> Serialize for Each$Ser<'a> {
+    struct Entity@Ser<'a>($Entity<'a>);
+    impl <'a> Serialize for Entity@Ser<'a> {
         fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
-            let Each$Ser(this) = self;
+            let Entity@Ser(this) = self;
             match this { { ^
-                $Each::$Name($link) => Each$Variants::$Name.serialize(s, &Link$Ser(*$link)),
+                $Entity::$Name($link) => Entity@Variants::$Name.serialize(s, &Link@Ser(*$link)),
             } }
         }
     }
-    struct Each$De<'a, 'b>(&'b mut dyn Build<'a>);
-    impl<'de, 'a, 'b> DeserializeSeed<'de> for Each$De<'a, 'b> {
-        type Value = $Each<'a>;
+    struct Entity@De<'a, 'b>(&'b mut dyn Build<'a>);
+    impl<'de, 'a, 'b> DeserializeSeed<'de> for Entity@De<'a, 'b> {
+        type Value = $Entity<'a>;
         fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
-            d.deserialize_enum(~Each, Each$Variants::NAMES, self)
+            d.deserialize_enum(~Entity, Entity@Variants::NAMES, self)
         }
     }
-    impl<'de, 'a, 'b> Visitor<'de> for Each$De<'a, 'b> {
-        type Value = $Each<'a>;
+    impl<'de, 'a, 'b> Visitor<'de> for Entity@De<'a, 'b> {
+        type Value = $Entity<'a>;
         fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-            let names = Each$Variants::NAMES.join(" | ");
-            write!(out, "Verbose {}: {names}", ~Each)
+            let names = Entity@Variants::NAMES.join(" | ");
+            write!(out, "Verbose {}: {names}", ~Entity)
         }
         fn visit_enum<A: EnumAccess<'de>>(self, data: A) -> StdResult<Self::Value, A::Error> {
-            let Each$De(build) = self;
-            let (this, access) = data.variant::<Each$Variants>()?;
+            let Entity@De(build) = self;
+            let (this, access) = data.variant::<Entity@Variants>()?;
             Ok(match this { { ^
-                Each$Variants::$Name => $Each::$Name(access.newtype_variant_seed(Link$De(build))?),
+                Entity@Variants::$Name => $Entity::$Name(access.newtype_variant_seed(Link@De(build))?),
             } })
         }
     }
 }
 
 tindalwic_macros::template! { ? struct ^
-    struct Each$Ser<'a>($Each<'a>);
-    impl<'a> Serialize for Each$Ser<'a> {
+    struct Entity@Ser<'a>($Entity<'a>);
+    impl<'a> Serialize for Entity@Ser<'a> {
         fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> {
-            let Each$Ser(this) = self;
-            let mut fields = s.serialize_struct(~Each, Each$Fields::NAMES.len())?;
+            let Entity@Ser(this) = self;
+            let mut fields = s.serialize_struct(~Entity, Entity@Fields::NAMES.len())?;
             { ^ fields.serialize_field(~name, &
                 ( ? bool    ^ this.$name )
-                ( ? else    ^ Link$Ser(this.$name) )
+                ( ? else    ^ Link@Ser(this.$name) )
             )?; }
             fields.end()
         }
     }
-    struct Each$De<'a, 'b>(&'b mut dyn Build<'a>);
-    impl<'de, 'a, 'b> DeserializeSeed<'de> for Each$De<'a, 'b> {
-        type Value = $Each<'a>;
+    struct Entity@De<'a, 'b>(&'b mut dyn Build<'a>);
+    impl<'de, 'a, 'b> DeserializeSeed<'de> for Entity@De<'a, 'b> {
+        type Value = $Entity<'a>;
         fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
-            d.deserialize_struct(~Each, Each$Fields::NAMES, self)
+            d.deserialize_struct(~Entity, Entity@Fields::NAMES, self)
         }
     }
-    impl<'de, 'a, 'b> Visitor<'de> for Each$De<'a, 'b> {
-        type Value = $Each<'a>;
+    impl<'de, 'a, 'b> Visitor<'de> for Entity@De<'a, 'b> {
+        type Value = $Entity<'a>;
         fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-            let names = Each$Fields::NAMES.join(", ");
-            write!(out, "Verbose {}: {names}", ~Each)
+            let names = Entity@Fields::NAMES.join(", ");
+            write!(out, "Verbose {}: {names}", ~Entity)
         }
         fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> StdResult<Self::Value, A::Error> {
-            let Each$De(build) = self;
-            let mut result = $Each::default();
-            let mut seen = [false;Each$Fields::NAMES.len()];
+            let Entity@De(build) = self;
+            let mut result = $Entity::default();
+            let mut seen = [false;Entity@Fields::NAMES.len()];
             while let Some(field) = map.next_key()? {
                 if seen[field as usize] {
-                    return Err(A::Error::duplicate_field(Each$Fields::NAMES[field as usize]));
+                    return Err(A::Error::duplicate_field(Entity@Fields::NAMES[field as usize]));
                 }
                 seen[field as usize] = true;
                 match field { { ^
-                    ( ? bool ^ Each$Fields::$Name => result.$name = map.next_value()?, )
-                    ( ? else ^ Each$Fields::$Name => result.$name = map.next_value_seed(Link$De(build))?, )
+                    ( ? bool ^ Entity@Fields::$Name => result.$name = map.next_value()?, )
+                    ( ? else ^ Entity@Fields::$Name => result.$name = map.next_value_seed(Link@De(build))?, )
                 } }
             }
             Ok(result)
         }
         fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> StdResult<Self::Value, A::Error> {
-            let Each$De(build) = self;
-            let mut result = $Each::default();
+            let Entity@De(build) = self;
+            let mut result = $Entity::default();
             { ^
                 ( ? bool ^ result.$name = seq.next_element()? )
-                ( ? else ^ result.$name = seq.next_element_seed(Link$De(build))? )
-                    .ok_or_else(|| A::Error::invalid_length(Each$Fields::$Name as usize, &Each$De(build)))?;
+                ( ? else ^ result.$name = seq.next_element_seed(Link@De(build))? )
+                    .ok_or_else(|| A::Error::invalid_length(Entity@Fields::$Name as usize, &Entity@De(build)))?;
             }
             Ok(result)
         }
@@ -97,38 +97,38 @@ tindalwic_macros::template! { ? struct ^
 }
 
 tindalwic_macros::template! { ? array ^
-    struct Each$Ser<'a>($Each<'a>);
-    impl<'a> Serialize for Each$Ser<'a> {
+    struct Entity@Ser<'a>($Entity<'a>);
+    impl<'a> Serialize for Entity@Ser<'a> {
         fn serialize<S: Serializer>(&self, s: S) -> StdResult<S::Ok, S::Error> { %
-            let Each$Ser(this) = self;
+            let Entity@Ser(this) = self;
             let mut seq = s.serialize_seq(Some(this.len()))?;
             for item in this {
-                seq.serialize_element(&Link$Ser(item))?;
+                seq.serialize_element(&Link@Ser(item))?;
             }
             seq.end()
         }
     }
-    struct Each$De<'a, 'b>(&'b mut dyn Build<'a>);
-    impl<'de, 'a, 'b> DeserializeSeed<'de> for Each$De<'a, 'b> {
-        type Value = $Each<'a>;
+    struct Entity@De<'a, 'b>(&'b mut dyn Build<'a>);
+    impl<'de, 'a, 'b> DeserializeSeed<'de> for Entity@De<'a, 'b> {
+        type Value = $Entity<'a>;
         fn deserialize<D: Deserializer<'de>>(self, d: D) -> StdResult<Self::Value, D::Error> {
             d.deserialize_seq(self)
         }
     }
-    impl<'de, 'a, 'b> Visitor<'de> for Each$De<'a, 'b> {
-        type Value = $Each<'a>;
+    impl<'de, 'a, 'b> Visitor<'de> for Entity@De<'a, 'b> {
+        type Value = $Entity<'a>;
         fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
-            let kind = ~Each;
+            let kind = ~Entity;
             write!(out, "sequence of Verbose {kind}")
         }
         fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> StdResult<Self::Value, A::Error> { %
-            let Each$De(build) = self;
+            let Entity@De(build) = self;
             let mut count = 0usize;
-            while let Some(item) = seq.next_element_seed(Link$De(build))? {
-                build.push_$link(item).map_err(A::Error::custom)?;
+            while let Some(item) = seq.next_element_seed(Link@De(build))? {
+                build.push_@link(item).map_err(A::Error::custom)?;
                 count += 1;
             }
-            Ok(build.finish_$each(count).map_err(A::Error::custom)?)
+            Ok(build.finish_@entity(count).map_err(A::Error::custom)?)
         }
     }
 }

@@ -104,114 +104,172 @@ pub fn indent(input: CompilerStream) -> CompilerStream {
 // that need to know about precious fields to keep them in sync and only getting
 // inscrutable runtime weirdness is super annoying. so making it compile-time...
 
-struct Facts {
-    lifetime: &'static str,
-    selector: &'static str,
-    map: phf::Map<&'static str, &'static str>,
+struct Entity {
+    category: &'static str,
+    facets: &'static [(&'static str, &'static str)],
 }
-static TRUTH: phf::Map<&'static str, Facts> = phf::phf_map! {
-    "File" => Facts {
-        lifetime: "<'a>",
-        selector: "struct",
-        map: phf::phf_map! {
-            "shebang" => "Option<UTF8<'a>>",
-            "prolog" => "Option<UTF8<'a>>",
-            "groups" => "Groups<'a>",
-        },
+static ENTITIES: phf::OrderedMap<&'static str, Entity> = phf::phf_ordered_map! {
+    "File" => Entity {
+        category: "struct",
+        facets: &[
+            ("shebang", "Comment"),
+            ("prolog", "Comment"),
+            ("groups", "Groups"),
+        ],
     },
-    "Groups" => Facts {
-        lifetime: "<'a>",
-        selector: "struct",
-        map: phf::phf_map! {
-            "slice" => "&'a [Cell<Group<'a>>]",
-        },
+    "Groups" => Entity {
+        category: "array",
+        facets: &[
+            ("items", "Group"),
+        ],
     },
-    "Group" => Facts {
-        lifetime: "<'a>",
-        selector: "struct",
-        map: phf::phf_map! {
-            "heading" => "Option<UTF8<'a>>",
-            "members" => "Members<'a>",
-        },
+    "Group" => Entity {
+        category: "struct",
+        facets: &[
+            ("heading", "Comment"),
+            ("members", "Members"),
+        ],
     },
-    "Members" => Facts {
-        lifetime: "<'a>",
-        selector: "struct",
-        map: phf::phf_map! {
-            "slice" => "&'a [Cell<Member<'a>>]",
-        },
+    "Members" => Entity {
+        category: "array",
+        facets: &[
+            ("items", "Member"),
+        ],
     },
-    "Member" => Facts {
-        lifetime: "<'a>",
-        selector: "struct",
-        map: phf::phf_map! {
-            "comment" => "Option<UTF8<'a>>",
-            "name" => "UTF8<'a>",
-            "longer" => "bool",
-            "data" => "Data<'a>",
-        },
+    "Member" => Entity {
+        category: "struct",
+        facets: &[
+            ("comment", "Comment"),
+            ("name", "Lines"),
+            ("longer", "bool"),
+            ("data", "Data"),
+        ],
     },
-    "Data" => Facts {
-        lifetime: "<'a>",
-        selector: "enum",
-        map: phf::phf_map! {
-            "Text" => "Text<'a>",
-            "List" => "List<'a>",
-        },
+    "Data" => Entity {
+        category: "enum",
+        facets: &[
+            ("text", "Text"),
+            ("list", "List"),
+        ],
     },
-    "List" => Facts {
-        lifetime: "<'a>",
-        selector: "struct",
-        map: phf::phf_map! {
-            "prolog" => "Option<UTF8<'a>>",
-            "groups" => "Groups<'a>",
-            "epilog" => "Option<UTF8<'a>>",
-        },
+    "List" => Entity {
+        category: "struct",
+        facets: &[
+            ("prolog", "Comment"),
+            ("groups", "Groups"),
+            ("epilog", "Comment"),
+        ],
     },
-    "Text" => Facts {
-        lifetime: "<'a>",
-        selector: "struct",
-        map: phf::phf_map! {
-            "lines" => "UTF8<'a>",
-            "epilog" => "Option<UTF8<'a>>",
-            "verbose" => "bool",
-        },
+    "Text" => Entity {
+        category: "struct",
+        facets: &[
+            ("lines", "Lines"),
+            ("epilog", "Comment"),
+            ("verbose", "bool"),
+        ],
     },
-    "UTF8" => Facts {
-        lifetime: "<'a>",
-        selector: "struct",
-        map: phf::phf_map! {
-            "slice" => "&'a str",
-            "indent" => "usize",
-        },
+    "Comment" => Entity {
+        category: "option",
+        facets: &[
+            ("inner", "Lines"),
+        ]
+    },
+    "Lines" => Entity {
+        category: "opaque",
+        facets: &[
+            ("slice", "str"),
+            ("indent", "usize"),
+        ],
     },
 };
+
+#[cfg(test)]
+mod entities {
+    use super::{ENTITIES, ToSnakeCase, ToUpperCamelCase};
+
+    #[test]
+    fn correct_categories_and_cases() {
+        fn nope(message: &'static str, key: &'static str, detail: &'static str) -> bool {
+            eprintln!("{message} @ {key}: {detail}");
+            false
+        }
+        for (&key, entity) in ENTITIES.entries() {
+            assert!(match entity.category {
+                "option" => {
+                    assert_eq!(1, entity.facets.len());
+                    assert_eq!("inner", entity.facets[0].0);
+                    true
+                }
+                "enum" => true,
+                "struct" => true,
+                "array" => true,
+                "opaque" => true,
+                _ => nope("category", key, entity.category),
+            });
+            assert_eq!(key, key.to_upper_camel_case());
+            for (name, link) in entity.facets.iter().copied() {
+                let expected = if entity.category == "enum" {
+                    name.to_upper_camel_case()
+                } else {
+                    name.to_snake_case()
+                };
+                assert_eq!(name, expected);
+                let found = ENTITIES.get(link).is_some();
+                let snake = link == link.to_snake_case();
+                assert!(match (found, snake) {
+                    (false, true) => true,
+                    (true, false) => true,
+                    _ => nope("link", key, link),
+                });
+            }
+        }
+    }
+}
+
 struct ParsedType {
+    link: &'static str,
     parsed: Type,
-    value: &'static str,
 }
 struct ParsedTypeMap {
     map: HashMap<&'static str, ParsedType>,
 }
 impl ParsedTypeMap {
-    fn new(facts: &Facts, errors: &mut Errors) -> Self {
+    fn new(entity: &Entity, errors: &mut Errors) -> Self {
         let mut map = HashMap::new();
-        for (&key, &value) in facts.map.entries() {
-            match parse_str::<Type>(value) {
+        for (name, link) in entity.facets.iter().copied() {
+            let resolved = if link == "str" {
+                "&'a str".to_string()
+            } else if let Some(found) = ENTITIES.get(link) {
+                match found.category {
+                    "option" => format!("Option<{}<'a>>", found.facets[0].1),
+                    _ => format!("{link}<'a>"),
+                }
+            } else {
+                link.to_string()
+            };
+            match parse_str::<Type>(&resolved) {
                 Err(err) => errors.push(err),
                 Ok(parsed) => {
-                    map.insert(key, ParsedType { parsed, value });
+                    map.insert(name, ParsedType { parsed, link });
                 }
             }
         }
         ParsedTypeMap { map }
     }
     fn remove(&mut self, ident: &Ident, check: &Type, message: &str, errors: &mut Errors) {
-        let key = ident.to_string();
+        let key = ident.to_string().to_snake_case();
         match self.map.remove(key.as_str()) {
-            None => errors.span(ident, format!("unexpected {message}")),
+            None => errors.span(ident, format!("unexpected {message} {key}")),
             Some(found) if check != &found.parsed => {
-                errors.span(check, format!("expected `{}`", found.value))
+                let expected = found.parsed.to_token_stream().to_string();
+                let actual = check.to_token_stream().to_string();
+                errors.span(
+                    check,
+                    format!(
+                        "wrong `{}`, expected {expected}, actual {actual}",
+                        found.link
+                    ),
+                )
             }
             _ => {}
         }
@@ -221,23 +279,26 @@ impl ParsedTypeMap {
             let missing: Vec<_> = self
                 .map
                 .iter()
-                .map(|(&key, parsed)| format!("{key}: {}", parsed.value))
+                .map(|(&key, parsed)| format!("{key}: {}", parsed.link))
                 .collect();
             errors.span(ident, format!("missing: {:?}", missing));
         }
     }
 }
-impl Facts {
+impl Entity {
     fn check_selector(&self, expected: &'static str, errors: &mut Errors) {
-        if self.selector != expected {
+        if self.category != expected {
             errors.new(Span::call_site(), format!("expected {expected}"));
         }
     }
     fn check_lifetime(&self, generics: &Generics, errors: &mut Errors) {
-        match parse_str::<Generics>(self.lifetime) {
-            Err(err) => errors.push(err),
-            Ok(parsed) if &parsed == generics => {}
-            _ => errors.span(generics, format!("expected: {}", self.lifetime)),
+        let actual: String = generics
+            .to_token_stream()
+            .to_string()
+            .split_ascii_whitespace()
+            .collect();
+        if "<'a>" != actual {
+            errors.span(generics, format!("expected: <'a> (not {actual})"));
         }
     }
 }
@@ -250,7 +311,7 @@ pub fn check_fields(attr: CompilerStream, item: CompilerStream) -> CompilerStrea
     }
     match ItemStruct::parse.parse(item.clone()) {
         Err(err) => errors.push(err),
-        Ok(input) => match TRUTH.get(&input.ident.to_string()) {
+        Ok(input) => match ENTITIES.get(&input.ident.to_string()) {
             None => errors.span(&input.ident, "unknown struct"),
             Some(truth) => {
                 truth.check_selector("struct", &mut errors);
@@ -278,7 +339,7 @@ pub fn check_variants(attr: CompilerStream, item: CompilerStream) -> CompilerStr
     }
     match ItemEnum::parse.parse(item.clone()) {
         Err(err) => errors.push(err),
-        Ok(input) => match TRUTH.get(&input.ident.to_string()) {
+        Ok(input) => match ENTITIES.get(&input.ident.to_string()) {
             None => errors.span(&input.ident, "unknown enum"),
             Some(truth) => {
                 truth.check_selector("enum", &mut errors);
@@ -317,6 +378,8 @@ fn reveal(cursor: Cursor) -> String {
     }
 }
 
+type Replace = HashMap<&'static str, String>;
+
 struct Subst<'a> {
     literal: bool,
     marker: Span,
@@ -326,8 +389,8 @@ struct Subst<'a> {
 impl<'a> Subst<'a> {
     fn parse(input: Cursor<'a>) -> Option<Self> {
         if let Some((punct, one)) = input.punct() {
-            let literal = '@' == punct.as_char();
-            if literal || '~' == punct.as_char() {
+            let literal = '~' == punct.as_char();
+            if literal || '$' == punct.as_char() {
                 if let Some((ident, next)) = one.ident() {
                     let marker = input.span().join(one.span()).unwrap_or(input.span());
                     return Some(Subst {
@@ -341,18 +404,16 @@ impl<'a> Subst<'a> {
         }
         None
     }
-    fn run<'r, F>(&self, replace: F, output: &mut TokenStream, errors: &mut Errors) -> Cursor<'a>
-    where
-        F: for<'p> Fn(&'p str) -> Option<&'r str>,
-    {
+    fn run(&self, replace: &Replace, output: &mut TokenStream, errors: &mut Errors) -> Cursor<'a> {
         let ident = self.ident.to_string();
-        match replace(&ident) {
+        match replace.get(ident.as_str()) {
             Some(subst) => {
                 // eprintln!("Subst: {ident} -> {subst}");
                 output.extend(if self.literal {
                     LitStr::new(subst, self.marker).to_token_stream()
                 } else {
-                    Ident::new(subst, self.marker).to_token_stream()
+                    parse_str::<Type>(subst).unwrap().to_token_stream()
+                    //Type::new(subst, self.marker).to_token_stream()
                 });
             }
             None => {
@@ -374,7 +435,7 @@ impl<'a> Paste<'a> {
     fn parse(input: Cursor<'a>) -> Option<Self> {
         if let Some((before, one)) = input.ident() {
             if let Some((punct, two)) = one.punct() {
-                if '~' == punct.as_char() {
+                if '$' == punct.as_char() {
                     if let Some((after, next)) = two.ident() {
                         let tilde = input.span().join(two.span()).unwrap_or(one.span());
                         return Some(Paste {
@@ -389,16 +450,13 @@ impl<'a> Paste<'a> {
         }
         None
     }
-    fn run<'r, F>(&self, replace: F, output: &mut TokenStream, errors: &mut Errors) -> Cursor<'a>
-    where
-        F: for<'p> Fn(&'p str) -> Option<&'r str>,
-    {
+    fn run(&self, replace: &Replace, output: &mut TokenStream, errors: &mut Errors) -> Cursor<'a> {
         let before = self.before.to_string();
         let after = self.after.to_string();
         let mut subbed = false;
         let mut pasted = String::new();
         for part in [&before, &after] {
-            match replace(&part) {
+            match replace.get(part.as_str()) {
                 Some(subst) => {
                     pasted.push_str(subst);
                     subbed = true;
@@ -407,7 +465,7 @@ impl<'a> Paste<'a> {
             }
         }
         if !subbed {
-            errors.new(self.tilde, "expected an `Each`");
+            errors.new(self.tilde, "expected a placeholder");
         }
         // eprintln!("Paste: {before}~{after} -> {pasted}");
         output.extend(Ident::new(&pasted, self.tilde).to_token_stream());
@@ -496,12 +554,12 @@ fn each(mut cursor: Cursor, mut wrap: Wrap, errors: &mut Errors) -> TokenStream 
         // eprintln!("each ({})", reveal(cursor));
         cursor = if let Some((ident, next)) = cursor.ident() {
             let name = ident.to_string();
-            if let Some(each) = TRUTH.get_entry(&name).map(Each::from_phf) {
+            if let Some(each) = ENTITIES.get_entry(&name).map(Each::from_phf) {
                 requested.insert(each.key, each);
             } else {
                 let mut found = false;
-                for each in TRUTH.entries().map(Each::from_phf) {
-                    if each.facts.selector == name {
+                for each in ENTITIES.entries().map(Each::from_phf) {
+                    if each.entity.category == name {
                         found = true;
                         requested.insert(each.key, each);
                     }
@@ -526,10 +584,10 @@ fn each(mut cursor: Cursor, mut wrap: Wrap, errors: &mut Errors) -> TokenStream 
             errors.new(cursor.span(), "unhandled");
             if !explained {
                 let mut choices = HashSet::new();
-                for facts in TRUTH.values() {
-                    choices.insert(facts.selector);
+                for facts in ENTITIES.values() {
+                    choices.insert(facts.category);
                 }
-                for key in TRUTH.keys() {
+                for key in ENTITIES.keys() {
                     choices.insert(key);
                 }
                 let message = format!("allowed before the `^` marker: {:?}", choices);
@@ -552,28 +610,27 @@ fn each(mut cursor: Cursor, mut wrap: Wrap, errors: &mut Errors) -> TokenStream 
 
 struct Each {
     key: &'static str,
-    facts: &'static Facts,
-    snake: String,
+    entity: &'static Entity,
+    replace: Replace,
 }
 impl Each {
-    fn replace(&self, placeholder: &'_ str) -> Option<&str> {
-        match placeholder {
-            "Each" => Some(self.key),
-            "each" => Some(&self.snake),
-            _ => None,
+    fn from_phf((&key, entity): (&&'static str, &'static Entity)) -> Self {
+        let mut replace = Replace::new();
+        replace.insert("Each", key.to_upper_camel_case());
+        replace.insert("each", key.to_snake_case());
+        Each {
+            key,
+            entity,
+            replace,
         }
-    }
-    fn from_phf((&key, facts): (&&'static str, &'static Facts)) -> Self {
-        let snake = key.to_snake_case();
-        Each { key, facts, snake }
     }
     fn one(&self, mut cursor: Cursor, mut wrap: Wrap, errors: &mut Errors) -> TokenStream {
         let mut output = TokenStream::new();
         if let Some((punct, next)) = cursor.punct() {
             if wrap.parse(&punct) {
-                for entry in self.facts.map.entries() {
-                    let fact = Fact::from_phf(self, entry);
-                    output.extend(fact.one(next, wrap, errors));
+                for pair in self.entity.facets {
+                    let mut facet = Facet::from_pair(self, pair);
+                    output.extend(facet.one(next, wrap, errors));
                 }
                 return output; // individually wrapped, not here
             }
@@ -581,9 +638,9 @@ impl Each {
         while !cursor.eof() {
             // eprintln!("Each::one ({})", reveal(input));
             cursor = if let Some(paste) = Paste::parse(cursor) {
-                paste.run(|it| self.replace(it), &mut output, errors)
+                paste.run(&self.replace, &mut output, errors)
             } else if let Some(subst) = Subst::parse(cursor) {
-                subst.run(|it| self.replace(it), &mut output, errors)
+                subst.run(&self.replace, &mut output, errors)
             } else if let Some((group, delim, span, next)) = cursor.any_group() {
                 output.extend(self.one(group, Wrap::some(delim, span), errors));
                 next
@@ -600,51 +657,68 @@ impl Each {
     }
 }
 
-struct Fact<'a> {
+struct Facet<'a> {
     each: &'a Each,
-    key: &'static str,
-    value: &'static str,
-    camel: String,
+    name: &'static str,
+    link: &'static str,
+    replace: Replace,
+    used: usize,
 }
-impl<'a> Fact<'a> {
-    fn replace(&self, placeholder: &'_ str) -> Option<&str> {
-        match placeholder {
-            "name" => Some(self.key),
-            "Name" => Some(&self.camel),
-            "type" => Some(self.value),
-            _ => self.each.replace(placeholder),
-        }
-    }
-    fn from_phf(each: &'a Each, (&key, &value): (&&'static str, &&'static str)) -> Self {
-        let camel = key.to_upper_camel_case();
-        Fact {
+impl<'a> Facet<'a> {
+    fn from_pair(each: &'a Each, (name, link): &(&'static str, &'static str)) -> Self {
+        let mut replace = each.replace.clone();
+        replace.insert("name", name.to_snake_case());
+        replace.insert("Name", name.to_upper_camel_case());
+        replace.insert("link", link.to_snake_case());
+        replace.insert("Link", link.to_upper_camel_case());
+        Facet {
             each,
-            key,
-            value,
-            camel,
+            name,
+            link,
+            replace,
+            used: 0,
         }
     }
-    fn one(&self, mut cursor: Cursor, wrap: Wrap, errors: &mut Errors) -> TokenStream {
-        let mut output = TokenStream::new();
-        if let Some((punct, next)) = cursor.punct() {
-            if '?' == punct.as_char() {
-                // collect tokens until ^ or % via wrap.parse()
-                let pattern = ""; // parse collection as Type
-                for entry in self.each.facts.map.entries() {
-                    let fact = Fact::from_phf(self.each, entry);
-                    if pattern == fact.key || pattern == fact.value || pattern == self.each.key {
-                        output.extend(fact.one(next, wrap, errors));
+    fn one(&mut self, mut cursor: Cursor, mut wrap: Wrap, errors: &mut Errors) -> TokenStream {
+        if let Some((first, one)) = cursor.punct() {
+            if '?' == first.as_char() {
+                if let Some((ident, two)) = one.ident() {
+                    let pattern = ident.to_string();
+                    if pattern == self.name
+                        || pattern == self.link
+                        || pattern == self.each.key
+                        || (self.used == 0 && pattern == "else")
+                    {
+                        if let Some((after, next)) = two.punct() {
+                            if wrap.parse(&after) {
+                                if pattern != "else" {
+                                    self.used += 1;
+                                }
+                                cursor = next;
+                            } else {
+                                errors.span(after, "expected a marker (`^` or `%`)");
+                                return TokenStream::new();
+                            }
+                        } else {
+                            errors.new(two.span(), "expected a marker (`^` or `%`)");
+                            return TokenStream::new();
+                        }
+                    } else {
+                        return TokenStream::new();
                     }
+                } else {
+                    errors.new(one.span(), "expected an identifier (to filter)");
+                    return TokenStream::new();
                 }
-                return output; // individually wrapped, not here
             }
         }
+        let mut output = TokenStream::new();
         while !cursor.eof() {
             // eprintln!("Fact::one ({})", reveal(input));
             cursor = if let Some(paste) = Paste::parse(cursor) {
-                paste.run(|it| self.replace(it), &mut output, errors)
+                paste.run(&self.replace, &mut output, errors)
             } else if let Some(subst) = Subst::parse(cursor) {
-                subst.run(|it| self.replace(it), &mut output, errors)
+                subst.run(&self.replace, &mut output, errors)
             } else
             // if let Some((literal, next)) = input.literal() {
             //     output.extend(

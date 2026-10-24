@@ -3,7 +3,7 @@ use serde::de::{DeserializeSeed, Unexpected, Visitor};
 use serde::de::{Deserializer as _, Error as _};
 use tindalwic::Data;
 use tindalwic::parse::Parse;
-use tindalwic::text::UTF8;
+use tindalwic::text::Lines;
 
 /// decode tindalwic file containing a single member (any name) into a value
 pub fn from_tindalwic<'de, T: ::serde::Deserialize<'de>>(
@@ -38,7 +38,7 @@ impl<'de, 'a> DataDe<'de, 'a> {
             data,
         }
     }
-    fn with_text(&self, value: UTF8<'a>) -> Self {
+    fn with_text(&self, value: Lines<'a>) -> Self {
         self.with_data(Data::Text(value.into()))
     }
     fn parse<T: std::str::FromStr>(&self) -> Option<T> {
@@ -53,7 +53,7 @@ impl<'de, 'a> DataDe<'de, 'a> {
         }
         None
     }
-    fn outlive(&self, value: &UTF8<'a>) -> Option<&'de str> {
+    fn outlive(&self, value: &Lines<'a>) -> Option<&'de str> {
         if let Some(verbatim) = value.verbatim(0) {
             let base = self.encoded.as_ptr() as usize;
             let mut start = verbatim.as_ptr() as usize;
@@ -348,7 +348,7 @@ impl<'de, 'a> serde::Deserializer<'de> for DataDe<'de, 'a> {
 }
 struct EnumDe<'de, 'a, 'i> {
     de: &'i DataDe<'de, 'a>, // the container of this encoded enum
-    name: UTF8<'a>,
+    name: Lines<'a>,
     payload: Option<Data<'a>>,
 }
 impl<'de, 'a, 'i> serde::de::EnumAccess<'de> for EnumDe<'de, 'a, 'i> {

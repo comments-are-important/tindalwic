@@ -2,8 +2,6 @@
 
 //! Text in Nested Dictionaries and Lists - with Important Comments
 
-use core::ops::Deref;
-
 #[doc(inline)]
 pub use tindalwic_macros::indent;
 
@@ -52,7 +50,7 @@ impl CommentMarker {
 }
 
 use group::{Groups, Members};
-use text::UTF8;
+use text::Lines;
 
 /// the only primitive data type.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -60,9 +58,9 @@ use text::UTF8;
 pub struct Text<'a> {
     /// the data. there are two possible forms for encoding: a single line not
     /// indented, or an indented block.
-    pub lines: UTF8<'a>,
+    pub lines: Lines<'a>,
     /// A Text can have a epilog comment after it,
-    pub epilog: Option<UTF8<'a>>,
+    pub epilog: Option<Lines<'a>>,
     /// gloss indicating preference to avoid any shortcut encoding
     pub verbose: bool,
 }
@@ -72,18 +70,11 @@ pub struct Text<'a> {
 #[tindalwic_macros::check_fields]
 pub struct List<'a> {
     /// A List can have an introductory comment.
-    pub prolog: Option<UTF8<'a>>,
+    pub prolog: Option<Lines<'a>>,
     /// many lists will have a single group without a header.
     pub groups: Groups<'a>,
     /// A List can have a comment after it.
-    pub epilog: Option<UTF8<'a>>,
-}
-impl<'a> Deref for List<'a> {
-    type Target = Groups<'a>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.groups
-    }
+    pub epilog: Option<Lines<'a>>,
 }
 impl<'a, T> From<T> for List<'a>
 where
@@ -96,15 +87,32 @@ where
         }
     }
 }
+impl<'a> List<'a> {
+    /// number of members
+    pub fn len(&self) -> usize {
+        self.groups.len()
+    }
+    /// flatten groups
+    pub fn members(&self) -> impl Iterator<Item = Member<'a>> {
+        self.groups.members()
+    }
+    /// O(N) lookup
+    pub fn named<T>(&self, name: T) -> impl Iterator<Item = Member<'a>>
+    where
+        Lines<'a>: From<T>,
+    {
+        self.groups.named(name)
+    }
+}
 
 /// data within a List has metadata. List is the data type, this is structure.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[tindalwic_macros::check_fields]
 pub struct Member<'a> {
     /// the name can have a comment before it.
-    pub comment: Option<UTF8<'a>>,
+    pub comment: Option<Lines<'a>>,
     /// the name need not be unique, and may be empty.
-    pub name: UTF8<'a>,
+    pub name: Lines<'a>,
     /// gloss indicating preference to avoid any shortcut encoding
     pub longer: bool,
     /// the Text or List
@@ -124,7 +132,7 @@ impl<'a> From<Data<'a>> for Member<'a> {
 #[tindalwic_macros::check_fields]
 pub struct Group<'a> {
     /// the metadata
-    pub heading: Option<UTF8<'a>>,
+    pub heading: Option<Lines<'a>>,
     /// the data
     pub members: Members<'a>,
 }
@@ -174,20 +182,13 @@ where
 #[tindalwic_macros::check_fields]
 pub struct File<'a> {
     /// A File can start with a Unix `#!` comment.
-    pub shebang: Option<UTF8<'a>>,
+    pub shebang: Option<Lines<'a>>,
     /// A File can have an introductory comment.
-    pub prolog: Option<UTF8<'a>>,
+    pub prolog: Option<Lines<'a>>,
     /// many lists will have a single group without a header.
     pub groups: Groups<'a>,
     // /// number of trailing empty lines
     // pub trailing: usize,
-}
-impl<'a> Deref for File<'a> {
-    type Target = Groups<'a>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.groups
-    }
 }
 impl<'a, T> From<T> for File<'a>
 where
@@ -201,6 +202,21 @@ where
     }
 }
 impl<'a> File<'a> {
+    /// number of members
+    pub fn len(&self) -> usize {
+        self.groups.len()
+    }
+    /// flatten groups
+    pub fn members(&self) -> impl Iterator<Item = Member<'a>> {
+        self.groups.members()
+    }
+    /// O(N) lookup
+    pub fn named<T>(&self, name: T) -> impl Iterator<Item = Member<'a>>
+    where
+        Lines<'a>: From<T>,
+    {
+        self.groups.named(name)
+    }
     /// make an [List] from self.prolog and self.groups
     pub fn embed_without_shebang(&self) -> List<'a> {
         List {

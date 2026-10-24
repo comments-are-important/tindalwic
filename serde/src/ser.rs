@@ -1,7 +1,7 @@
 use super::{Error, Result};
 use serde::ser::Serialize;
 use tindalwic::parse::Build;
-use tindalwic::text::UTF8;
+use tindalwic::text::Lines;
 use tindalwic::{Data, File, List, Member, Text};
 
 /// encode a value into a tindalwic file containing a single member with the given name.
@@ -293,7 +293,7 @@ impl<'c, 'b, 'a> serde::ser::SerializeTupleVariant for TupleVariantSer<'c, 'b, '
 /// helper for ItemSer
 pub struct MapSer<'c, 'b, 'a> {
     ser: &'c mut DataSer<'b, 'a>,
-    key: Option<UTF8<'a>>,
+    key: Option<Lines<'a>>,
     count: usize,
 }
 impl<'c, 'b, 'a> serde::ser::SerializeMap for MapSer<'c, 'b, 'a> {

@@ -4,7 +4,7 @@ use anyhow::{Error, Result};
 use std::path::PathBuf;
 use tindalwic::CommentMarker;
 use tindalwic::File;
-use tindalwic::text::UTF8;
+use tindalwic::text::Lines;
 
 /// read tindalwic, print expected lezer tree to stdout
 /// the core crate is authoritative so the lezer needs to conform.
@@ -26,8 +26,8 @@ pub fn run(input: &PathBuf) -> Result<()> {
 enum Node<'a> {
     File(File<'a>),
     Lines(usize),
-    Shebang(Option<UTF8<'a>>),
-    Prolog(Option<UTF8<'a>>),
+    Shebang(Option<Lines<'a>>),
+    Prolog(Option<Lines<'a>>),
 }
 impl Parent {
     fn fill(&mut self, node: Node) {

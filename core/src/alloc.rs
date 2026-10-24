@@ -2,10 +2,10 @@
 
 extern crate alloc;
 
-use crate::UTF8;
+use crate::Lines;
 use alloc::string::String;
 
-impl<'a> UTF8<'a> {
+impl<'a> Lines<'a> {
     /// Allocates a [String], filled with the UTF-8 copied from `self`.
     pub fn joined(&self) -> String {
         if let Some(slice) = self.verbatim(0) {
@@ -24,9 +24,9 @@ impl<'a> UTF8<'a> {
         }
     }
 }
-impl<'a> From<&'a String> for UTF8<'a> {
+impl<'a> From<&'a String> for Lines<'a> {
     fn from(value: &'a String) -> Self {
-        UTF8::from(&value[..])
+        Lines::from(&value[..])
     }
 }
 

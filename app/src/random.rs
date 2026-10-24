@@ -8,7 +8,7 @@ use std::fs;
 use std::io::Write as _;
 use tindalwic::bumpalo::Arena;
 use tindalwic::parse::Parse as _;
-use tindalwic::text::UTF8;
+use tindalwic::text::Lines;
 use tindalwic::{Data, File, Group, List, Member, VERSION};
 
 #[derive(clap::Args, Debug)]
@@ -227,7 +227,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
         }
         self.arena.intern(&value)
     }
-    fn comment(&mut self) -> Option<UTF8<'a>> {
+    fn comment(&mut self) -> Option<Lines<'a>> {
         if self.rng.random_bool(0.5) {
             Some(self.value().into())
         } else {

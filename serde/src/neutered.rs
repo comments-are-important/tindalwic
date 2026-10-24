@@ -1,4 +1,4 @@
-use super::{ValueDe, ValueSer};
+use super::{LinesDe, LinesSer};
 use serde::de::{DeserializeSeed, Deserializer, Error, MapAccess, SeqAccess, Visitor};
 use serde::ser::{Serialize, Serializer};
 use serde::ser::{SerializeMap as _, SerializeSeq as _};
@@ -27,7 +27,7 @@ impl<'a> Serialize for ListSer<'a> {
         } else if unique {
             let mut map = s.serialize_map(Some(this.len()))?;
             for member in this.members() {
-                map.serialize_entry(&ValueSer(member.name), &DataSer(member.data))?;
+                map.serialize_entry(&LinesSer(member.name), &DataSer(member.data))?;
             }
             map.end()
         } else {
@@ -44,7 +44,7 @@ impl<'a> Serialize for PairSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let PairSer(this) = self;
         let mut map = s.serialize_map(Some(2))?;
-        map.serialize_entry(NAME_KEY, &ValueSer(this.name))?;
+        map.serialize_entry(NAME_KEY, &LinesSer(this.name))?;
         map.serialize_entry(DATA_KEY, &DataSer(this.data))?;
         map.end()
     }
@@ -54,7 +54,7 @@ impl<'a> Serialize for DataSer<'a> {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let DataSer(this) = self;
         match this {
-            Data::Text(text) => ValueSer(text.lines).serialize(s),
+            Data::Text(text) => LinesSer(text.lines).serialize(s),
             Data::List(list) => ListSer(*list).serialize(s),
         }
     }
@@ -116,7 +116,7 @@ impl<'de, 'a, 'b> Visitor<'de> for DataDe<'a, 'b> {
     }
     fn visit_str<E: Error>(self, v: &str) -> Result<Self::Value, E> {
         let DataDe(build) = self;
-        Ok(ValueDe(build).visit_str(v)?.into())
+        Ok(LinesDe(build).visit_str(v)?.into())
     }
     fn visit_bytes<E: Error>(self, v: &[u8]) -> Result<Self::Value, E> {
         if v.is_ascii() {
@@ -155,7 +155,7 @@ impl<'de, 'a, 'b> Visitor<'de> for ListDe<'a, 'b> {
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
         let ListDe(build) = self;
         let mut count = 0usize;
-        while let Some(name) = map.next_key_seed(ValueDe(build))? {
+        while let Some(name) = map.next_key_seed(LinesDe(build))? {
             let mut member = Member::default();
             member.data = map.next_value_seed(DataDe(build))?;
             member.name = (if let Some(slice) = name.verbatim(0) {

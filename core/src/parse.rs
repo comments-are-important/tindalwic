@@ -3,7 +3,7 @@
 use core::str::Split;
 
 use crate::group::{Groups, Members};
-use crate::{CommentMarker, Data, File, Group, List, Member, Text, UTF8};
+use crate::{CommentMarker, Data, File, Group, Lines, List, Member, Text};
 
 // there are some lines/branches here that are impossible to get coverage for,
 // and the mechanisms for suppressing the report are inadequate ... until:
@@ -273,11 +273,11 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
 
     /// current line has been recognized as beginning of a Value that might
     /// flow, so stretch a portion of it out to include the whole thing.
-    fn flow(&mut self, indent: usize, from: &'a str) -> Result<UTF8<'a>, &'static str> {
+    fn flow(&mut self, indent: usize, from: &'a str) -> Result<Lines<'a>, &'static str> {
         if !self.next(indent)? {
             return Ok(from.into());
         }
-        Ok(UTF8::parsed(self.lines.stretch(from)?, indent + 1))
+        Ok(Lines::parsed(self.lines.stretch(from)?, indent + 1))
     }
 
     /// parse a comment if one starts on this line.
@@ -285,7 +285,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
         &mut self,
         indent: usize,
         mark: CommentMarker,
-    ) -> Result<Option<UTF8<'a>>, &'static str> {
+    ) -> Result<Option<Lines<'a>>, &'static str> {
         if let Some(from) = self
             .lines
             .dedent(indent)
@@ -321,10 +321,10 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
         })
     }
     /// a block (optionally) follows current line (at indent+1).
-    fn block(&mut self, indent: usize) -> Result<UTF8<'a>, &'static str> {
+    fn block(&mut self, indent: usize) -> Result<Lines<'a>, &'static str> {
         self.lines.advance();
         let Some(first) = self.lines.dedent(indent + 1) else {
-            return Ok(UTF8::default());
+            return Ok(Lines::default());
         };
         self.flow(indent, first)
     }
@@ -387,13 +387,13 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
         let message = match self.lines.dedent(indent) {
             None => "",
             Some(scan) if scan.starts_with('<') && scan.ends_with('>') => {
-                member.name = UTF8::from(&scan[1..scan.len() - 1]);
+                member.name = Lines::from(&scan[1..scan.len() - 1]);
                 member.data = Data::Text(self.text(indent)?);
                 member.longer = true;
                 return Ok(Some(member));
             }
             Some(scan) if scan.starts_with('[') && scan.ends_with(']') => {
-                member.name = UTF8::from(&scan[1..scan.len() - 1]);
+                member.name = Lines::from(&scan[1..scan.len() - 1]);
                 member.data = Data::List(self.list(indent + 1)?);
                 member.longer = true;
                 return Ok(Some(member));
@@ -428,7 +428,7 @@ impl<'a, 'b, 'r> Input<'a, 'b, 'r> {
             Some(scan) if scan.starts_with('=') => "",
             Some(scan) => {
                 if let Some((before, after)) = scan.split_once('=') {
-                    member.name = UTF8::from(before);
+                    member.name = Lines::from(before);
                     member.data = Data::Text(self.lenient(indent, after)?);
                     return Ok(Some(member));
                 } else {

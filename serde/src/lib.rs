@@ -1,14 +1,12 @@
 //! implementations of the serde features
 
 use serde::Deserialize;
-use serde::de::{DeserializeSeed, MapAccess, Visitor};
+use serde::de::{DeserializeSeed, Visitor};
 use serde::ser::Serialize;
 use std::fmt::{self, Display};
-use std::marker::PhantomData;
 use std::result::Result as StdResult;
-use strum::{EnumCount, IntoStaticStr, VariantArray, VariantNames};
 use tindalwic::parse::Build;
-use tindalwic::text::UTF8;
+use tindalwic::text::Lines;
 
 /// [conventional](https://serde.rs/conventions.html) Deserializer API module
 pub mod de;
@@ -60,13 +58,13 @@ pub use compact::Compact;
 pub use neutered::Neutered;
 pub use verbose::Verbose;
 
-struct ValueSer<'a>(UTF8<'a>);
-impl<'a> Serialize for ValueSer<'a> {
+struct LinesSer<'a>(Lines<'a>);
+impl<'a> Serialize for LinesSer<'a> {
     fn serialize<S>(&self, s: S) -> StdResult<S::Ok, S::Error>
     where
         S: serde::ser::Serializer,
     {
-        let ValueSer(this) = self;
+        let LinesSer(this) = self;
         if let Some(slice) = this.verbatim(0) {
             s.serialize_str(slice)
         } else {
@@ -74,9 +72,9 @@ impl<'a> Serialize for ValueSer<'a> {
         }
     }
 }
-struct ValueDe<'a, 'b>(&'b mut dyn Build<'a>);
-impl<'de, 'a, 'b> DeserializeSeed<'de> for ValueDe<'a, 'b> {
-    type Value = UTF8<'a>;
+struct LinesDe<'a, 'b>(&'b mut dyn Build<'a>);
+impl<'de, 'a, 'b> DeserializeSeed<'de> for LinesDe<'a, 'b> {
+    type Value = Lines<'a>;
     fn deserialize<D>(self, d: D) -> StdResult<Self::Value, D::Error>
     where
         D: serde::de::Deserializer<'de>,
@@ -84,33 +82,33 @@ impl<'de, 'a, 'b> DeserializeSeed<'de> for ValueDe<'a, 'b> {
         d.deserialize_str(self)
     }
 }
-impl<'de, 'a, 'b> Visitor<'de> for ValueDe<'a, 'b> {
-    type Value = UTF8<'a>;
+impl<'de, 'a, 'b> Visitor<'de> for LinesDe<'a, 'b> {
+    type Value = Lines<'a>;
     fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
         out.write_str("a string value")
     }
     fn visit_str<E: serde::de::Error>(self, v: &str) -> StdResult<Self::Value, E> {
-        let ValueDe(build) = self;
+        let LinesDe(build) = self;
         Ok(build.intern(v).map_err(E::custom)?.into())
     }
 }
 
-struct MaybeSer<'a>(Option<UTF8<'a>>);
-impl<'a> Serialize for MaybeSer<'a> {
+struct CommentSer<'a>(Option<Lines<'a>>);
+impl<'a> Serialize for CommentSer<'a> {
     fn serialize<S>(&self, s: S) -> StdResult<S::Ok, S::Error>
     where
         S: serde::ser::Serializer,
     {
-        let MaybeSer(this) = self;
+        let CommentSer(this) = self;
         match this {
             None => s.serialize_none(),
-            Some(value) => s.serialize_some(&ValueSer(*value)),
+            Some(value) => s.serialize_some(&LinesSer(*value)),
         }
     }
 }
-struct MaybeDe<'a, 'b>(&'b mut dyn Build<'a>);
-impl<'de, 'a, 'b> DeserializeSeed<'de> for MaybeDe<'a, 'b> {
-    type Value = Option<UTF8<'a>>;
+struct CommentDe<'a, 'b>(&'b mut dyn Build<'a>);
+impl<'de, 'a, 'b> DeserializeSeed<'de> for CommentDe<'a, 'b> {
+    type Value = Option<Lines<'a>>;
     fn deserialize<D>(self, d: D) -> StdResult<Self::Value, D::Error>
     where
         D: serde::de::Deserializer<'de>,
@@ -118,8 +116,8 @@ impl<'de, 'a, 'b> DeserializeSeed<'de> for MaybeDe<'a, 'b> {
         d.deserialize_option(self)
     }
 }
-impl<'de, 'a, 'b> Visitor<'de> for MaybeDe<'a, 'b> {
-    type Value = Option<UTF8<'a>>;
+impl<'de, 'a, 'b> Visitor<'de> for CommentDe<'a, 'b> {
+    type Value = Option<Lines<'a>>;
     fn expecting(&self, out: &mut fmt::Formatter) -> fmt::Result {
         out.write_str("an optional value (comments)")
     }
@@ -130,103 +128,39 @@ impl<'de, 'a, 'b> Visitor<'de> for MaybeDe<'a, 'b> {
     where
         D: serde::de::Deserializer<'de>,
     {
-        let MaybeDe(build) = self;
-        ValueDe(build).deserialize(d).map(|value| Some(value))
+        let CommentDe(build) = self;
+        LinesDe(build).deserialize(d).map(|value| Some(value))
     }
 }
 
 // ==================================================================================
 
-struct Flags<H: FieldHelp> {
-    flags: Box<[bool]>,
-    phantom: PhantomData<H>,
-}
-impl<H: FieldHelp> Flags<H> {
-    fn count(&self) -> usize {
-        self.flags.iter().map(|flag| (*flag) as usize).sum()
-    }
-    fn selected(&self) -> impl std::iter::Iterator<Item = &H> {
-        H::ARRAY.iter().filter(|variant| self.flags[variant.num()])
-    }
-    fn once<'de, A, F>(&mut self, variant: H, f: F) -> StdResult<H, A::Error>
-    where
-        A: MapAccess<'de>,
-        F: Fn(&'static str) -> A::Error,
-    {
-        if self.flags[variant.num()] {
-            return Err(f(variant.into()));
-        }
-        self.flags[variant.num()] = true;
-        Ok(variant)
-    }
-}
+tindalwic_macros::template! { ? struct ^
 
-trait FieldHelp: EnumCount + VariantArray + VariantNames + Into<&'static str> + Copy {
-    const KIND: &'static str;
-    fn num(self) -> usize;
-
-    const NAMES: &'static [&'static str] = <Self as VariantNames>::VARIANTS;
-    const ARRAY: &'static [Self] = <Self as VariantArray>::VARIANTS;
-    fn each<'a>(value: bool) -> Flags<Self> {
-        Flags {
-            flags: vec![value; Self::COUNT].into_boxed_slice(),
-            phantom: PhantomData,
-        }
-    }
-    fn assign<F: Fn(Self) -> bool>(f: F) -> Flags<Self> {
-        let mut flags = Self::each(false);
-        for variant in Self::ARRAY {
-            flags.flags[variant.num()] = (f)(*variant)
-        }
-        flags
-    }
-}
-trait VariantHelp: VariantNames + Into<&'static str> + Copy {
-    const KIND: &'static str;
-    fn num(self) -> usize;
-
-    const NAMES: &'static [&'static str] = <Self as VariantNames>::VARIANTS;
-    fn serialize<S, W>(&self, s: S, value: &W) -> StdResult<S::Ok, S::Error>
-    where
-        S: serde::ser::Serializer,
-        W: ?Sized + Serialize,
-    {
-        s.serialize_newtype_variant(Self::KIND, self.num() as u32, (*self).into(), value)
-    }
-}
-
-tindalwic_macros::template! { ? Text, List, Group, Member, File ^
-    #[derive(Clone, Copy, Debug, Deserialize, EnumCount, IntoStaticStr, VariantArray, VariantNames)]
+    #[derive(Clone, Copy, Debug, Deserialize)]
     #[serde(field_identifier, rename_all = "lowercase")]
-    #[strum(serialize_all = "lowercase")]
-    enum Each~Fields { [^ ~Name, ] }
-    impl FieldHelp for Each~Fields {
-        const KIND: &'static str = @Each;
-        fn num(self) -> usize { self as usize }
-
+    enum Each$Fields { [^ $Name, ] }
+    impl Each$Fields {
+        const NAMES: &'static [&'static str] = &[[^ ~Name, ]];
     }
-}
 
-tindalwic_macros::template! { ? Data ^
-    #[derive(Clone, Copy, Debug, Deserialize, IntoStaticStr, VariantNames)]
+
+}
+tindalwic_macros::template! { ? enum ^
+
+    #[derive(Clone, Copy, Debug, Deserialize)]
     #[serde(variant_identifier)]
-    enum Each~Variants { [ ^ ~Name, ] }
-    impl VariantHelp for Each~Variants {
-        const KIND: &'static str = @Each;
-        fn num(self) -> usize { self as usize }
+    enum Each$Variants { [ ^ $Name, ] }
+    impl Each$Variants {
+        const NAMES: &'static [&'static str] = &[[^ ~Name, ]];
+        fn name(&self) -> &'static str { Self::NAMES[(*self) as usize] }
 
+        fn serialize<S, W>(&self, s: S, value: &W) -> StdResult<S::Ok, S::Error>
+        where
+            S: serde::ser::Serializer,
+            W: ?Sized + Serialize,
+        {
+            s.serialize_newtype_variant(~Each, (*self) as u32, self.name(), value)
+        }
     }
 }
-
-// #[tindalwic_macros::each(Text,List,File)]
-// impl FieldHelp for FieldsᛳEach {
-//     const KIND: &'static str = "ᛳEach";
-//     fn num(self) -> usize { self as usize }
-//     fn should<'a>(this: &ᛳEach<ᛲ>) -> Flags<FieldsᛳEach> {
-//         FieldsᛳEach::assign(|field| match field { `
-//             [ ? UTF8<ᛲ>         ^ FieldsᛳEach::ᛳName => !this.ᛳname.is_empty(), ]
-//             [ ? Option<UTF8<ᛲ>> ^ FieldsᛳEach::ᛳName => this.ᛳname.is_some(), ]
-//             [ ? bool            ^ FieldsᛳEach::ᛳName => this.ᛳname, ]
-//         })
-//     }
-// }

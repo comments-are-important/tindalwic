@@ -1,7 +1,7 @@
 //! code for encoding data into the Tindalwic format.
 
 use crate::parse::ParseError;
-use crate::{CommentMarker, Data, File, Group, Member, Text, UTF8};
+use crate::{CommentMarker, Data, File, Group, Lines, Member, Text};
 
 use core::fmt::{Display, Formatter, Result, Write as _};
 use core::write;
@@ -56,7 +56,7 @@ impl<'o, 'f> Output<'o, 'f> {
             b'\t' | b'#' | b'%' | b'<' | b'>' | b'@' | b'[' | b']' | b'{' | b'}' | b'='
         )
     }
-    fn utf8<'a>(&mut self, value: &UTF8<'a>) -> Result {
+    fn utf8<'a>(&mut self, value: &Lines<'a>) -> Result {
         if let Some(slice) = value.verbatim(self.indent) {
             self.out.write_str(slice)?;
         } else {
@@ -71,7 +71,7 @@ impl<'o, 'f> Output<'o, 'f> {
         }
         Ok(())
     }
-    fn comment<'a>(&mut self, marker: CommentMarker, option: &Option<UTF8<'a>>) -> Result {
+    fn comment<'a>(&mut self, marker: CommentMarker, option: &Option<Lines<'a>>) -> Result {
         if let Some(value) = option {
             self.indent()?;
             self.out.write_str(marker.token())?;
@@ -203,7 +203,7 @@ impl<'a> Display for Text<'a> {
         Output::new(out).text(self)
     }
 }
-impl<'a> Display for UTF8<'a> {
+impl<'a> Display for Lines<'a> {
     fn fmt(&self, out: &mut Formatter<'_>) -> Result {
         Output::new(out).utf8(self)
     }

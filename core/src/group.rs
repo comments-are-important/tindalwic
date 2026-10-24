@@ -1,7 +1,8 @@
 //! provide (controlled) access to the things inside private `cells` fields.
 
-use crate::{Group, Member, UTF8};
+use crate::{Group, Lines, Member};
 use core::cell::Cell;
+// use core::ops::Deref;
 
 macro_rules! cellular {
     ($(#[$meta:meta])* $name:ident<$inner:ident>$iterator:ident) => {
@@ -98,9 +99,9 @@ impl<'a> Groups<'a> {
     /// O(N) lookup
     pub fn named<T>(&self, name: T) -> impl Iterator<Item = Member<'a>>
     where
-        UTF8<'a>: From<T>,
+        Lines<'a>: From<T>,
     {
-        let search: UTF8<'a> = name.into();
+        let search: Lines<'a> = name.into();
         self.members().filter(move |it| it.name == search)
     }
 }

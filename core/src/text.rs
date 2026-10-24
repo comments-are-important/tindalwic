@@ -13,15 +13,14 @@ use core::str::Split;
 /// methods strip indentation as necessary. Encoding is particularly cheap when the
 /// embedded margins already match what is needed.
 #[derive(Clone, Copy, Debug, Eq)]
-#[tindalwic_macros::check_fields]
-pub struct UTF8<'a> {
+pub struct Lines<'a> {
     slice: &'a str,
     indent: usize, // usize::MAX => single line
 }
 
-impl<'a> UTF8<'a> {
+impl<'a> Lines<'a> {
     pub(crate) fn parsed(slice: &'a str, indent: usize) -> Self {
-        UTF8 { slice, indent }
+        Lines { slice, indent }
     }
     /// Returns `true` if `self` has a length of zero bytes.
     pub fn is_empty(&self) -> bool {
@@ -73,7 +72,7 @@ impl<'a> Iterator for LineIterator<'a> {
     }
 }
 
-impl<'a> IntoIterator for UTF8<'a> {
+impl<'a> IntoIterator for Lines<'a> {
     type Item = &'a str;
     type IntoIter = LineIterator<'a>;
     /// the lines without margin/eol, always at least one
@@ -90,16 +89,16 @@ impl<'a> IntoIterator for UTF8<'a> {
     }
 }
 
-impl<'a> Default for UTF8<'a> {
+impl<'a> Default for Lines<'a> {
     fn default() -> Self {
-        UTF8 {
+        Lines {
             slice: "",
             indent: usize::MAX,
         }
     }
 }
 
-impl<'a> PartialEq for UTF8<'a> {
+impl<'a> PartialEq for Lines<'a> {
     fn eq(&self, other: &Self) -> bool {
         if self.indent == other.indent {
             self.slice == other.slice
@@ -109,16 +108,16 @@ impl<'a> PartialEq for UTF8<'a> {
     }
 }
 
-impl<'a> From<&'a str> for UTF8<'a> {
+impl<'a> From<&'a str> for Lines<'a> {
     fn from(value: &'a str) -> Self {
-        UTF8 {
+        Lines {
             slice: value,
             indent: if value.contains('\n') { 0 } else { usize::MAX },
         }
     }
 }
 
-impl<'a> core::hash::Hash for UTF8<'a> {
+impl<'a> core::hash::Hash for Lines<'a> {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         let mut lines = self.into_iter();
         let first = lines.next().expect("lines is never empty");
@@ -132,7 +131,7 @@ impl<'a> core::hash::Hash for UTF8<'a> {
 
 impl<'a, T> From<T> for Text<'a>
 where
-    UTF8<'a>: From<T>,
+    Lines<'a>: From<T>,
 {
     fn from(value: T) -> Self {
         Text {

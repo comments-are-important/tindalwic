@@ -1,4 +1,5 @@
 #![allow(missing_docs)]
+use anyhow::{Error, Result, bail};
 use bumpalo::Bump;
 use rand::prelude::IndexedRandom;
 use rand::rngs::SmallRng;
@@ -7,9 +8,10 @@ use std::fmt::{self, Write};
 use std::fs;
 use std::io::Write as _;
 use tindalwic::bumpalo::Arena;
+use tindalwic::group::{Groups, Members};
 use tindalwic::parse::Parse as _;
 use tindalwic::text::Lines;
-use tindalwic::{Data, File, Group, List, Member, VERSION};
+use tindalwic::{Data, File, Group, List, Member, Text, VERSION};
 
 #[derive(clap::Args, Debug)]
 pub struct Args {
@@ -35,7 +37,7 @@ impl Args {
             "abcdefghijklmnopqrstuvwxyz"
         }
     }
-    pub fn run(&self) -> anyhow::Result<()> {
+    pub fn run(&self) -> Result<()> {
         let seed = match self.seed {
             Some(value) => value,
             None => rand::make_rng::<SmallRng>().random(),
@@ -44,11 +46,12 @@ impl Args {
         if let Some(check) = self.check {
             let mut rng = SmallRng::seed_from_u64(seed);
             for count in 0..check {
+                let shape = Some(Silhouette::random(self.items, &mut rng));
                 let bump = Bump::new();
                 let mut arena = Arena::new(&bump);
                 let sample = Args::sample(self.unicode);
                 let mut random = Random::new(&mut arena, &mut rng, sample)?;
-                let original = random.file(self.items)?;
+                let original = random.file(&shape)?;
                 let expected = original.to_string();
                 let (good, parsed, errors) = match arena.format_errors("", &expected, usize::MAX) {
                     Ok(parsed) => (true, parsed, "".into()),
@@ -71,7 +74,7 @@ impl Args {
                     fs::write("target/chk.parsed.tindalwic", &actually)?;
                     eprintln!("wrote to ./target/chk.*");
                 }
-                anyhow::bail! {
+                bail! {
                     if !good { "parse error"}
                     else if original != parsed {"API difference"}
                     else if expected != actually { "recoding difference"}
@@ -86,7 +89,7 @@ impl Args {
         std::io::stdout().write(file.to_string().as_bytes())?;
         Ok(())
     }
-    fn file<'a>(&self, seed: u64, arena: &mut Arena<'a>) -> anyhow::Result<File<'a>> {
+    fn file<'a>(&self, seed: u64, arena: &mut Arena<'a>) -> Result<File<'a>> {
         let mut shebang = String::new();
         for arg in std::env::args() {
             if shebang.is_empty() {
@@ -103,9 +106,10 @@ impl Args {
         shebang.push_str(" by version ");
         shebang.push_str(VERSION);
         let mut rng = SmallRng::seed_from_u64(seed);
+        let shape = Some(Silhouette::random(self.items, &mut rng));
         let sample = Args::sample(self.unicode);
         let mut random = Random::new(arena, &mut rng, sample)?;
-        let mut file = random.file(self.items)?;
+        let mut file = random.file(&shape)?;
         file.shebang = Some(arena.intern(&shebang).into());
         Ok(file)
     }
@@ -185,14 +189,10 @@ pub struct Random<'a, 'r, R: Rng + ?Sized> {
     sample: Vec<char>,
 }
 impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
-    pub fn new(
-        arena: &'r mut Arena<'a>,
-        rng: &'r mut R,
-        sample: &'static str,
-    ) -> anyhow::Result<Self> {
+    pub fn new(arena: &'r mut Arena<'a>, rng: &'r mut R, sample: &'static str) -> Result<Self> {
         let sample: Vec<char> = sample.chars().collect();
         if sample.contains(&'\n') {
-            anyhow::bail!("can't have LF char in sample");
+            bail!("can't have LF char in sample");
         }
         Ok(Random { arena, rng, sample })
     }
@@ -210,7 +210,7 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
         }
         result
     }
-    fn value(&mut self) -> &'a str {
+    fn lines(&mut self, _shape: &Option<Silhouette>) -> Result<Lines<'a>> {
         let mut value = String::new();
         if self.rng.random_bool(0.92) {
             for _ in 0..self.rng.random_range(20..85) {
@@ -225,73 +225,48 @@ impl<'a, 'r, R: Rng + ?Sized> Random<'a, 'r, R> {
                 }
             }
         }
-        self.arena.intern(&value)
+        Ok(Lines::from(self.arena.intern(&value)))
     }
-    fn comment(&mut self) -> Option<Lines<'a>> {
+    fn comment(&mut self) -> Result<Option<Lines<'a>>> {
         if self.rng.random_bool(0.5) {
-            Some(self.value().into())
+            Ok(Some(self.lines(&None)?))
         } else {
-            None
+            Ok(None)
         }
     }
-    fn data(&mut self, shape: &Option<Silhouette>) -> anyhow::Result<Data<'a>> {
-        Ok(if let Some(parent) = shape {
-            let count = self.groups(&parent.children)?;
-            self.list(count)?
+    fn data(&mut self, shape: &Option<Silhouette>) -> Result<Data<'a>> {
+        Ok(if shape.is_some() {
+            Data::List(self.list(shape)?)
         } else {
-            Data::Text(self.value().into())
+            Data::Text(self.text(shape)?)
         })
     }
-    fn member(&mut self, _shape: &Option<Silhouette>) -> anyhow::Result<Member<'a>> {
-        self.data(&None)?;
-        anyhow::bail!("todo member")
-    }
-    fn members(&mut self, kids: &[Option<Silhouette>]) -> anyhow::Result<usize> {
-        for kid in kids {
-            let member = self.member(kid)?;
-            self.arena
-                .builder()
-                .push_member(member)
-                .map_err(anyhow::Error::msg)?;
+    tindalwic_macros::template! { ? array ^ { ^
+        fn $class(&mut self, shape: &Option<Silhouette>) -> Result<$Class<'a>> {
+            let mut degenerate = Silhouette::new();
+            let actual = match &shape {
+                None => {
+                    degenerate.children.push(None);
+                    &degenerate
+                }
+                Some(silhouette) => silhouette
+            };
+            for kid in &actual.children {
+                let item = self.$link(&kid)?;
+                self.arena.builder().push_~link(item).map_err(Error::msg)?;
+            }
+            Ok(self.arena.builder().finish_~class(actual.children.len()).map_err(Error::msg)?)
         }
-        Ok(kids.len())
-    }
-    fn group(&mut self, _shape: &Option<Silhouette>) -> anyhow::Result<Group<'a>> {
-        self.members(&[][..])?;
-        anyhow::bail!("todo group")
-    }
-    fn groups(&mut self, _kids: &[Option<Silhouette>]) -> anyhow::Result<usize> {
-        self.group(&None)?;
-        anyhow::bail!("todo groups")
-    }
-    fn list(&mut self, count: usize) -> anyhow::Result<Data<'a>> {
-        Ok(Data::List(List {
-            prolog: self.comment(),
-            groups: self
-                .arena
-                .builder()
-                .finish_groups(count)
-                .map_err(anyhow::Error::msg)?,
-            epilog: self.comment(),
-        }))
-    }
-    pub fn file(&mut self, grow: usize) -> anyhow::Result<File<'a>> {
-        let shape = Silhouette::random(grow, self.rng);
-        let count = self.groups(&shape.children)?;
-        let shebang = if self.rng.random_bool(0.5) {
-            None
-        } else {
-            Some(self.value().into())
-        };
-        Ok(File {
-            shebang,
-            prolog: self.comment(),
-            groups: self
-                .arena
-                .builder()
-                .finish_groups(count)
-                .map_err(anyhow::Error::msg)?,
-            // trailing: self.rng.random_range(0..3),
-        })
+    }}
+    tindalwic_macros::template! { ? struct ^
+        fn $class(&mut self, shape: &Option<Silhouette>) -> Result<$Class<'a>> {
+            let mut this = $Class::default();
+            { ^
+                ( ? bool ^ this.$name = self.rng.random_bool(0.5); )
+                ( ? Comment ^ this.$name = self.comment()?; )
+                ( ? else ^ this.$name = self.$link(shape)?; )
+            }
+            Ok(this)
+        }
     }
 }

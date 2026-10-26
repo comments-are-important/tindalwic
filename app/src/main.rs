@@ -46,6 +46,12 @@ enum Command {
         /// tindalwic file to read (use `-` for stdin)
         input: PathBuf,
     },
+    /// Write the class diagram
+    #[cfg(debug_assertions)]
+    Mermaid {
+        /// file to read (use `-` for stdin)
+        output: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -57,5 +63,7 @@ fn main() -> Result<()> {
         Command::Random { args } => args.run(),
         #[cfg(debug_assertions)]
         Command::Lezer { input } => lezer::run(input),
+        #[cfg(debug_assertions)]
+        Command::Mermaid { output } => mermaid::run(output),
     }
 }

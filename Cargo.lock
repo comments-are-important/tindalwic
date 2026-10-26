@@ -777,6 +777,7 @@ dependencies = [
  "tempfile",
  "time",
  "tindalwic",
+ "tindalwic-macros",
  "tindalwic-serde",
  "toml_edit",
  "yaml_serde",

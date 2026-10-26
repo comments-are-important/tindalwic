@@ -18,16 +18,16 @@ pub struct Members<'a> {
 }
 
 tindalwic_macros::template! { ? array ^ {^
-    impl<'a> From<&'a mut [$Link<'a>]> for $Entity<'a> {
+    impl<'a> From<&'a mut [$Link<'a>]> for $Class<'a> {
         fn from(value: &'a mut [$Link<'a>]) -> Self {
             let items = Cell::from_mut(value).as_slice_of_cells();
-            $Entity { items }
+            $Class { items }
         }
     }
-    impl<'a> $Entity<'a> {
+    impl<'a> $Class<'a> {
         /// wrap the given cells as a single grouping
         pub(crate) fn new(items: &'a [Cell<$Link<'a>>]) -> Self {
-            $Entity { items }
+            $Class { items }
         }
         /// are there no items?
         pub fn is_empty(&self) -> bool {
@@ -52,17 +52,17 @@ tindalwic_macros::template! { ? array ^ {^
             }
         }
         /// iterate the items
-        pub fn iterator(&self) -> Entity@Iterator<'a> {
-            Entity@Iterator {
+        pub fn iterator(&self) -> Class~Iterator<'a> {
+            Class~Iterator {
                 pending: self.items,
             }
         }
     }
     /// iterates over the elements
-    pub struct Entity@Iterator<'a> {
+    pub struct Class~Iterator<'a> {
         pending: &'a [Cell<$Link<'a>>],
     }
-    impl<'a> Iterator for Entity@Iterator<'a> {
+    impl<'a> Iterator for Class~Iterator<'a> {
         type Item = $Link<'a>;
         fn next(&mut self) -> Option<Self::Item> {
             let Some((first, rest)) = self.pending.split_first() else {
@@ -72,17 +72,17 @@ tindalwic_macros::template! { ? array ^ {^
             Some(first.get())
         }
     }
-    impl<'a> IntoIterator for $Entity<'a> {
+    impl<'a> IntoIterator for $Class<'a> {
         type Item = $Link<'a>;
-        type IntoIter = Entity@Iterator<'a>;
-        fn into_iter(self) -> Entity@Iterator<'a> {
+        type IntoIter = Class~Iterator<'a>;
+        fn into_iter(self) -> Class~Iterator<'a> {
             self.iterator()
         }
     }
-    impl<'a> IntoIterator for &$Entity<'a> {
+    impl<'a> IntoIterator for &$Class<'a> {
         type Item = $Link<'a>;
-        type IntoIter = Entity@Iterator<'a>;
-        fn into_iter(self) -> Entity@Iterator<'a> {
+        type IntoIter = Class~Iterator<'a>;
+        fn into_iter(self) -> Class~Iterator<'a> {
             self.iterator()
         }
     }
